@@ -13,13 +13,30 @@ import {
   loadConfig,
   resolveInput,
   badgeSvg,
+  analyzeSymbols,
   diagnose,
   diffSymbols,
+  extractFromSource,
   extractVersion,
+  gateDecision,
+  insertChangelogSection,
+  loadCoverageHistory,
+  postGitHubComment,
+  readAcknowledgment,
+  readPackageVersion,
+  recordCoverage,
+  renderChangelogMarkdown,
+  renderCiMarkdown,
   renderDiffHtml,
+  sparklineSvg,
+  sparklineUnicode,
+  versionLabel,
+  writeAcknowledgment,
   type BrewDocsConfig,
+  type DoctorReport,
   type RenderOptions,
   type StorageAdapter,
+  type SymbolDoc,
 } from "@brewdocs/core";
 import { createServer } from "./server.js";
 import * as fs from "node:fs";
@@ -166,6 +183,224 @@ function getFlag(argv: string[], flag: string): string | undefined {
   return undefined;
 }
 
+/** PR number from GitHub Actions env (pull_request ref or event payload). */
+function prNumberFromEnv(): number | undefined {
+  const ref = process.env.GITHUB_REF;
+  if (ref) {
+    const m = /^refs\/pull\/(\d+)\//.exec(ref);
+    if (m) return Number(m[1]);
+  }
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (eventPath && fs.existsSync(eventPath)) {
+    try {
+      const event = JSON.parse(fs.readFileSync(eventPath, "utf8")) as {
+        pull_request?: { number?: number };
+        number?: number;
+      };
+      const n = event.pull_request?.number ?? event.number;
+      if (typeof n === "number") return n;
+    } catch {
+      /* ignore */
+    }
+  }
+  return undefined;
+}
+
+/**
+ * CI guardian: compare the working tree against a base ref and (optionally)
+ * post the report as a PR comment. Exit 1 on --min-coverage breach or
+ * --fail-on-breaking.
+ */
+async function runCi(rest: string[]): Promise<void> {
+  const source = rest[0];
+  const base = getFlag(rest, "--base");
+  if (!source || source.startsWith("-") || !base) {
+    throw new Error(
+      "usage: brewdocs ci <source> --base <ref> [--post] [--min-coverage <pct>] [--fail-on-breaking] [--out <file>] [--json]",
+    );
+  }
+  const { src, cleanup } = resolveCliSource(source, undefined);
+  try {
+    const headExtract = extractFromSource(src);
+    const headReport = analyzeSymbols(headExtract.title, headExtract.symbols);
+
+    let baseReport: DoctorReport | null = null;
+    let baseSymbols: SymbolDoc[] | null = null;
+    try {
+      // Strict: a missing/unfetched base must fail loudly, not silently
+      // produce an empty diff against the working tree.
+      const baseExtract = await extractVersion(src, base, { strict: true });
+      baseReport = analyzeSymbols(baseExtract.title, baseExtract.symbols);
+      baseSymbols = baseExtract.symbols;
+    } catch (err) {
+      console.error(
+        `! could not extract base "${base}": ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    const headVersion = readPackageVersion(src.root);
+    const diff = baseSymbols
+      ? diffSymbols(base, baseSymbols, headVersion, headExtract.symbols)
+      : null;
+
+    const config = loadConfig(src.root);
+    const minCoverage =
+      Number(getFlag(rest, "--min-coverage")) || config.minCoverage || undefined;
+
+    // The current build joins the trend for the comment; persistence is
+    // opt-in via `brewdocs doctor --record`.
+    const history: ReturnType<typeof loadCoverageHistory> = [
+      ...loadCoverageHistory(src.root),
+      {
+        version: headVersion,
+        score: headReport.score,
+        timestamp: new Date().toISOString(),
+        totalSymbols: headReport.totalSymbols,
+        documentedSymbols: headReport.documentedSymbols,
+      },
+    ];
+
+    const markdown = renderCiMarkdown({
+      title: headExtract.title,
+      head: headReport,
+      base: baseReport,
+      diff,
+      history,
+      baseVersion: base,
+      headVersion,
+      minCoverage,
+    });
+
+    const outFlag = getFlag(rest, "--out");
+    if (outFlag) {
+      const outPath = path.resolve(process.cwd(), outFlag);
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, markdown, "utf8");
+      console.log(`CI report -> ${outPath}`);
+    }
+    if (getFlag(rest, "--json")) {
+      console.log(
+        JSON.stringify(
+          { head: headReport, base: baseReport, diff, minCoverage: minCoverage ?? null },
+          null,
+          2,
+        ),
+      );
+    } else if (!outFlag) {
+      console.log(markdown);
+    }
+
+    if (rest.includes("--post")) {
+      const token = process.env.GITHUB_TOKEN ?? process.env.BREWDOCS_GITHUB_TOKEN;
+      const repo = getFlag(rest, "--repo") ?? process.env.GITHUB_REPOSITORY;
+      const pr = Number(getFlag(rest, "--pr")) || prNumberFromEnv();
+      if (!token) throw new Error("--post requires GITHUB_TOKEN (or BREWDOCS_GITHUB_TOKEN)");
+      if (!repo) throw new Error("--post requires GITHUB_REPOSITORY or --repo owner/name");
+      if (!pr) {
+        throw new Error(
+          "--post requires a pull request number (--pr N, or run in a pull_request context)",
+        );
+      }
+      const result = await postGitHubComment({ token, repo, pr, markdown });
+      console.log(`${result.created ? "Created" : "Updated"} PR comment: ${result.url}`);
+    }
+
+    if (minCoverage !== undefined && headReport.score < minCoverage) {
+      console.error(
+        `x docs coverage ${headReport.score}% is below the ${minCoverage}% minimum`,
+      );
+      process.exitCode = 1;
+    } else if (rest.includes("--fail-on-breaking") && diff && diff.breakingCount > 0) {
+      console.error(`x ${diff.breakingCount} breaking change(s) vs ${base}`);
+      process.exitCode = 1;
+    }
+  } finally {
+    cleanup();
+  }
+}
+
+/** Release gate: breaking changes need a generated guide or an acknowledgment. */
+async function runGate(rest: string[]): Promise<void> {
+  const source = rest[0];
+  const from = getFlag(rest, "--from");
+  if (!source || source.startsWith("-") || !from) {
+    throw new Error(
+      "usage: brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge <note>] [--json]",
+    );
+  }
+  const to = getFlag(rest, "--to");
+  const { src, cleanup } = resolveCliSource(source, undefined);
+  try {
+    const older = await extractVersion(src, from, { strict: true });
+    let newerSymbols: SymbolDoc[];
+    let toLabel: string;
+    if (to) {
+      const newer = await extractVersion(src, to, { strict: true });
+      newerSymbols = newer.symbols;
+      toLabel = to;
+    } else {
+      newerSymbols = extractFromSource(src).symbols;
+      toLabel = readPackageVersion(src.root);
+    }
+    const diff = diffSymbols(from, older.symbols, toLabel, newerSymbols);
+    const title = older.title;
+
+    const outDirFlag = getFlag(rest, "--out");
+    let guideGenerated = false;
+    if (outDirFlag) {
+      const outDir = path.resolve(process.cwd(), outDirFlag);
+      fs.mkdirSync(outDir, { recursive: true });
+      const html = path.join(outDir, "diff.html");
+      const md = path.join(outDir, "MIGRATION.md");
+      fs.writeFileSync(html, renderDiffHtml(diff, title), "utf8");
+      fs.writeFileSync(md, renderChangelogMarkdown(diff, title), "utf8");
+      guideGenerated = true;
+      console.log(`Migration guide -> ${md}`);
+      console.log(`Diff page -> ${html}`);
+    }
+
+    const ackValue = getFlag(rest, "--acknowledge");
+    const ackGiven =
+      rest.includes("--acknowledge") ||
+      rest.some((a) => a.startsWith("--acknowledge="));
+    const acknowledged = ackGiven || readAcknowledgment(src.root, from, toLabel);
+    if (ackGiven) {
+      const note =
+        ackValue && !ackValue.startsWith("-") ? ackValue : undefined;
+      const file = writeAcknowledgment(src.root, from, toLabel, note);
+      console.log(`Acknowledgment recorded -> ${file}`);
+    }
+
+    const decision = gateDecision({
+      breakingCount: diff.breakingCount,
+      guideGenerated,
+      acknowledged,
+    });
+
+    if (getFlag(rest, "--json")) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: decision.ok,
+            reason: decision.reason,
+            guideGenerated,
+            acknowledged,
+            diff,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.log(`v${versionLabel(from)} -> v${versionLabel(toLabel)}: ${diff.summary}`);
+      console.log(`${decision.ok ? "PASS" : "FAIL"}: ${decision.reason}`);
+    }
+    if (!decision.ok) process.exitCode = 1;
+  } finally {
+    cleanup();
+  }
+}
+
 export async function run(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -201,15 +436,50 @@ export async function run(argv: string[]): Promise<void> {
         config.minCoverage ||
         (json ? undefined : 0);
 
+      const record = rest.includes("--record");
+      let history = loadCoverageHistory(src.root);
+      if (record) {
+        if (fs.existsSync(args.source)) {
+          history = recordCoverage(
+            src.root,
+            report,
+            readPackageVersion(src.root),
+          );
+        } else {
+          console.log(
+            "(--record skipped: trend history lives in the local checkout's .brewdocs/coverage.json)",
+          );
+        }
+      }
+
       if (json) {
         console.log(JSON.stringify(report, null, 2));
       } else {
         printDoctorReport(report);
+        if (history.length >= 2) {
+          const scores = history.map((r) => r.score);
+          const delta = scores[scores.length - 1] - scores[scores.length - 2];
+          console.log(
+            `   trend: ${sparklineUnicode(scores)} ${scores[scores.length - 1]}% (${
+              delta >= 0 ? "+" : "-"
+            }${Math.abs(delta)} vs previous build, ${history.length} recorded)`,
+          );
+        }
       }
       if (badge) {
         const badgePath = path.resolve(process.cwd(), badge);
         fs.writeFileSync(badgePath, badgeSvg(report), "utf8");
         console.log(`🏅 Badge written -> ${badgePath}`);
+      }
+      const trendSvg = getFlag(rest, "--trend-svg");
+      if (trendSvg) {
+        const svgPath = path.resolve(process.cwd(), trendSvg);
+        fs.writeFileSync(
+          svgPath,
+          sparklineSvg(history.map((r) => r.score)),
+          "utf8",
+        );
+        console.log(`📈 Trend sparkline -> ${svgPath}`);
       }
       if (threshold !== undefined && report.score < threshold) {
         console.error(
@@ -260,6 +530,65 @@ export async function run(argv: string[]): Promise<void> {
       cleanup();
     }
     return;
+  }
+
+  if (command === "changelog") {
+    const source = rest[0];
+    const from = getFlag(rest, "--from");
+    const to = getFlag(rest, "--to");
+    if (!source || source.startsWith("-")) {
+      throw new Error(
+        "usage: brewdocs changelog <source> --from <tag> --to <tag> [--file <changelog.md>] [--out <dir>] [--json]",
+      );
+    }
+    if (!from || !to) throw new Error("both --from <tag> and --to <tag> are required");
+    const { src, cleanup } = resolveCliSource(source, undefined);
+    try {
+      const older = await extractVersion(src, from, { strict: true });
+      const newer = await extractVersion(src, to, { strict: true });
+      const diff = diffSymbols(from, older.symbols, to, newer.symbols);
+      const title = newer.title ?? older.title;
+      const section = renderChangelogMarkdown(diff, title);
+
+      if (getFlag(rest, "--json")) {
+        console.log(JSON.stringify({ section, diff }, null, 2));
+      } else {
+        console.log(section);
+      }
+
+      const outFile = getFlag(rest, "--out");
+      if (outFile) {
+        const outPath = path.resolve(process.cwd(), outFile);
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        fs.writeFileSync(outPath, section, "utf8");
+        console.log(`📝 Changelog section -> ${outPath}`);
+      }
+
+      const file = getFlag(rest, "--file");
+      if (file) {
+        const filePath = path.resolve(process.cwd(), file);
+        const existing = fs.existsSync(filePath)
+          ? fs.readFileSync(filePath, "utf8")
+          : "";
+        fs.writeFileSync(
+          filePath,
+          insertChangelogSection(existing, section),
+          "utf8",
+        );
+        console.log(`📝 Inserted into ${filePath}`);
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "ci") {
+    return runCi(rest);
+  }
+
+  if (command === "gate") {
+    return runGate(rest);
   }
 
   if (command === "build-all") {
@@ -408,7 +737,11 @@ Usage:
                (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
   brewdocs versions <source>
   brewdocs doctor <source> [--json] [--badge <file.svg>] [--min-coverage <pct>]
+                  [--record] [--trend-svg <file.svg>]
   brewdocs diff <source> --from <tag> --to <tag> [--out <dir>] [--json]
+  brewdocs changelog <source> --from <tag> --to <tag> [--file <changelog.md>] [--out <file>] [--json]
+  brewdocs ci <source> --base <ref> [--post] [--min-coverage <pct>] [--fail-on-breaking] [--out <file>] [--json]
+  brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
 
 Commands:
   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
@@ -418,8 +751,15 @@ Commands:
                    (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2)
   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
   versions <src>   List available versions (git tags, or package version)
-  doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate)
+  doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate,
+                   --record trend history, --trend-svg sparkline)
   diff <src>       API diff between two git tags: --from <tag> --to <tag>
+  changelog <src>  Auto-generated changelog section (markdown) from an API diff
+  ci <src>         CI guardian: coverage + API diff vs --base <ref>;
+                   --post comments on the PR (GITHUB_TOKEN); gate with
+                   --min-coverage / --fail-on-breaking
+  gate <src>       Release gate: fail on breaking changes unless a migration
+                   guide is generated (--out) or acknowledged (--acknowledge)
   themes           List available themes
   help             Show this help
 

@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "BrewDocs command line interface. Brew your docs, serve them hot.",
   "type": "module",
   "license": "MIT",
@@ -24,7 +24,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@brewdocs/core": "0.2.0",
+    "@brewdocs/core": "0.3.0",
     "tsx": "^4.19.2"
   },
   "publishConfig": {

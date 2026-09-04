@@ -29,6 +29,14 @@ inputs:
     description: Build a specific version (git tag).
     required: false
     default: ""
+  min-coverage:
+    description: Fail the action when docs coverage is below this percentage.
+    required: false
+    default: ""
+  pr-comment:
+    description: On pull_request events, run `brewdocs ci` against the base and post/update a single PR comment.
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -45,4 +53,17 @@ runs:
         ${{ inputs.dark == 'true' && 'ARGS+=(--dark)' || '' }}
         ${{ inputs.multi == 'true' && 'ARGS+=(--multi)' || '' }}
         ${{ inputs.version != '' && format('ARGS+=(--version "{0}")', inputs.version) || '' }}
+        brewdocs "${ARGS[@]}"
+    - name: Docs coverage gate
+      if: ${{ inputs.min-coverage != '' }}
+      shell: bash
+      run: brewdocs doctor "${{ inputs.source }}" --min-coverage "${{ inputs.min-coverage }}"
+    - name: CI guardian (PR comment)
+      if: ${{ inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        ARGS=(ci "${{ inputs.source }}" --base "${{ github.event.pull_request.base.sha }}" --post)
+        ${{ inputs.min-coverage != '' && format('ARGS+=(--min-coverage "{0}")', inputs.min-coverage) || '' }}
         brewdocs "${ARGS[@]}"

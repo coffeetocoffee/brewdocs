@@ -56,14 +56,22 @@ export function findGitRoot(start: string): string | null {
 
 /**
  * Extract the DocModel for a specific version (git tag) of a source.
- * Falls back to the working tree when the checkout fails.
+ * Falls back to the working tree when the checkout fails — unless
+ * `opts.strict`, which throws instead (used by CI so a bogus empty diff
+ * can't pass silently).
  */
 export async function extractVersion(
   source: Source,
   version: string,
+  opts: { strict?: boolean } = {},
 ): Promise<ExtractResult> {
   const root = path.resolve(source.root);
   const gitRoot = findGitRoot(root);
+  if (opts.strict && !gitRoot) {
+    throw new Error(
+      `"${root}" is not inside a git repository; cannot extract version "${version}"`,
+    );
+  }
   let srcRoot = root;
   let cleanup: (() => void) | null = null;
 
@@ -74,6 +82,10 @@ export async function extractVersion(
       const rel = path.relative(gitRoot, root);
       srcRoot = rel ? path.join(tmp, rel) : tmp;
       cleanup = () => removeWorktree(gitRoot, tmp);
+    } else if (opts.strict) {
+      throw new Error(
+        `could not check out "${version}" — is the ref fetched in this clone?`,
+      );
     }
   }
 

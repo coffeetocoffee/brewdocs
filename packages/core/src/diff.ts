@@ -42,7 +42,7 @@ function docsFingerprint(s: SymbolDoc): string {
   });
 }
 
-function describeChange(kind: ChangeKind, c: SymbolChange): string {
+export function describeChange(kind: ChangeKind, c: SymbolChange): string {
   switch (kind) {
     case "removed":
       return "removed";
@@ -144,6 +144,11 @@ export function diffSymbols(
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Strip a leading "v"/"V" so tags like "v1.2.0" render as "v1.2.0", not "vv1.2.0". */
+export function versionLabel(version: string): string {
+  return version.replace(/^v/i, "");
+}
+
 const sigBlock = (s: SymbolDoc | undefined): string =>
   s?.signature ? `<pre class="sig">${escapeHtml(s.signature)}</pre>` : "";
 
@@ -180,7 +185,7 @@ export function renderDiffHtml(diff: VersionDiff, title: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)} — API diff v${escapeHtml(diff.fromVersion)} → v${escapeHtml(diff.toVersion)}</title>
+<title>${escapeHtml(title)} — API diff v${escapeHtml(versionLabel(diff.fromVersion))} → v${escapeHtml(versionLabel(diff.toVersion))}</title>
 <style>
 :root { --bg:#faf7f2; --ink:#2b2118; --muted:#7a6a58; --accent:#b5651d; --card:#fff; --line:#e8ddcc; --code-bg:#f0e7d8; }
 * { box-sizing:border-box }
@@ -209,7 +214,7 @@ footer { color:var(--muted); font-size:.85rem; margin-top:2rem }
 <body>
 <header>
   <h1>${escapeHtml(title)} <span class="badge">${diff.breakingCount} breaking</span></h1>
-  <p class="sub">API diff: <code>v${escapeHtml(diff.fromVersion)}</code> → <code>v${escapeHtml(diff.toVersion)}</code> — ${escapeHtml(diff.summary)}</p>
+  <p class="sub">API diff: <code>v${escapeHtml(versionLabel(diff.fromVersion))}</code> → <code>v${escapeHtml(versionLabel(diff.toVersion))}</code> — ${escapeHtml(diff.summary)}</p>
 </header>
 ${section("Added", diff.added, "Nothing added.", "added")}
 ${section("Removed", diff.removed, "Nothing removed.", "removed")}

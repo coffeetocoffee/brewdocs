@@ -21,7 +21,7 @@ export {
   type DeployResult,
 } from "./deploy.js";
 export { buildSearchIndex, type SearchDoc } from "./search.js";
-export { discoverVersions } from "./versions.js";
+export { discoverVersions, readPackageVersion } from "./versions.js";
 export {
   resolveInput,
   type ResolvedSource,
@@ -38,6 +38,29 @@ export {
 export {
   diffSymbols,
   renderDiffHtml,
+  describeChange,
+  versionLabel,
   type VersionDiff,
   type SymbolChange,
 } from "./diff.js";
+export {
+  CI_COMMENT_MARKER,
+  loadCoverageHistory,
+  recordCoverage,
+  coverageFilePath,
+  sparklineUnicode,
+  sparklineSvg,
+  breakingChangesOf,
+  renderChangelogMarkdown,
+  insertChangelogSection,
+  renderCiMarkdown,
+  gateDecision,
+  readAcknowledgment,
+  writeAcknowledgment,
+  postGitHubComment,
+  type CoverageRecord,
+  type CiReportInput,
+  type GateInput,
+  type GateDecision,
+  type GitHubCommentTarget,
+} from "./ci.js";

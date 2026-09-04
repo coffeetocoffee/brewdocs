@@ -45,8 +45,11 @@ npx @brewdocs/cli build ./examples/lib
 | `brewdocs deploy <src>` | Deploy to a local `*.brewdocs.dev` subdomain |
 | `brewdocs serve` | Start the local hosting server + web drop-in |
 | `brewdocs versions <src>` | List available versions |
-| `brewdocs doctor <src>` | Docs coverage report (+ badge, JSON, CI gate) |
+| `brewdocs doctor <src>` | Docs coverage report (+ badge, JSON, CI gate, trend) |
 | `brewdocs diff <src>` | API diff between two git tags (migration guide) |
+| `brewdocs changelog <src>` | Auto changelog section from an API diff |
+| `brewdocs ci <src>` | PR report: coverage delta + API diff vs base (--post to comment) |
+| `brewdocs gate <src>` | Release gate: breaking changes need a guide or acknowledgment |
 | `brewdocs themes` | List available themes |
 | `brewdocs gallery` | Build a gallery of example sites |
 
@@ -75,6 +78,59 @@ brewdocs doctor ./my-project --min-coverage 80   # exit 1 below 80%
 The score weighs documented symbols (60%), documented params (20%),
 documented return types (10%), and usage examples (10%). Set a
 persistent threshold in `brewdocs.yml` with `minCoverage: 80`.
+
+### Coverage trends
+
+Record the score on every build and watch the trend (one record per
+version, capped at 100 entries; commit `.brewdocs/coverage.json` to keep
+the trend across CI runs):
+
+```bash
+brewdocs doctor ./my-project --record                  # append score to .brewdocs/coverage.json
+brewdocs doctor ./my-project                           # shows the trend when history exists
+brewdocs doctor ./my-project --trend-svg docs-trend.svg  # sparkline SVG for your README
+```
+
+## CI guardian
+
+`brewdocs ci` compares the working tree against a base ref and reports
+coverage changes plus the API diff — built for PRs:
+
+```bash
+brewdocs ci . --base origin/main                       # print the markdown report
+brewdocs ci . --base origin/main --post                # post/update one PR comment (marker-tracked)
+brewdocs ci . --base origin/main --post --min-coverage 80 --fail-on-breaking   # gate the PR
+```
+
+`--post` needs `GITHUB_TOKEN` and a PR number (`--pr N`, `GITHUB_REF`, or the
+pull_request event payload). It finds the existing comment by the
+`<!-- brewdocs:ci -->` marker and updates it instead of spamming. With the
+bundled GitHub Action, set `pr-comment: true` (and optionally
+`min-coverage`) to wire this up; the workflow needs
+`permissions: pull-requests: write`.
+
+## Release gate
+
+Block a release that breaks the API unless a migration guide is generated
+or the break is explicitly acknowledged:
+
+```bash
+brewdocs gate . --from v1.0.0                    # exit 1 when breaking changes are unhandled
+brewdocs gate . --from v1.0.0 --out dist         # passes: writes dist/MIGRATION.md + dist/diff.html
+brewdocs gate . --from v1.0.0 --acknowledge "reviewed"   # passes: records .brewdocs/*.ack.json
+```
+
+## Auto-generated changelog sections
+
+Turn an API diff into a "What's new / What broke / Migration notes"
+markdown section (plain text, or inserted after the H1 of an existing
+CHANGELOG):
+
+```bash
+brewdocs changelog . --from v1.0.0 --to v2.0.0                 # print the section
+brewdocs changelog . --from v1.0.0 --to v2.0.0 --out section.md
+brewdocs changelog . --from v1.0.0 --to v2.0.0 --file CHANGELOG.md
+```
 
 ## Migration guides (`brewdocs diff`)
 

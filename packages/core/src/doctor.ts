@@ -167,7 +167,7 @@ export function diagnose(source: { root: string; name?: string }): DoctorReport 
 const SVG_BADGE = (label: string, value: string, color: string): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="116" height="20" role="img" aria-label="${label}: ${value}"><title>${label}: ${value}</title><linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient><clipPath id="r"><rect width="116" height="20" rx="3" fill="#fff"/></clipPath><g clip-path="url(#r)"><rect width="61" height="20" fill="#555"/><rect x="61" width="55" height="20" fill="${color}"/><rect width="116" height="20" fill="url(#s)"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="110" text-rendering="geometricPrecision"><text x="305" y="140" transform="scale(.1)" fill="#010101" fill-opacity=".3">${label}</text><text x="305" y="130" transform="scale(.1)" fill="#fff">${label}</text><text x="885" y="140" transform="scale(.1)" fill="#010101" fill-opacity=".3">${value}</text><text x="885" y="130" transform="scale(.1)" fill="#fff">${value}</text></g></svg>`;
 
-function colorFor(score: number): string {
+export function colorFor(score: number): string {
   if (score >= 90) return "#4c1"; // bright green
   if (score >= 75) return "#97ca00"; // green
   if (score >= 60) return "#dfb317"; // yellow

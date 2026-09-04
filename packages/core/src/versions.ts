@@ -16,7 +16,7 @@ function findGitRoot(start: string): string | null {
   }
 }
 
-function readPackageVersion(root: string): string {
+export function readPackageVersion(root: string): string {
   try {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(root, "package.json"), "utf8"),
