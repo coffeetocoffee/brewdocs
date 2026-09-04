@@ -7,6 +7,8 @@ export interface BrewDocsConfig {
   name?: string;
   multi?: boolean;
   storage?: "local" | "s3";
+  /** `brewdocs doctor` fails (exit 1) when coverage drops below this. */
+  minCoverage?: number;
   s3?: {
     bucket?: string;
     region?: string;

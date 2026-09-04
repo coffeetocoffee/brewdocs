@@ -5,6 +5,17 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/** Walk up from `start` to locate the enclosing git repo root, if any. */
+function findGitRoot(start: string): string | null {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 function readPackageVersion(root: string): string {
   try {
     const pkg = JSON.parse(
@@ -20,15 +31,16 @@ function readPackageVersion(root: string): string {
 /**
  * Discover available doc versions for a source.
  *
- * If the directory is a git repo, returns its tags plus a "dev" entry for the
+ * If the directory lives inside a git repo (including monorepo
+ * subdirectories), returns the repo's tags plus a "dev" entry for the
  * working tree. Otherwise it returns just the current package version. The
  * function never throws — without git it gracefully degrades.
  */
 export async function discoverVersions(root: string): Promise<string[]> {
   const pkgVersion = readPackageVersion(root);
-  const gitDir = path.join(root, ".git");
+  const gitRoot = findGitRoot(root);
 
-  if (!fs.existsSync(gitDir)) {
+  if (!gitRoot) {
     return [pkgVersion];
   }
 
@@ -36,7 +48,7 @@ export async function discoverVersions(root: string): Promise<string[]> {
     const { stdout } = await execFileAsync(
       "git",
       ["tag", "--list", "--sort=-v:refname"],
-      { cwd: root },
+      { cwd: gitRoot },
     );
     const tags = stdout
       .split(/\r?\n/)

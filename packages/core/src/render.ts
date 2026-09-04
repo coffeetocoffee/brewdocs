@@ -7,6 +7,8 @@ import { buildSearchIndex } from "./search.js";
 export interface VersionLink {
   version: string;
   path: string;
+  /** Optional link to an API diff page covering this version vs the previous one. */
+  diffPath?: string;
 }
 
 export interface RenderOptions {
@@ -221,8 +223,12 @@ function versionSwitcher(versions: VersionLink[] | undefined, current: string | 
         }>v${escapeHtml(v.version)}</option>`,
     )
     .join("");
+  const diffLink = versions.find((v) => v.diffPath && v.version === current)?.diffPath;
+  const diffAnchor = diffLink
+    ? ` <a class="version-diff" href="${escapeHtml(diffLink)}" title="API diff against the previous version">diff</a>`
+    : "";
   return `<label class="version">Version:
-    <select id="version-select">${opts}</select>
+    <select id="version-select">${opts}</select>${diffAnchor}
   </label>`;
 }
 

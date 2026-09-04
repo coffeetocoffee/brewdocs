@@ -5,7 +5,7 @@ export { extractPackage } from "./extractors/package.js";
 export { extractExports } from "./extractors/exports.js";
 export { markdownToHtml } from "./markdown.js";
 export { renderToHtml, renderToHtmlMulti, type RenderOptions, type VersionLink, type RenderedPage } from "./render.js";
-export { build, buildModel, buildVersion, buildVersions, buildMulti } from "./build.js";
+export { build, buildModel, buildVersion, buildVersions, buildMulti, extractVersion } from "./build.js";
 export { buildGallery, type GalleryEntry } from "./gallery.js";
 export {
   type StorageAdapter,
@@ -28,3 +28,16 @@ export {
 } from "./resolve.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
 export { loadConfig, type BrewDocsConfig } from "./config.js";
+export {
+  analyzeSymbols,
+  diagnose,
+  badgeSvg,
+  type DoctorReport,
+  type DoctorIssue,
+} from "./doctor.js";
+export {
+  diffSymbols,
+  renderDiffHtml,
+  type VersionDiff,
+  type SymbolChange,
+} from "./diff.js";

@@ -4,8 +4,9 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractFromSource } from "./extract.js";
 import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js";
+import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
-import type { RenderModel, Source } from "./types.js";
+import type { ExtractResult, RenderModel, Source } from "./types.js";
 
 /** Build the render model (no file write). Useful for tests/snapshots. */
 export function buildModel(source: Source): RenderModel {
@@ -40,6 +41,47 @@ export function build(
   const outFile = path.join(outDir, "index.html");
   fs.writeFileSync(outFile, html, "utf8");
   return outFile;
+}
+
+/** Walk up from `start` to locate the enclosing git repo root, if any. */
+export function findGitRoot(start: string): string | null {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Extract the DocModel for a specific version (git tag) of a source.
+ * Falls back to the working tree when the checkout fails.
+ */
+export async function extractVersion(
+  source: Source,
+  version: string,
+): Promise<ExtractResult> {
+  const root = path.resolve(source.root);
+  const gitRoot = findGitRoot(root);
+  let srcRoot = root;
+  let cleanup: (() => void) | null = null;
+
+  if (gitRoot) {
+    const tmp = await checkoutVersion(gitRoot, version);
+    if (tmp) {
+      // The source may live in a subdirectory of the repo (monorepo).
+      const rel = path.relative(gitRoot, root);
+      srcRoot = rel ? path.join(tmp, rel) : tmp;
+      cleanup = () => removeWorktree(gitRoot, tmp);
+    }
+  }
+
+  try {
+    return extractFromSource({ root: srcRoot, name: source.name });
+  } finally {
+    if (cleanup) cleanup();
+  }
 }
 
 function dirSafe(version: string): string {
@@ -124,16 +166,17 @@ export async function buildVersion(
   version: string,
   options: RenderOptions = {},
 ): Promise<string> {
-  const root = source.root;
-  const isGit = fs.existsSync(path.join(root, ".git"));
+  const root = path.resolve(source.root);
+  const gitRoot = findGitRoot(root);
   let srcRoot = root;
   let cleanup: (() => void) | null = null;
 
-  if (isGit && version !== pkgVersion(root)) {
-    const tmp = await checkoutVersion(root, version);
+  if (gitRoot && version !== pkgVersion(root)) {
+    const tmp = await checkoutVersion(gitRoot, version);
     if (tmp) {
-      srcRoot = tmp;
-      cleanup = () => removeWorktree(root, tmp);
+      const rel = path.relative(gitRoot, root);
+      srcRoot = rel ? path.join(tmp, rel) : tmp;
+      cleanup = () => removeWorktree(gitRoot, tmp);
     }
   }
 
@@ -172,24 +215,30 @@ export async function buildVersions(
     ];
   }
 
-  const root = source.root;
-  const isGit = fs.existsSync(path.join(root, ".git"));
+  const root = path.resolve(source.root);
+  const gitRoot = findGitRoot(root);
   const built: string[] = [];
+  const models = new Map<string, RenderModel>();
 
   for (const v of versions) {
     let srcRoot = root;
     let cleanup: (() => void) | null = null;
-    if (isGit && v !== pkgVersion(root)) {
-      const tmp = await checkoutVersion(root, v);
+    if (gitRoot && v !== pkgVersion(root)) {
+      const tmp = await checkoutVersion(gitRoot, v);
       if (!tmp) continue;
-      srcRoot = tmp;
-      cleanup = () => removeWorktree(root, tmp);
+      const rel = path.relative(gitRoot, root);
+      srcRoot = rel ? path.join(tmp, rel) : tmp;
+      cleanup = () => removeWorktree(gitRoot, tmp);
     }
 
     const model = buildModel({ root: srcRoot, name: source.name });
+    models.set(v, model);
     const links = versions.map((o) => ({
       version: o,
       path: o === v ? "./index.html" : `../${dirSafe(o)}/index.html`,
+      diffPath: models.has(o) && versions.indexOf(o) < versions.length - 1
+        ? `../${dirSafe(o)}/diff.html`
+        : undefined,
     }));
     const html = renderToHtml(model, {
       ...options,
@@ -205,11 +254,28 @@ export async function buildVersions(
     if (cleanup) cleanup();
   }
 
+  // API diff pages between consecutive versions, newest vs previous.
+  const ordered = versions.filter((v) => models.has(v));
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const newer = models.get(ordered[i])!;
+    const older = models.get(ordered[i + 1])!;
+    const diff = diffSymbols(ordered[i + 1], older.symbols, ordered[i], newer.symbols);
+    if (diff.added.length + diff.removed.length + diff.changed.length === 0) continue;
+    const diffHtml = renderDiffHtml(diff, newer.title);
+    const diffFile = path.join(outDir, dirSafe(ordered[i]), "diff.html");
+    fs.mkdirSync(path.dirname(diffFile), { recursive: true });
+    fs.writeFileSync(diffFile, diffHtml, "utf8");
+    built.push(diffFile);
+  }
+
   const latest = versions[0];
-  const rootModel = buildModel({ root, name: source.name });
+  const rootModel = models.get(latest) ?? buildModel({ root, name: source.name });
   const rootLinks = versions.map((o) => ({
     version: o,
     path: o === latest ? "./index.html" : `./${dirSafe(o)}/index.html`,
+    diffPath: models.has(o) && versions.indexOf(o) < versions.length - 1
+      ? `./${dirSafe(o)}/diff.html`
+      : undefined,
   }));
   const rootFile = path.join(outDir, "index.html");
   fs.writeFileSync(

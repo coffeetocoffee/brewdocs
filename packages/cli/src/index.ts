@@ -12,6 +12,11 @@ import {
   listThemes,
   loadConfig,
   resolveInput,
+  badgeSvg,
+  diagnose,
+  diffSymbols,
+  extractVersion,
+  renderDiffHtml,
   type BrewDocsConfig,
   type RenderOptions,
   type StorageAdapter,
@@ -58,6 +63,10 @@ function parseBuild(argv: string[]): BuildArgs {
       name = argv[++i];
     } else if (arg.startsWith("--name=")) {
       name = arg.slice("--name=".length);
+    } else if (arg === "--badge" || arg === "--min-coverage") {
+      i++; // value-taking flags the builder ignores, but their values must not become <source>
+    } else if (arg.startsWith("--badge=") || arg.startsWith("--min-coverage=")) {
+      // inline form, nothing to skip
     } else if (arg === "--multi") {
       multi = true;
     } else if (arg === "--watch" || arg === "-w") {
@@ -76,8 +85,34 @@ function parseBuild(argv: string[]): BuildArgs {
   return { source, out, theme, dark, version, name, multi, watch };
 }
 
-/** Merge CLI flags over brewdocs.yml defaults into render options. */
-function mergeOptions(args: BuildArgs, config: BrewDocsConfig): RenderOptions {
+function printDoctorReport(report: ReturnType<typeof diagnose>): void {
+  console.log(`🩺 ${report.title} — docs coverage: ${report.score}%`);
+  console.log(
+    `   symbols: ${report.documentedSymbols}/${report.totalSymbols} documented · params: ${report.paramsDocumented}/${report.paramsTotal} · returns: ${report.returnsDocumented}/${report.returnsTotal} · examples: ${report.examplesTotal}`,
+  );
+  if (report.issues.length === 0) {
+    console.log("   no issues found. Well brewed! ☕");
+    return;
+  }
+  const bySeverity = (s: string) => report.issues.filter((i) => i.severity === s);
+  const errors = bySeverity("error");
+  const warnings = bySeverity("warning");
+  const infos = bySeverity("info");
+  for (const [label, list, icon] of [
+    ["errors", errors, "✗"],
+    ["warnings", warnings, "⚠"],
+    ["hints", infos, "·"],
+  ] as const) {
+    if (list.length === 0) continue;
+    console.log(`\n   ${label} (${list.length}):`);
+    for (const issue of list.slice(0, 40)) {
+      console.log(`     ${icon} ${issue.symbol} — ${issue.message}`);
+    }
+    if (list.length > 40) console.log(`     … and ${list.length - 40} more`);
+  }
+}
+
+/** Merge CLI flags over brewdocs.yml defaults into render options. */function mergeOptions(args: BuildArgs, config: BrewDocsConfig): RenderOptions {
   return {
     theme: args.theme ?? config.theme,
     dark: args.dark || Boolean(config.dark),
@@ -150,6 +185,80 @@ export async function run(argv: string[]): Promise<void> {
     if (!src) throw new Error("usage: brewdocs versions <source>");
     const versions = await discoverVersions(path.resolve(process.cwd(), src));
     console.log(versions.map((v) => `v${v}`).join("\n"));
+    return;
+  }
+
+  if (command === "doctor") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    try {
+      const report = diagnose(src);
+      const json = getFlag(rest, "--json");
+      const badge = getFlag(rest, "--badge");
+      const config = loadConfig(src.root);
+      const threshold =
+        Number(getFlag(rest, "--min-coverage")) ||
+        config.minCoverage ||
+        (json ? undefined : 0);
+
+      if (json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printDoctorReport(report);
+      }
+      if (badge) {
+        const badgePath = path.resolve(process.cwd(), badge);
+        fs.writeFileSync(badgePath, badgeSvg(report), "utf8");
+        console.log(`🏅 Badge written -> ${badgePath}`);
+      }
+      if (threshold !== undefined && report.score < threshold) {
+        console.error(
+          `✗ docs coverage ${report.score}% is below the ${threshold}% minimum`,
+        );
+        process.exitCode = 1;
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "diff") {
+    const source = rest[0];
+    const from = getFlag(rest, "--from");
+    const to = getFlag(rest, "--to");
+    if (!source || source.startsWith("-")) {
+      throw new Error("usage: brewdocs diff <source> --from <tag> --to <tag> [--json] [--out <dir>]");
+    }
+    if (!from || !to) throw new Error("both --from <tag> and --to <tag> are required");
+    const { src, cleanup } = resolveCliSource(source, undefined);
+    try {
+      // Sequential, not Promise.all: two `git worktree add`s on the same repo
+      // race on git's worktree lock and both silently fall back to the
+      // working tree, producing a bogus empty diff.
+      const older = await extractVersion(src, from);
+      const newer = await extractVersion(src, to);
+      const diff = diffSymbols(from, older.symbols, to, newer.symbols);
+      const outFlag = getFlag(rest, "--out");
+      if (outFlag) {
+        const outDir = path.resolve(process.cwd(), outFlag);
+        fs.mkdirSync(outDir, { recursive: true });
+        const title = newer.title ?? older.title;
+        const outFile = path.join(outDir, "diff.html");
+        fs.writeFileSync(outFile, renderDiffHtml(diff, title), "utf8");
+        console.log(`📜 Diff page -> ${outFile}`);
+      }
+      if (getFlag(rest, "--json") || !outFlag) {
+        if (!outFlag) {
+          console.log(
+            `${diff.summary} (+${diff.added.length} −${diff.removed.length} ~${diff.changed.length})`,
+          );
+        }
+        console.log(JSON.stringify(diff, null, 2));
+      }
+    } finally {
+      cleanup();
+    }
     return;
   }
 
@@ -298,6 +407,8 @@ Usage:
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
                (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
   brewdocs versions <source>
+  brewdocs doctor <source> [--json] [--badge <file.svg>] [--min-coverage <pct>]
+  brewdocs diff <source> --from <tag> --to <tag> [--out <dir>] [--json]
 
 Commands:
   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
@@ -307,6 +418,8 @@ Commands:
                    (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2)
   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
   versions <src>   List available versions (git tags, or package version)
+  doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate)
+  diff <src>       API diff between two git tags: --from <tag> --to <tag>
   themes           List available themes
   help             Show this help
 

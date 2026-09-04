@@ -45,6 +45,8 @@ npx @brewdocs/cli build ./examples/lib
 | `brewdocs deploy <src>` | Deploy to a local `*.brewdocs.dev` subdomain |
 | `brewdocs serve` | Start the local hosting server + web drop-in |
 | `brewdocs versions <src>` | List available versions |
+| `brewdocs doctor <src>` | Docs coverage report (+ badge, JSON, CI gate) |
+| `brewdocs diff <src>` | API diff between two git tags (migration guide) |
 | `brewdocs themes` | List available themes |
 | `brewdocs gallery` | Build a gallery of example sites |
 
@@ -58,6 +60,36 @@ npx @brewdocs/cli build ./examples/lib
 - `--storage <local|s3>` — backend for `deploy` / `serve` (see below)
 - `--multi` — emit one HTML page per exported symbol (`symbols/<name>.html`)
 - `-w, --watch` — rebuild on source changes (`build` only)
+
+## Docs coverage (`brewdocs doctor`)
+
+Score your API documentation and gate CI on it:
+
+```bash
+brewdocs doctor ./my-project               # terminal report (score + issues)
+brewdocs doctor ./my-project --json        # machine-readable report
+brewdocs doctor ./my-project --badge docs-coverage.svg   # codecov-style SVG badge
+brewdocs doctor ./my-project --min-coverage 80   # exit 1 below 80%
+```
+
+The score weighs documented symbols (60%), documented params (20%),
+documented return types (10%), and usage examples (10%). Set a
+persistent threshold in `brewdocs.yml` with `minCoverage: 80`.
+
+## Migration guides (`brewdocs diff`)
+
+Diff the exported API between two git tags and generate a standalone
+"What's new / What broke" page:
+
+```bash
+brewdocs diff ./my-project --from v1.0.0 --to v2.0.0 --out dist
+# -> dist/diff.html (added / removed / changed, breaking changes highlighted)
+brewdocs diff ./my-project --from v1.0.0 --to v2.0.0 --json
+```
+
+On multi-version sites (`brewdocs build-all`), diff pages between
+consecutive versions are generated automatically and linked from the
+version switcher.
 
 ## Web drop-in (for non-devs)
 

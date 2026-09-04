@@ -43,9 +43,25 @@ describe("Phase 3 — search index", () => {
 });
 
 describe("Phase 3 — version discovery", () => {
-  it("returns the package version for a non-git directory", async () => {
+  it("returns the package version for a directory outside any git repo", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-nogit-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "package.json"),
+        JSON.stringify({ name: "x", version: "3.1.4" }),
+      );
+      const versions = await discoverVersions(tmp);
+      expect(versions).toEqual(["3.1.4"]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers repo tags for a monorepo subdirectory", async () => {
     const versions = await discoverVersions(path.join(EXAMPLES, "lib"));
-    expect(versions).toEqual(["1.2.0"]);
+    expect(versions.length).toBeGreaterThan(1);
+    expect(versions).toContain("1.2.0");
+    expect(versions).toContain("v0.1.1");
   });
 });
 
