@@ -1,0 +1,8 @@
+{
+  "name": "tiny",
+  "version": "1.0.0",
+  "description": "A tiny example package used to prove the BrewDocs build pipeline.",
+  "license": "MIT",
+  "homepage": "https://example.com/tiny",
+  "repository": "github:example/tiny"
+}

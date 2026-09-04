@@ -1,0 +1,50 @@
+{
+  "name": "@brewdocs/core",
+  "version": "0.0.0",
+  "description": "Core extraction pipeline for BrewDocs.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brewdocs/brewdocs.git"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/index.ts",
+    "src/types.ts",
+    "src/extract.ts",
+    "src/build.ts",
+    "src/render.ts",
+    "src/markdown.ts",
+    "src/highlight.ts",
+    "src/themes.ts",
+    "src/search.ts",
+    "src/versions.ts",
+    "src/deploy.ts",
+    "src/resolve.ts",
+    "src/gallery.ts",
+    "src/extractors/readme.ts",
+    "src/extractors/package.ts",
+    "src/extractors/exports.ts",
+    "src/extractors/jsdoc.ts",
+    "src/deploy/storage.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "typescript": "^5.6.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

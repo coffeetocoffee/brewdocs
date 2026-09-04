@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BrewDocs — Brew your docs, serve them hot</title>
+<style>
+  :root {
+    --bg: #fbf7f0; --ink: #2b2118; --muted: #7a6a58; --accent: #b5651d;
+    --card: #fffdf9; --line: #e7ddd0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 2.5rem 1.5rem 1.25rem; text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--card), var(--bg));
+  }
+  .cup { font-size: 2.2rem; }
+  h1 { margin: 0.25rem 0 0; font-family: Georgia, serif; font-size: 2.1rem; }
+  .tag { color: var(--muted); margin: 0.25rem 0 0; }
+  main { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  .brew-box {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap;
+  }
+  .brew-box input {
+    flex: 1 1 320px; min-width: 0; padding: 0.8rem 1rem; font: inherit; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
+  }
+  .brew-box button {
+    padding: 0.8rem 1.4rem; font: inherit; font-size: 1rem; font-weight: 600; cursor: pointer;
+    border: none; border-radius: 10px; background: var(--accent); color: #fff;
+  }
+  .brew-box button:disabled { opacity: 0.6; cursor: default; }
+  .hint { color: var(--muted); font-size: 0.85rem; margin: 0.6rem 0 0; }
+  .hint code { background: #f0e7d8; padding: 0.05rem 0.35rem; border-radius: 4px; }
+  #status { margin-top: 1rem; min-height: 1.2rem; }
+  .error { color: #b00020; }
+  .result {
+    margin-top: 1.5rem; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    background: var(--card);
+  }
+  .result-head {
+    display: flex; align-items: center; gap: 0.75rem; padding: 0.9rem 1.1rem; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+  }
+  .result-head .url { font-weight: 600; color: var(--accent); word-break: break-all; }
+  .result-head .actions { margin-left: auto; display: flex; gap: 0.5rem; }
+  .result-head .actions button, .result-head .actions a {
+    font: inherit; font-size: 0.85rem; text-decoration: none; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 8px; padding: 0.35rem 0.7rem;
+  }
+  .result-head .actions a.primary, .result-head .actions button.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  iframe { width: 100%; height: 60vh; border: 0; background: #fff; }
+  .sites { margin-top: 2.5rem; }
+  .sites h2 { font-family: Georgia, serif; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+  .sites ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
+  .sites li a {
+    display: flex; justify-content: space-between; gap: 1rem; text-decoration: none; color: var(--ink);
+    padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  }
+  .sites li a:hover { border-color: var(--accent); }
+  .sites .sub { color: var(--accent); font-weight: 600; }
+  .sites .empty { color: var(--muted); }
+  footer { text-align: center; color: var(--muted); padding: 2rem; font-size: 0.85rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div class="cup">☕</div>
+  <h1>BrewDocs</h1>
+  <p class="tag">Brew your docs, serve them hot.</p>
+</header>
+<main>
+  <div class="brew-box">
+    <input id="url" type="text" placeholder="Paste a GitHub repo, npm package, or local path…"
+           value="./examples/lib" />
+    <button id="brew">Brew 🍵</button>
+  </div>
+  <p class="hint">
+    Try a local example like <code>./examples/lib</code>, an npm name like <code>left-pad</code>,
+    or a GitHub URL. Devs can also use the CLI: <code>brewdocs build &lt;src&gt;</code>.
+  </p>
+
+  <div id="status"></div>
+  <div id="result" class="result" hidden>
+    <div class="result-head">
+      <span class="url" id="result-url"></span>
+      <span class="actions">
+        <a id="open-link" target="_blank" rel="noopener">Open ↗</a>
+        <button id="export-btn">Export HTML</button>
+        <button id="redeploy-btn">Re-brew</button>
+      </span>
+    </div>
+    <iframe id="preview" title="Doc preview"></iframe>
+  </div>
+
+  <section class="sites">
+    <h2>Hosted sites</h2>
+    <ul id="sites-list"><li class="empty">Loading…</li></ul>
+  </section>
+</main>
+<footer>Brewed with <a href="#">BrewDocs</a> — Brew your docs, serve them hot.</footer>
+
+<script>
+  var urlInput = document.getElementById("url");
+  var brewBtn = document.getElementById("brew");
+  var statusEl = document.getElementById("status");
+  var resultEl = document.getElementById("result");
+  var resultUrl = document.getElementById("result-url");
+  var openLink = document.getElementById("open-link");
+  var preview = document.getElementById("preview");
+  var exportBtn = document.getElementById("export-btn");
+  var redeployBtn = document.getElementById("redeploy-btn");
+  var sitesList = document.getElementById("sites-list");
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || "";
+    statusEl.className = isError ? "error" : "";
+  }
+
+  function refreshSites() {
+    fetch("/api/sites").then(function (r) { return r.json(); }).then(function (sites) {
+      if (!sites.length) {
+        sitesList.innerHTML = '<li class="empty">No sites deployed yet.</li>';
+        return;
+      }
+      sitesList.innerHTML = sites.map(function (s) {
+        return '<li><a href="/s/' + s.subdomain + '/"><span class="sub">' +
+          s.subdomain + '.brewdocs.dev</span><span>' +
+          (s.title ? s.title : "") + '</span></a></li>';
+      }).join("");
+    }).catch(function () {
+      sitesList.innerHTML = '<li class="empty">Could not load sites.</li>';
+    });
+  }
+
+  function brew() {
+    var source = urlInput.value.trim();
+    if (!source) { setStatus("Enter a repo, package, or path.", true); return; }
+    brewBtn.disabled = true;
+    setStatus("Brewing…");
+    resultEl.hidden = true;
+    fetch("/api/build", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: source }),
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.j.error || "Build failed");
+        var sub = res.j.subdomain;
+        resultUrl.textContent = sub + ".brewdocs.dev";
+        openLink.href = "/s/" + sub + "/";
+        preview.src = "/s/" + sub + "/";
+        resultEl.hidden = false;
+        setStatus("");
+        refreshSites();
+      })
+      .catch(function (e) { setStatus(e.message, true); })
+      .then(function () { brewBtn.disabled = false; });
+  }
+
+  brewBtn.addEventListener("click", brew);
+  urlInput.addEventListener("keydown", function (e) { if (e.key === "Enter") brew(); });
+
+  exportBtn.addEventListener("click", function () {
+    var source = urlInput.value.trim();
+    if (!source) return;
+    fetch("/api/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: source }),
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (j) { throw new Error(j.error); });
+      return r.blob();
+    }).then(function (blob) {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "brewdocs.html";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }).catch(function (e) { setStatus(e.message, true); });
+  });
+
+  redeployBtn.addEventListener("click", brew);
+  refreshSites();
+</script>
+</body>
+</html>

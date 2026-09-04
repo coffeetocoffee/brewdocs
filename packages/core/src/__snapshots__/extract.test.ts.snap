@@ -1,0 +1,367 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
+{
+  "description": "A small library with JSDoc-documented exports.",
+  "frontmatter": {
+    "summary": "A tiny library fixture for BrewDocs extractor tests.",
+    "title": "Lib",
+  },
+  "metadata": {
+    "description": "A small library with JSDoc-documented exports.",
+    "homepage": "https://example.com/lib",
+    "keywords": [
+      "docs",
+      "brew",
+      "example",
+    ],
+    "license": "MIT",
+    "main": "index.ts",
+    "name": "lib",
+    "repository": "github:example/lib",
+    "version": "1.2.0",
+  },
+  "pkg": {
+    "bin": undefined,
+    "dependencies": undefined,
+    "description": "A small library with JSDoc-documented exports.",
+    "devDependencies": undefined,
+    "exports": undefined,
+    "homepage": "https://example.com/lib",
+    "keywords": [
+      "docs",
+      "brew",
+      "example",
+    ],
+    "license": "MIT",
+    "name": "lib",
+    "repository": "github:example/lib",
+    "scripts": undefined,
+    "version": "1.2.0",
+  },
+  "readmeHtml": "<h1>lib</h1>
+<p>A small library used to exercise the <strong>JSDoc/TSDoc</strong> and <strong>exports</strong> extractors.</p>
+<h2>Usage</h2>
+<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">"lib"</span>;
+<span class="tok-fn">brew</span>(<span class="tok-string">"./repo"</span>, <span class="tok-number">3</span>);</code></pre>
+<h2>Notes</h2>
+<p>This package intentionally documents its exports with JSDoc so Phase 1 can pull params, return values, examples, and deprecation notices.</p>",
+  "sections": [
+    {
+      "html": "<p>A small library used to exercise the <strong>JSDoc/TSDoc</strong> and <strong>exports</strong> extractors.</p>",
+      "id": "lib",
+      "level": 1,
+      "title": "lib",
+    },
+    {
+      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">"lib"</span>;
+<span class="tok-fn">brew</span>(<span class="tok-string">"./repo"</span>, <span class="tok-number">3</span>);</code></pre>",
+      "id": "usage",
+      "level": 2,
+      "title": "Usage",
+    },
+    {
+      "html": "<p>This package intentionally documents its exports with JSDoc so Phase 1 can pull params, return values, examples, and deprecation notices.</p>",
+      "id": "notes",
+      "level": 2,
+      "title": "Notes",
+    },
+  ],
+  "symbols": [
+    {
+      "deprecated": undefined,
+      "description": "Brew a single cup of docs.",
+      "examples": [
+        "brew("./repo", 3);",
+      ],
+      "kind": "function",
+      "name": "brew",
+      "params": [
+        {
+          "default": undefined,
+          "description": "repo or package path to brew from",
+          "name": "source",
+          "optional": false,
+          "type": "string",
+        },
+        {
+          "default": undefined,
+          "description": "how strong the brew is, from 1 (weak) to 5 (bold)",
+          "name": "strength",
+          "optional": false,
+          "type": "number",
+        },
+      ],
+      "returns": {
+        "description": "the brewed output path",
+        "type": "string",
+      },
+      "signature": "export function brew(source: string, strength: number): string {
+  return \`\${source}:\${strength}\`;
+}",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": "A served cup of documentation.",
+      "examples": [],
+      "kind": "interface",
+      "name": "Cup",
+      "params": [],
+      "returns": undefined,
+      "signature": "export interface Cup {
+  /** Volume in millilitres. */
+  size: number;
+  /** Whether the cup is still hot. */
+  hot: boolean;
+}",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": "Use brew instead. It supports strength control.",
+      "description": "Legacy brew entry point.",
+      "examples": [],
+      "kind": "function",
+      "name": "oldBrew",
+      "params": [
+        {
+          "default": undefined,
+          "description": "",
+          "name": "src",
+          "optional": false,
+          "type": "string",
+        },
+      ],
+      "returns": {
+        "description": "",
+        "type": "void",
+      },
+      "signature": "export function oldBrew(src: string): void {
+  brew(src, 2);
+}",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": "Pour an existing brew into a fresh cup.",
+      "examples": [],
+      "kind": "function",
+      "name": "pour",
+      "params": [
+        {
+          "default": undefined,
+          "description": "previously brewed output",
+          "name": "input",
+          "optional": false,
+          "type": "string",
+        },
+        {
+          "default": undefined,
+          "description": "cup size in ml",
+          "name": "size",
+          "optional": true,
+          "type": "number",
+        },
+      ],
+      "returns": {
+        "description": "a new cup descriptor",
+        "type": "{ input: string; size: number; }",
+      },
+      "signature": "export function pour(input: string, size = 250): { input: string; size: number } {
+  return { input, size };
+}",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": undefined,
+      "examples": [],
+      "kind": "constant",
+      "name": "VERSION",
+      "params": [],
+      "returns": undefined,
+      "signature": "VERSION = "1.2.0"",
+      "sourceFile": "index.ts",
+    },
+  ],
+  "title": "lib",
+}
+`;
+
+exports[`Phase 1 extractors > tiny: no exports, README parsed into sections with frontmatter 1`] = `
+{
+  "description": "A tiny example package used to prove the BrewDocs build pipeline.",
+  "frontmatter": {},
+  "metadata": {
+    "description": "A tiny example package used to prove the BrewDocs build pipeline.",
+    "homepage": "https://example.com/tiny",
+    "license": "MIT",
+    "name": "tiny",
+    "repository": "github:example/tiny",
+    "version": "1.0.0",
+  },
+  "pkg": {
+    "bin": undefined,
+    "dependencies": undefined,
+    "description": "A tiny example package used to prove the BrewDocs build pipeline.",
+    "devDependencies": undefined,
+    "exports": undefined,
+    "homepage": "https://example.com/tiny",
+    "keywords": undefined,
+    "license": "MIT",
+    "name": "tiny",
+    "repository": "github:example/tiny",
+    "scripts": undefined,
+    "version": "1.0.0",
+  },
+  "readmeHtml": "<h1>tiny</h1>
+<p>A <strong>tiny</strong> example package used to prove the BrewDocs build pipeline.</p>
+<h2>Install</h2>
+<pre class="code" data-lang="bash"><code>npm install tiny</code></pre>
+<h2>Usage</h2>
+<p>Call <code>brew()</code> to start. It is <em>fast</em>.</p>
+<ul><li>No config needed</li><li>Works offline</li><li>Ships zero dependencies</li></ul>
+<h2>Notes</h2>
+<p>This README is intentionally small. Later phases extract JSDoc, exported functions, and <code>package.json</code> metadata into a full one-page site.</p>",
+  "sections": [
+    {
+      "html": "<p>A <strong>tiny</strong> example package used to prove the BrewDocs build pipeline.</p>",
+      "id": "tiny",
+      "level": 1,
+      "title": "tiny",
+    },
+    {
+      "html": "<pre class="code" data-lang="bash"><code>npm install tiny</code></pre>",
+      "id": "install",
+      "level": 2,
+      "title": "Install",
+    },
+    {
+      "html": "<p>Call <code>brew()</code> to start. It is <em>fast</em>.</p>
+<ul><li>No config needed</li><li>Works offline</li><li>Ships zero dependencies</li></ul>",
+      "id": "usage",
+      "level": 2,
+      "title": "Usage",
+    },
+    {
+      "html": "<p>This README is intentionally small. Later phases extract JSDoc, exported functions, and <code>package.json</code> metadata into a full one-page site.</p>",
+      "id": "notes",
+      "level": 2,
+      "title": "Notes",
+    },
+  ],
+  "symbols": [],
+  "title": "tiny",
+}
+`;
+
+exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSDoc 1`] = `
+{
+  "description": "A widget package with a class, interface, and constants.",
+  "frontmatter": {},
+  "metadata": {
+    "description": "A widget package with a class, interface, and constants.",
+    "license": "Apache-2.0",
+    "main": "index.ts",
+    "name": "widget",
+    "version": "0.4.1",
+  },
+  "pkg": {
+    "bin": undefined,
+    "dependencies": undefined,
+    "description": "A widget package with a class, interface, and constants.",
+    "devDependencies": undefined,
+    "exports": undefined,
+    "homepage": undefined,
+    "keywords": undefined,
+    "license": "Apache-2.0",
+    "name": "widget",
+    "repository": undefined,
+    "scripts": undefined,
+    "version": "0.4.1",
+  },
+  "readmeHtml": "<h1>widget</h1>
+<p>A package that exports a class, an interface, and constants — used to confirm the extractor handles multiple symbol kinds.</p>
+<h2>Usage</h2>
+<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">"widget"</span>;
+<span class="tok-keyword">const</span> w = <span class="tok-keyword">new</span> <span class="tok-fn">Widget</span>(SIZE_SM);</code></pre>
+<h2>Notes</h2>
+<p>No JSDoc here on purpose, to verify the extractor still produces symbols without documentation comments.</p>",
+  "sections": [
+    {
+      "html": "<p>A package that exports a class, an interface, and constants — used to confirm the extractor handles multiple symbol kinds.</p>",
+      "id": "widget",
+      "level": 1,
+      "title": "widget",
+    },
+    {
+      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">"widget"</span>;
+<span class="tok-keyword">const</span> w = <span class="tok-keyword">new</span> <span class="tok-fn">Widget</span>(SIZE_SM);</code></pre>",
+      "id": "usage",
+      "level": 2,
+      "title": "Usage",
+    },
+    {
+      "html": "<p>No JSDoc here on purpose, to verify the extractor still produces symbols without documentation comments.</p>",
+      "id": "notes",
+      "level": 2,
+      "title": "Notes",
+    },
+  ],
+  "symbols": [
+    {
+      "deprecated": undefined,
+      "description": undefined,
+      "examples": [],
+      "kind": "constant",
+      "name": "SIZE_LG",
+      "params": [],
+      "returns": undefined,
+      "signature": "SIZE_LG = 500",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": undefined,
+      "examples": [],
+      "kind": "constant",
+      "name": "SIZE_SM",
+      "params": [],
+      "returns": undefined,
+      "signature": "SIZE_SM = 250",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": undefined,
+      "examples": [],
+      "kind": "class",
+      "name": "Widget",
+      "params": [],
+      "returns": undefined,
+      "signature": "export class Widget {
+  size: number;
+  label?: string;
+
+  constructor(opts: WidgetOptions) {
+    this.size = opts.size;",
+      "sourceFile": "index.ts",
+    },
+    {
+      "deprecated": undefined,
+      "description": undefined,
+      "examples": [],
+      "kind": "interface",
+      "name": "WidgetOptions",
+      "params": [],
+      "returns": undefined,
+      "signature": "export interface WidgetOptions {
+  size: number;
+  label?: string;
+}",
+      "sourceFile": "index.ts",
+    },
+  ],
+  "title": "widget",
+}
+`;

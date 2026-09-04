@@ -1,0 +1,10 @@
+{
+  "name": "lib",
+  "version": "1.2.0",
+  "description": "A small library with JSDoc-documented exports.",
+  "license": "MIT",
+  "homepage": "https://example.com/lib",
+  "repository": "github:example/lib",
+  "keywords": ["docs", "brew", "example"],
+  "main": "index.ts"
+}

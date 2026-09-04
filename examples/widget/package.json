@@ -1,0 +1,7 @@
+{
+  "name": "widget",
+  "version": "0.4.1",
+  "description": "A widget package with a class, interface, and constants.",
+  "license": "Apache-2.0",
+  "main": "index.ts"
+}

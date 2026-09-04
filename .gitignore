@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Build / generated output
+dist/
+dist-*/
+hosting/
+docs-site/
+gallery/
+*.tsbuildinfo
+
+# Local-only planning doc (per request)
+ROADMAP.md
