@@ -37,10 +37,9 @@ runs:
         node-version: 20
     - name: Brew docs
       shell: bash
-      run: >
-        npx brewdocs build "${{ inputs.source }}"
-        --out "${{ inputs.out }}"
-        --theme "${{ inputs.theme }}"
-        ${{ inputs.dark == 'true' && '--dark' || '' }}
-        ${{ inputs.multi == 'true' && '--multi' || '' }}
-        ${{ inputs.version != '' && format('--version {0}', inputs.version) || '' }}
+      run: |
+        ARGS=(build "${{ inputs.source }}" --out "${{ inputs.out }}" --theme "${{ inputs.theme }}")
+        ${{ inputs.dark == 'true' && 'ARGS+=(--dark)' || '' }}
+        ${{ inputs.multi == 'true' && 'ARGS+=(--multi)' || '' }}
+        ${{ inputs.version != '' && format('ARGS+=(--version "{0}")', inputs.version) || '' }}
+        npx @brewdocs/cli "${ARGS[@]}"

@@ -20,7 +20,7 @@ exported symbols (resolved via the TypeScript compiler). No config, no MDX
 pipeline, no theme to maintain — you get a single themed HTML page with
 client-side search (⌘K), a version switcher, and a light/dark toggle.
 
-`npx brewdocs build ./my-project` → `index.html`. Or paste a GitHub repo into
+`npx @brewdocs/cli build ./my-project` → `index.html`. Or paste a GitHub repo into
 the web drop-in and hit Brew. There's also `deploy` to a local
 `*.brewdocs.dev` subdomain and an S3/R2 adapter for real hosting.
 

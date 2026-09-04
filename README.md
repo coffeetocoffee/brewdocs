@@ -24,7 +24,7 @@ search (`⌘K` / `Ctrl+K`), a version switcher, and a light/dark toggle.
 ## Quick start
 
 ```bash
-npm install -g brewdocs
+npm install -g @brewdocs/cli
 brewdocs build ./my-project --out dist
 # open dist/index.html
 ```
@@ -32,7 +32,7 @@ brewdocs build ./my-project --out dist
 Or without installing:
 
 ```bash
-npx brewdocs build ./examples/lib
+npx @brewdocs/cli build ./examples/lib
 ```
 
 ## CLI
@@ -101,7 +101,7 @@ Add `.github/workflows/brewdocs.yml` (see the repo's own, which builds `./docs`)
 to brew your docs to GitHub Pages on every push:
 
 ```yaml
-- run: npx brewdocs build ./docs --out docs-site --theme ink
+- run: npx @brewdocs/cli build ./docs --out docs-site --theme ink
 - uses: actions/upload-pages-artifact@v3
   with: { path: docs-site }
 ```
