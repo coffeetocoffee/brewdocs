@@ -35,6 +35,9 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: 20
+    - name: Install BrewDocs
+      shell: bash
+      run: npm install -g @brewdocs/cli
     - name: Brew docs
       shell: bash
       run: |
@@ -42,4 +45,4 @@ runs:
         ${{ inputs.dark == 'true' && 'ARGS+=(--dark)' || '' }}
         ${{ inputs.multi == 'true' && 'ARGS+=(--multi)' || '' }}
         ${{ inputs.version != '' && format('ARGS+=(--version "{0}")', inputs.version) || '' }}
-        npx @brewdocs/cli "${ARGS[@]}"
+        brewdocs "${ARGS[@]}"

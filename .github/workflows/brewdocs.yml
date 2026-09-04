@@ -18,12 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Brew the docs
-        uses: ./          # the BrewDocs reusable action in this repo
+      - uses: actions/setup-node@v4
         with:
-          source: ./docs
-          out: docs-site
-          theme: ink
+          node-version: 20
+      - run: npm install
+      - name: Brew the docs (from local source)
+        run: npm run brewdocs build ./docs --out docs-site --theme ink
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs-site
