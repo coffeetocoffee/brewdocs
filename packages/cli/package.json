@@ -10,7 +10,7 @@
   },
   "homepage": "https://brewdocs.dev",
   "bin": {
-    "brewdocs": "./bin/brewdocs.js"
+    "brewdocs": "bin/brewdocs.js"
   },
   "files": [
     "bin",

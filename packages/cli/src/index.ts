@@ -11,6 +11,7 @@ import {
   exportSite,
   listThemes,
   loadConfig,
+  resolveInput,
   type BrewDocsConfig,
   type RenderOptions,
   type StorageAdapter,
@@ -84,6 +85,27 @@ function mergeOptions(args: BuildArgs, config: BrewDocsConfig): RenderOptions {
   };
 }
 
+/**
+ * Resolve a CLI source argument (local path, npm package name, or GitHub URL)
+ * into a buildable Source. Without this, npm names were path.resolve()d into
+ * nonexistent local dirs and built empty doc sites silently.
+ */
+function resolveCliSource(
+  input: string,
+  nameOverride: string | undefined,
+): {
+  src: { root: string; name?: string };
+  name: string | undefined;
+  cleanup: () => void;
+} {
+  const resolved = resolveInput(input);
+  return {
+    src: { root: resolved.source.root, name: nameOverride ?? resolved.source.name },
+    name: resolved.source.name,
+    cleanup: resolved.cleanup,
+  };
+}
+
 /** Build a storage adapter from --storage flag, env vars, and brewdocs.yml. */
 function buildStorage(kind: string | undefined, config: BrewDocsConfig): StorageAdapter | undefined {
   const useS3 = kind === "s3" || config.storage === "s3";
@@ -133,22 +155,24 @@ export async function run(argv: string[]): Promise<void> {
 
   if (command === "build-all") {
     const args = parseBuild(rest);
-    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
-    const files = await buildVersions(
-      { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name },
-      outDir,
-      mergeOptions(args, config),
-    );
-    console.log(`☕ Brewed ${files.length} version page(s) -> ${outDir}`);
+    try {
+      const files = await buildVersions(src, outDir, mergeOptions(args, config));
+      console.log(`☕ Brewed ${files.length} version page(s) -> ${outDir}`);
+    } finally {
+      cleanup();
+    }
     return;
   }
 
   if (command === "build") {
     const args = parseBuild(rest);
-    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const resolved = resolveCliSource(args.source, args.name);
+    const { src, cleanup } = resolved;
+    const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
-    const src = { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name };
     const opts = mergeOptions(args, config);
 
     const doBuild = async (): Promise<void> => {
@@ -174,38 +198,45 @@ export async function run(argv: string[]): Promise<void> {
     }
 
     await doBuild();
+    cleanup();
     return;
   }
 
   if (command === "export") {
     const args = parseBuild(rest);
-    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
-    const outFile = await exportSite(
-      { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name },
-      outDir,
-      mergeOptions(args, config),
-    );
-    console.log(`📦 Exported static site -> ${outFile}`);
+    try {
+      const outFile = await exportSite(src, outDir, mergeOptions(args, config));
+      console.log(`📦 Exported static site -> ${outFile}`);
+    } finally {
+      cleanup();
+    }
     return;
   }
 
   if (command === "deploy") {
     const args = parseBuild(rest);
-    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const resolved = resolveCliSource(args.source, args.name);
+    const { src, cleanup } = resolved;
+    const config = loadConfig(src.root);
     const storageKind = getFlag(rest, "--storage") ?? "local";
-    const src = { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name };
-    const sub = args.name ?? config.name ?? deriveSubdomain(src);
+    const sub = args.name ?? config.name ?? resolved.name ?? deriveSubdomain(src);
     const storage = buildStorage(storageKind, config);
 
-    const result = await deploySite(
-      src,
-      path.resolve(process.cwd(), args.out),
-      sub,
-      mergeOptions(args, config),
-      storage,
-    );
-    console.log(`🚀 Deployed -> ${result.url}`);
+    try {
+      const result = await deploySite(
+        src,
+        path.resolve(process.cwd(), args.out),
+        sub,
+        mergeOptions(args, config),
+        storage,
+      );
+      console.log(`🚀 Deployed -> ${result.url}`);
+    } finally {
+      cleanup();
+    }
     return;
   }
 

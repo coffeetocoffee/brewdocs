@@ -67,3 +67,59 @@ describe("Phase 4 — hosting server auth", () => {
     server.close();
   });
 });
+
+describe("Phase 5 — hosted-tier protection", () => {
+  it("rate limits repeated /api/build from the same client", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-rl-"));
+    const server = createServer(hosting, undefined, undefined, {
+      rateLimit: 1,
+      rateWindowMs: 60000,
+      maxConcurrentBuilds: 1,
+      maxQueue: 1,
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const base = `http://127.0.0.1:${port}`;
+    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+
+    const first = await fetch(`${base}/api/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await fetch(`${base}/api/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    expect(second.status).toBe(429);
+    expect(second.headers.get("retry-after")).toBeTruthy();
+
+    server.close();
+  });
+
+  it("returns 503 when the build queue is exhausted", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-q-"));
+    const server = createServer(hosting, undefined, undefined, {
+      maxConcurrentBuilds: 0,
+      maxQueue: 0,
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const base = `http://127.0.0.1:${port}`;
+    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+
+    const res = await fetch(`${base}/api/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    expect(res.status).toBe(503);
+
+    server.close();
+  });
+});

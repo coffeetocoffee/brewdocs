@@ -30,6 +30,99 @@ export interface ServeOptions {
   port: number;
 }
 
+export interface ProtectionOptions {
+  rateLimit?: number;
+  rateWindowMs?: number;
+  maxConcurrentBuilds?: number;
+  maxQueue?: number;
+}
+
+export class BuildQueueFullError extends Error {
+  constructor() {
+    super("build queue is full");
+    this.name = "BuildQueueFullError";
+  }
+}
+
+class RateLimiter {
+  private hits = new Map<string, { count: number; resetAt: number }>();
+  constructor(private limit: number, private windowMs: number) {
+    const timer = setInterval(() => this.prune(), this.windowMs);
+    timer.unref?.();
+  }
+  private prune(): void {
+    const now = Date.now();
+    for (const [key, rec] of this.hits) {
+      if (now >= rec.resetAt) this.hits.delete(key);
+    }
+  }
+  check(key: string): { ok: boolean; retryAfterSec: number } {
+    const now = Date.now();
+    const rec = this.hits.get(key);
+    if (!rec || now >= rec.resetAt) {
+      this.hits.set(key, { count: 1, resetAt: now + this.windowMs });
+      return { ok: true, retryAfterSec: 0 };
+    }
+    if (rec.count >= this.limit) {
+      return { ok: false, retryAfterSec: Math.ceil((rec.resetAt - now) / 1000) };
+    }
+    rec.count++;
+    return { ok: true, retryAfterSec: 0 };
+  }
+}
+
+class BuildQueue {
+  private active = 0;
+  private pending: Array<{
+    job: () => Promise<unknown>;
+    resolve: (v: unknown) => void;
+    reject: (e: unknown) => void;
+  }> = [];
+  constructor(private maxConcurrent: number, private maxQueue: number) {}
+  enqueue<T>(job: () => Promise<T>): Promise<T> {
+    if (this.active >= this.maxConcurrent) {
+      if (this.pending.length >= this.maxQueue) {
+        return Promise.reject(new BuildQueueFullError());
+      }
+      return new Promise<T>((resolve, reject) => {
+        this.pending.push({
+          job: job as () => Promise<unknown>,
+          resolve: resolve as (v: unknown) => void,
+          reject,
+        });
+      });
+    }
+    return this.start(job);
+  }
+  private start<T>(job: () => Promise<T>): Promise<T> {
+    this.active++;
+    return job().finally(() => {
+      this.active--;
+      const next = this.pending.shift();
+      if (next) {
+        Promise.resolve(this.start(next.job as () => Promise<unknown>))
+          .then(next.resolve, next.reject);
+      }
+    });
+  }
+}
+
+function clientKey(req: http.IncomingMessage): string {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+function numOption(
+  value: number | undefined,
+  env: string | undefined,
+  fallback: number,
+): number {
+  const v = value ?? (env !== undefined ? Number(env) : undefined);
+  if (v === undefined || Number.isNaN(v)) return fallback;
+  return v;
+}
+
 function packageName(root: string): string | undefined {
   try {
     const pkg = JSON.parse(
@@ -121,8 +214,18 @@ export function createServer(
   hostingDir: string,
   storage?: StorageAdapter,
   token?: string,
+  protection?: ProtectionOptions,
 ): http.Server {
   fs.mkdirSync(hostingDir, { recursive: true });
+
+  const limiter = new RateLimiter(
+    numOption(protection?.rateLimit, process.env.BREWDOCS_RATE_LIMIT, 10),
+    numOption(protection?.rateWindowMs, process.env.BREWDOCS_RATE_WINDOW_MS, 60000),
+  );
+  const queue = new BuildQueue(
+    numOption(protection?.maxConcurrentBuilds, process.env.BREWDOCS_MAX_BUILDS, 2),
+    numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
+  );
 
   const requireAuth = (req: http.IncomingMessage): boolean => {
     if (!token) return true;
@@ -139,38 +242,59 @@ export function createServer(
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
+      const limited = limiter.check(clientKey(req));
+      if (!limited.ok) {
+        res
+          .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
+          .end(
+            JSON.stringify({
+              error: "rate limited",
+              retryAfter: limited.retryAfterSec,
+            }),
+          );
+        return;
+      }
 
       let body = "";
       for await (const chunk of req) body += chunk;
+      let data: {
+        source?: string;
+        name?: string;
+        theme?: string;
+        dark?: boolean;
+      };
       try {
-        const data = JSON.parse(body || "{}") as {
-          source?: string;
-          name?: string;
-          theme?: string;
-          dark?: boolean;
-        };
-        if (!data.source) {
-          res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
-          return;
-        }
-        const resolved = resolveInput(data.source);
-        const sub = subdomainFor(resolved.source, data.name);
-        const opts: RenderOptions = { theme: data.theme, dark: !!data.dark };
-        const result = await deploySite(
-          resolved.source,
-          hostingDir,
-          sub,
-          opts,
-          storage,
+        data = JSON.parse(body || "{}") as typeof data;
+      } catch {
+        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
+        return;
+      }
+      if (!data.source) {
+        res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
+        return;
+      }
+
+      try {
+        const result = await queue.enqueue(() =>
+          runBuild(data, hostingDir, storage),
         );
-        resolved.cleanup();
         res
           .writeHead(200, { "content-type": TYPES[".json"] })
-          .end(JSON.stringify({ url: result.url, subdomain: sub }));
+          .end(JSON.stringify(result));
       } catch (e) {
+        if (e instanceof BuildQueueFullError) {
+          res
+            .writeHead(503, { "retry-after": "5" })
+            .end(JSON.stringify({ error: "server busy, try again shortly" }));
+          return;
+        }
         res
           .writeHead(500)
-          .end(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }));
+          .end(
+            JSON.stringify({
+              error: String(e instanceof Error ? e.message : e),
+            }),
+          );
       }
       return;
     }
@@ -180,41 +304,59 @@ export function createServer(
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
+      const limited = limiter.check(clientKey(req));
+      if (!limited.ok) {
+        res
+          .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
+          .end(
+            JSON.stringify({
+              error: "rate limited",
+              retryAfter: limited.retryAfterSec,
+            }),
+          );
+        return;
+      }
 
       let body = "";
       for await (const chunk of req) body += chunk;
-      let tmp: string | undefined;
+      let data: {
+        source?: string;
+        theme?: string;
+        dark?: boolean;
+        name?: string;
+      };
       try {
-        const data = JSON.parse(body || "{}") as {
-          source?: string;
-          theme?: string;
-          dark?: boolean;
-          name?: string;
-        };
-        if (!data.source) {
-          res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
-          return;
-        }
-        const resolved = resolveInput(data.source);
-        tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-export-"));
-        const file = await exportSite(resolved.source, tmp, {
-          theme: data.theme,
-          dark: !!data.dark,
-        });
-        resolved.cleanup();
-        const html = readFileSync(file, "utf8");
-        const name = subdomainFor(resolved.source, data.name) ?? "site";
+        data = JSON.parse(body || "{}") as typeof data;
+      } catch {
+        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
+        return;
+      }
+      if (!data.source) {
+        res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
+        return;
+      }
+
+      try {
+        const out = await queue.enqueue(() => runExport(data));
         res.writeHead(200, {
           "content-type": TYPES[".html"],
-          "content-disposition": `attachment; filename="${name}.html"`,
+          "content-disposition": `attachment; filename="${out.name}.html"`,
         });
-        res.end(html);
+        res.end(out.html);
       } catch (e) {
+        if (e instanceof BuildQueueFullError) {
+          res
+            .writeHead(503, { "retry-after": "5" })
+            .end(JSON.stringify({ error: "server busy, try again shortly" }));
+          return;
+        }
         res
           .writeHead(500)
-          .end(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }));
-      } finally {
-        if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+          .end(
+            JSON.stringify({
+              error: String(e instanceof Error ? e.message : e),
+            }),
+          );
       }
       return;
     }
@@ -247,4 +389,48 @@ export function createServer(
     res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
     fs.createReadStream(site.filePath).pipe(res);
   });
+}
+
+async function runBuild(
+  data: { source?: string; name?: string; theme?: string; dark?: boolean },
+  hostingDir: string,
+  storage?: StorageAdapter,
+): Promise<{ url: string; subdomain: string }> {
+  const resolved = resolveInput(data.source!);
+  try {
+    const sub = subdomainFor(resolved.source, data.name);
+    const opts: RenderOptions = { theme: data.theme, dark: !!data.dark };
+    const result = await deploySite(
+      resolved.source,
+      hostingDir,
+      sub,
+      opts,
+      storage,
+    );
+    return { url: result.url, subdomain: sub };
+  } finally {
+    resolved.cleanup();
+  }
+}
+
+async function runExport(data: {
+  source?: string;
+  theme?: string;
+  dark?: boolean;
+  name?: string;
+}): Promise<{ html: string; name: string }> {
+  const resolved = resolveInput(data.source!);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-export-"));
+  try {
+    const file = await exportSite(resolved.source, tmp, {
+      theme: data.theme,
+      dark: !!data.dark,
+    });
+    const html = readFileSync(file, "utf8");
+    const name = subdomainFor(resolved.source, data.name) ?? "site";
+    return { html, name };
+  } finally {
+    resolved.cleanup();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
