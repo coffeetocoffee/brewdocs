@@ -170,8 +170,8 @@ Source → ExtractResult → RenderModel → standalone HTML
 ```bash
 npm install
 npm test          # 40+ tests across extractors, render, search, deploy, API
-npm run brewdocs build ./docs --theme ink --out docs-site   # dogfood docs
-npm run brewdocs gallery --out gallery                      # example gallery
+npm run brewdocs -- build ./docs --theme ink --out docs-site   # dogfood docs
+npm run brewdocs -- gallery --out gallery                      # example gallery
 ```
 
 ## License

@@ -23,7 +23,7 @@ jobs:
           node-version: 20
       - run: npm install
       - name: Brew the docs (from local source)
-        run: npm run brewdocs build ./docs --out docs-site --theme ink
+        run: npm run brewdocs -- build ./docs --out docs-site --theme ink
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs-site
