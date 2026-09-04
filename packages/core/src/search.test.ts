@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -57,11 +58,32 @@ describe("Phase 3 — version discovery", () => {
     }
   });
 
-  it("discovers repo tags for a monorepo subdirectory", async () => {
-    const versions = await discoverVersions(path.join(EXAMPLES, "lib"));
-    expect(versions.length).toBeGreaterThan(1);
-    expect(versions).toContain("1.2.0");
-    expect(versions).toContain("v0.1.1");
+  it("discovers git tags for a monorepo subdirectory", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-git-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "package.json"),
+        JSON.stringify({ name: "x", version: "1.0.0" }),
+      );
+      fs.mkdirSync(path.join(tmp, "packages", "pkg"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmp, "packages", "pkg", "package.json"),
+        JSON.stringify({ name: "pkg", version: "2.0.0" }),
+      );
+      const run = (args: string[]) =>
+        execFileSync("git", args, { cwd: tmp, stdio: "ignore" });
+      run(["init"]);
+      run(["config", "user.email", "test@example.com"]);
+      run(["config", "user.name", "test"]);
+      run(["add", "."]);
+      run(["commit", "-m", "init"]);
+      run(["tag", "v9.9.9"]);
+      // Subdirectory of the repo: git root discovery must walk up.
+      const versions = await discoverVersions(path.join(tmp, "packages", "pkg"));
+      expect(versions).toContain("v9.9.9");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
