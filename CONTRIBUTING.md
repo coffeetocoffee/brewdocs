@@ -8,8 +8,8 @@ we keep everything dependency-light on purpose.
 ```bash
 npm install
 npm test                 # 45 tests across extractors, render, search, deploy, API
-npm run brewdocs build ./docs --theme ink --out docs-site
-npm run brewdocs serve   # web drop-in at the printed URL
+npm run brewdocs -- build ./docs --theme ink --out docs-site
+npm run brewdocs -- serve   # web drop-in at the printed URL
 ```
 
 ## Layout
@@ -31,14 +31,18 @@ The core pipeline is a pure flow: `Source → ExtractResult → RenderModel → 
 
 ## Publishing
 
-Publishing is a manual, deliberate step (not automated here):
+Releases ship both packages to npm via the `Publish` workflow:
 
-```bash
-cd packages/core && npm publish     # publish core first
-cd ../cli      && npm publish        # then the CLI (depends on core)
-```
+1. Bump `version` in the root `package.json`, `packages/core/package.json`,
+   and `packages/cli/package.json` (keep all three in sync; the CLI depends
+   on the same version of core).
+2. Commit, then tag: `git tag v0.1.0 && git push origin v0.1.0`.
+3. The workflow runs tests, then publishes `@brewdocs/core` first and
+   `@brewdocs/cli` second (order matters — the CLI depends on core).
 
-Both packages ship TypeScript source and run via `tsx`, so no prebuild is needed.
+It needs a `NPM_TOKEN` repo secret with publish access to the `@brewdocs`
+scope. Both packages ship TypeScript source and run via `tsx`, so no
+prebuild is needed.
 
 ## License
 

@@ -1,12 +1,12 @@
 {
   "name": "@brewdocs/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "BrewDocs command line interface. Brew your docs, serve them hot.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brewdocs/brewdocs.git"
+    "url": "git+https://github.com/coffeetocoffee/brewdocs.git"
   },
   "homepage": "https://brewdocs.dev",
   "bin": {
@@ -17,14 +17,14 @@
     "src/cli.ts",
     "src/index.ts",
     "src/server.ts",
-    "web",
+    "src/web",
     "README.md"
   ],
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@brewdocs/core": "0.0.0",
+    "@brewdocs/core": "0.1.0",
     "tsx": "^4.19.2"
   },
   "publishConfig": {

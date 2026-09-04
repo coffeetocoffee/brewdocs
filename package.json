@@ -1,6 +1,6 @@
 {
   "name": "brewdocs",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Brew your docs, serve them hot. Point it at a GitHub repo or npm package to get a clean, hosted one-page doc site.",
   "type": "module",
