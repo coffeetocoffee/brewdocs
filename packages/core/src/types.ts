@@ -25,6 +25,29 @@ export interface ParamDoc {
   default?: string;
 }
 
+/** A member (method / property / constructor) of a class or interface. */
+export interface MemberDoc {
+  name: string;
+  kind: "method" | "property" | "constructor";
+  /** Normalized `name(params): type` / `name: type` signature text. */
+  signature?: string;
+  description?: string;
+  /** Resolved property type. */
+  type?: string;
+  optional?: boolean;
+  static?: boolean;
+  readonly?: boolean;
+  visibility?: "public" | "private" | "protected";
+  deprecated?: string | boolean;
+}
+
+/** A generic type parameter of a symbol (`T extends X = Y`). */
+export interface TypeParamDoc {
+  name: string;
+  constraint?: string;
+  default?: string;
+}
+
 /** A documented exported symbol (extracted in Phase 1). */
 export interface SymbolDoc {
   name: string;
@@ -37,6 +60,21 @@ export interface SymbolDoc {
   examples: string[];
   deprecated?: string | boolean;
   sourceFile?: string;
+  /** Members of a class or interface (Direction A). */
+  members?: MemberDoc[];
+  /** Generic type parameters (Direction A). */
+  typeParams?: TypeParamDoc[];
+  /** `@throws` clauses (Direction A). */
+  throws?: string[];
+  /** `@see` references (Direction A). */
+  see?: string[];
+  /**
+   * Alias-unwrapped parameter types (`UserId` -> `string`, rest/optional
+   * markers preserved) used for semantic — not textual — signature diffs.
+   */
+  resolvedParams?: string[];
+  /** Alias-unwrapped return type. */
+  resolvedReturn?: string;
 }
 
 /** Key/value pairs pulled from README frontmatter. */

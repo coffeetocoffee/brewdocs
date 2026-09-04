@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Core extraction pipeline for BrewDocs.",
   "type": "module",
   "license": "MIT",
@@ -34,6 +34,7 @@
     "src/extractors/package.ts",
     "src/extractors/exports.ts",
     "src/extractors/jsdoc.ts",
+    "src/extractors/type-resolve.ts",
     "src/deploy/storage.ts",
     "README.md"
   ],

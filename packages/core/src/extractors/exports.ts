@@ -3,6 +3,12 @@ import * as path from "node:path";
 import ts from "typescript";
 import type { SymbolDoc } from "../types.js";
 import { parseJsDoc } from "./jsdoc.js";
+import {
+  extractMembers,
+  resolvedParamType,
+  resolvedReturnType,
+  typeParamsOf,
+} from "./type-resolve.js";
 
 function resolveEntry(root: string, pkg: Record<string, unknown>): string | undefined {
   const candidates: string[] = [];
@@ -107,6 +113,17 @@ function symbolFromDecl(
     }
   }
 
+  // Direction A: alias-unwrapped types for semantic diffing, plus members,
+  // type parameters, @throws and @see on the symbol page.
+  const resolvedParams =
+    ts.isFunctionLike(decl) && decl.parameters.length > 0
+      ? decl.parameters.map((p) => resolvedParamType(p, checker))
+      : undefined;
+  const resolvedReturn =
+    ts.isFunctionLike(decl) && decl.kind !== ts.SyntaxKind.Constructor
+      ? resolvedReturnType(decl as ts.SignatureDeclaration, checker)
+      : undefined;
+
   return {
     name,
     kind,
@@ -117,6 +134,12 @@ function symbolFromDecl(
     examples: jsdoc.examples,
     deprecated: jsdoc.deprecated || undefined,
     sourceFile: path.relative(root, declSourceFile.fileName),
+    members: extractMembers(decl, checker),
+    typeParams: typeParamsOf(decl),
+    throws: jsdoc.throws.length > 0 ? jsdoc.throws : undefined,
+    see: jsdoc.see.length > 0 ? jsdoc.see : undefined,
+    resolvedParams,
+    resolvedReturn,
   };
 }
 

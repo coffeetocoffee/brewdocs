@@ -33,6 +33,71 @@ function slug(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Exported symbol name -> link target on the current page layout. */
+type SymbolLinks = Map<string, string>;
+
+function symbolLinks(
+  model: RenderModel,
+  hrefFor: (name: string) => string,
+  exclude?: string,
+): SymbolLinks {
+  const map: SymbolLinks = new Map();
+  for (const s of model.symbols) {
+    if (s.name !== exclude) map.set(s.name, hrefFor(s.name));
+  }
+  return map;
+}
+
+const IDENT_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+
+/** Escape plain type text and wrap identifiers that name exported symbols in links (Direction A cross-links). */
+function linkifyType(text: string, links?: SymbolLinks): string {
+  if (!links || links.size === 0 || !text) return escapeHtml(text);
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(IDENT_RE)) {
+    out += escapeHtml(text.slice(last, m.index));
+    const href = links.get(m[0]);
+    out += href
+      ? `<a class="type-ref" href="${escapeHtml(href)}">${escapeHtml(m[0])}</a>`
+      : escapeHtml(m[0]);
+    last = m.index + m[0].length;
+  }
+  out += escapeHtml(text.slice(last));
+  return out;
+}
+
+/**
+ * Cross-link identifiers inside already-highlighted signature HTML. The
+ * highlighter emits flat spans, so identifiers of known symbols sit in plain
+ * text between tags — linkify those, but never inside comments or strings.
+ */
+function linkifyHighlighted(code: string, links?: SymbolLinks): string {
+  if (!links || links.size === 0 || !code) return code;
+  const parts = code.split(/(<[^>]+>)/);
+  let out = "";
+  let skip = 0;
+  for (const part of parts) {
+    if (part.startsWith("<")) {
+      if (/^<span class="tok-(comment|string)\b/.test(part)) skip++;
+      else if (part === "</span>" && skip > 0) skip--;
+      out += part;
+      continue;
+    }
+    if (skip > 0) {
+      out += part;
+      continue;
+    }
+    out += part.replace(IDENT_RE, (word) => {
+      const href = links.get(word);
+      return href
+        ? `<a class="type-ref" href="${escapeHtml(href)}">${escapeHtml(word)}</a>`
+        : word;
+    });
+  }
+  return out;
+}
+
 function themeVars(theme: Theme): string {
   const light = Object.entries(theme.light)
     .map(([k, v]) => `  ${k}: ${v};`)
@@ -60,14 +125,28 @@ function row(k: string, v: string): string {
   return `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`;
 }
 
-function renderSymbol(sym: SymbolDoc): string {
+function renderSymbol(
+  sym: SymbolDoc,
+  links?: SymbolLinks,
+): string {
   const badge = sym.deprecated
     ? `<span class="badge dep">deprecated</span>`
     : "";
+  const typeParams = sym.typeParams?.length
+    ? `<span class="kind">&lt;${sym.typeParams
+        .map((tp) =>
+          tp.constraint
+            ? `${escapeHtml(tp.name)} extends ${linkifyType(tp.constraint, links)}${
+                tp.default ? ` = ${linkifyType(tp.default, links)}` : ""
+              }`
+            : escapeHtml(tp.name),
+        )
+        .join(", ")}&gt;</span>`
+    : "";
   const sig = sym.signature
-    ? `<pre class="code sig" data-lang="ts"><code>${highlightCode(
-        sym.signature,
-        "ts",
+    ? `<pre class="code sig" data-lang="ts"><code>${linkifyHighlighted(
+        highlightCode(sym.signature, "ts"),
+        links,
       )}</code></pre>`
     : "";
   const desc = sym.description ? `<p>${escapeHtml(sym.description)}</p>` : "";
@@ -80,7 +159,7 @@ function renderSymbol(sym: SymbolDoc): string {
               `<tr><th>${escapeHtml(p.name)}${
                 p.optional ? "?" : ""
               }</th><td>${
-                p.type ? `<code>${escapeHtml(p.type)}</code> ` : ""
+                p.type ? `<code>${linkifyType(p.type, links)}</code> ` : ""
               }${p.description ? escapeHtml(p.description) : ""}</td></tr>`,
           )
           .join("\n")}
@@ -89,8 +168,44 @@ function renderSymbol(sym: SymbolDoc): string {
 
   const ret = sym.returns
     ? `<div class="returns"><h4>Returns</h4><p>${
-        sym.returns.type ? `<code>${escapeHtml(sym.returns.type)}</code> ` : ""
+        sym.returns.type
+          ? `<code>${linkifyType(sym.returns.type, links)}</code> `
+          : ""
       }${sym.returns.description ? escapeHtml(sym.returns.description) : ""}</p></div>`
+    : "";
+
+  const members = sym.members?.length
+    ? `<div class="members"><h4>Members</h4><table>
+        ${sym.members
+          .map(
+            (m) =>
+              `<tr><th>${escapeHtml(m.name)}${
+                m.optional ? "?" : ""
+              } <span class="kind">${escapeHtml(m.kind)}</span></th><td>${
+                m.signature
+                  ? `<code class="member-sig">${linkifyHighlighted(
+                      highlightCode(m.signature, "ts"),
+                      links,
+                    )}</code>`
+                  : m.type
+                    ? `<code>${linkifyType(m.type, links)}</code>`
+                    : ""
+              }${m.description ? ` ${escapeHtml(m.description)}` : ""}</td></tr>`,
+          )
+          .join("\n")}
+      </table></div>`
+    : "";
+
+  const throws = sym.throws?.length
+    ? `<div class="throws"><h4>Throws</h4><ul>${sym.throws
+        .map((t) => `<li>${linkifyType(t, links)}</li>`)
+        .join("")}</ul></div>`
+    : "";
+
+  const see = sym.see?.length
+    ? `<div class="see"><h4>See</h4><ul>${sym.see
+        .map((s) => `<li>${linkifyType(s, links)}</li>`)
+        .join("")}</ul></div>`
     : "";
 
   const examples = sym.examples.length
@@ -110,8 +225,8 @@ function renderSymbol(sym: SymbolDoc): string {
     : "";
 
   return `<section class="symbol" id="symbol-${slug(sym.name)}">
-    <h3>${escapeHtml(sym.name)} <span class="kind">${sym.kind}</span> ${badge}</h3>
-    ${sig}${desc}${params}${ret}${examples}${file}
+    <h3>${escapeHtml(sym.name)} ${typeParams}<span class="kind">${sym.kind}</span> ${badge}</h3>
+    ${sig}${desc}${params}${ret}${members}${throws}${see}${examples}${file}
   </section>`;
 }
 
@@ -169,6 +284,9 @@ const STRUCTURAL_CSS = `
   .code.sig { margin: 0.5rem 0 0; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   :not(pre) > code { background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 0.1rem 0.35rem; border-radius: 4px; }
+  a.type-ref { color: var(--accent); text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 55%, transparent); }
+  a.type-ref:hover { border-bottom-style: solid; }
+  .code a.type-ref { color: inherit; font: inherit; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 55%, transparent); }
   .tok-comment { color: var(--tok-comment); font-style: italic; }
   .tok-string { color: var(--tok-string); }
   .tok-keyword { color: var(--tok-keyword); font-weight: 600; }
@@ -186,6 +304,11 @@ const STRUCTURAL_CSS = `
   .badge.dep { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem; }
   .params th, .params td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
   .params th { color: var(--muted); width: 30%; }
+  .members th, .members td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .members th { color: var(--accent); font-weight: 600; white-space: nowrap; width: 32%; }
+  .member-sig { font-size: 0.82rem; }
+  .throws ul, .see ul { margin: 0.25rem 0 0; padding-left: 1.2rem; }
+  .throws li, .see li { margin: 0.15rem 0; }
   .examples h4, .params h4, .returns h4 { margin: 0.9rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .src { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
   .symbol-index { list-style: none; padding: 0; margin: 1rem 0; }
@@ -353,6 +476,7 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
   const index = buildSearchIndex(model, Boolean(options.multiPage));
   const indexJson = JSON.stringify(index).replace(/</g, "\\u003c");
   const desc = model.description ?? "";
+  const links = symbolLinks(model, (name) => `#symbol-${slug(name)}`);
 
   const toc = [
     ...model.sections.map(
@@ -376,7 +500,7 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
 
   const api = model.symbols.length
     ? `<section id="api"><h2>API</h2>${model.symbols
-        .map(renderSymbol)
+        .map((s) => renderSymbol(s, links))
         .join("\n")}</section>`
     : "";
 
@@ -420,6 +544,7 @@ export function renderToHtmlMulti(
   const desc = model.description ?? "";
 
   const symbolSlug = (name: string) => `symbols/${slug(name)}.html`;
+  const links = symbolLinks(model, symbolSlug);
 
   const readmeBody = model.sections.length
     ? model.sections
@@ -476,7 +601,7 @@ export function renderToHtmlMulti(
     const symToc = `<li><a href="../index.html#api">API</a></li>
       <li><a href="../index.html">${escapeHtml(model.title)}</a></li>`;
     const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← Back to docs</a></p>
-      ${renderSymbol(sym)}</section>`;
+      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name))}</section>`;
     pages.push({
       path: symbolSlug(sym.name),
       html: pageShell({

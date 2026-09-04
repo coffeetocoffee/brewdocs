@@ -1,6 +1,31 @@
 import ts from "typescript";
 import type { ParamDoc } from "../types.js";
 
+/**
+ * Read an {@link ...}/`@see` link target. Link name nodes are detached from
+ * the AST parent chain, so `getText()` can throw or return "" — fall back to
+ * the raw identifier text (identifiers use `escapedText`, member chains use
+ * left/right).
+ */
+function linkTargetName(name: unknown): string {
+  if (!name || typeof name !== "object") return "";
+  const n = name as {
+    getText?: () => string;
+    escapedText?: unknown;
+    left?: unknown;
+    right?: unknown;
+  };
+  try {
+    const t = n.getText?.();
+    if (t) return t;
+  } catch {
+    /* fall through */
+  }
+  if (typeof n.escapedText === "string") return n.escapedText;
+  if (n.left && n.right) return `${linkTargetName(n.left)}.${linkTargetName(n.right)}`;
+  return "";
+}
+
 /** Flatten a JSDoc comment (string | NodeArray) into plain text. */
 function commentText(comment: string | ts.NodeArray<ts.Node> | undefined): string {
   if (!comment) return "";
@@ -17,7 +42,7 @@ function commentText(comment: string | ts.NodeArray<ts.Node> | undefined): strin
       node.kind === ts.SyntaxKind.JSDocLinkCode ||
       node.kind === ts.SyntaxKind.JSDocLinkPlain
     ) {
-      return node.name?.getText() ?? (typeof node.text === "string" ? node.text : "");
+      return `${linkTargetName(node.name)}${typeof node.text === "string" ? node.text : ""}`;
     }
     if (typeof node.text === "string") return node.text;
     if (typeof node.getText === "function") {
@@ -38,6 +63,8 @@ export interface JsDocInfo {
   returns?: { type?: string; description?: string };
   examples: string[];
   deprecated?: string | boolean;
+  throws: string[];
+  see: string[];
 }
 
 /** Extract JSDoc/TSDoc info from a declaration node. */
@@ -46,6 +73,8 @@ export function parseJsDoc(node: ts.Node): JsDocInfo {
     description: "",
     params: [],
     examples: [],
+    throws: [],
+    see: [],
   };
 
   const jsDoc = (node as unknown as { jsDoc?: ts.JSDoc[] }).jsDoc;
@@ -82,6 +111,18 @@ export function parseJsDoc(node: ts.Node): JsDocInfo {
       };
     } else if (name === "example") {
       info.examples.push(commentText(tag.comment));
+    } else if (name === "throws" || name === "throw") {
+      const text = commentText(tag.comment).trim();
+      const type = (tag as ts.JSDocTypeTag).typeExpression?.type.getText();
+      info.throws.push(type ? `${type} ${text}`.trim() : text || "unknown error");
+    } else if (name === "see") {
+      // `@see Vault for full lifecycle control` — TS puts the link target on
+      // the tag's `name` (an EntityName node detached from the parent chain)
+      // and only the trailing text lands in `comment`.
+      const target = linkTargetName((tag as unknown as { name?: unknown }).name);
+      const text = commentText(tag.comment).trim();
+      const full = [target, text].filter(Boolean).join(" ").trim();
+      if (full) info.see.push(full);
     } else if (name === "deprecated") {
       const text = commentText(tag.comment);
       info.deprecated = text ? text : true;

@@ -24,17 +24,23 @@ afterAll(async () => {
 });
 
 describe("Phase 5 — API endpoints", () => {
-  it("POST /api/build brews a site from a local path and returns a URL", async () => {
-    const res = await fetch(`${BASE}/api/build`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source: libRoot }),
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { url: string; subdomain: string };
-    expect(json.subdomain).toBe("lib");
-    expect(json.url).toBe("https://lib.brewdocs.dev");
-  });
+  // Brewing runs a full TS extraction per request; under a loaded suite that
+  // can exceed vitest's 5s default, so give these endpoints headroom.
+  it(
+    "POST /api/build brews a site from a local path and returns a URL",
+    { timeout: 30_000 },
+    async () => {
+      const res = await fetch(`${BASE}/api/build`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: libRoot }),
+      });
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { url: string; subdomain: string };
+      expect(json.subdomain).toBe("lib");
+      expect(json.url).toBe("https://lib.brewdocs.dev");
+    },
+  );
 
   it("serves the brewed site at /s/<subdomain>/", async () => {
     const res = await fetch(`${BASE}/s/lib/`);
@@ -49,17 +55,21 @@ describe("Phase 5 — API endpoints", () => {
     expect(sites.some((s) => s.subdomain === "lib")).toBe(true);
   });
 
-  it("POST /api/export returns a downloadable HTML file", async () => {
-    const res = await fetch(`${BASE}/api/export`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source: libRoot }),
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-disposition")).toContain(".html");
-    const html = await res.text();
-    expect(html).toContain("BrewDocs");
-  });
+  it(
+    "POST /api/export returns a downloadable HTML file",
+    { timeout: 30_000 },
+    async () => {
+      const res = await fetch(`${BASE}/api/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: libRoot }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-disposition")).toContain(".html");
+      const html = await res.text();
+      expect(html).toContain("BrewDocs");
+    },
+  );
 
   it("serves the web drop-in at /", async () => {
     const res = await fetch(`${BASE}/`);

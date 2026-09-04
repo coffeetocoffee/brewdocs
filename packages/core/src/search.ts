@@ -46,6 +46,9 @@ export function buildSearchIndex(model: RenderModel, multiPage = false): SearchD
       sym.signature ?? "",
       sym.params.map((p) => `${p.name} ${p.description ?? ""}`).join(" "),
       sym.returns?.description ?? "",
+      (sym.members ?? []).map((m) => `${m.name} ${m.description ?? ""}`).join(" "),
+      (sym.throws ?? []).join(" "),
+      (sym.see ?? []).join(" "),
     ]
       .join(" ")
       .trim();

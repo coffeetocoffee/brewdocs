@@ -33,12 +33,36 @@ function normalizeSig(s: SymbolDoc): string {
   return (s.signature ?? "").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Semantic fingerprint of a callable signature: alias-unwrapped param and
+ * return types only. Two signatures with the same resolved types are
+ * compatible even when the source text differs (`UserId` vs `string`,
+ * formatting, param renames). Undefined when unresolved types are missing,
+ * so diffing falls back to the textual comparison.
+ */
+function resolvedSigFingerprint(s: SymbolDoc): string | undefined {
+  if (!s.resolvedParams) return undefined;
+  const parts = [...s.resolvedParams];
+  if (s.resolvedReturn) parts.push(s.resolvedReturn);
+  return parts.join("|");
+}
+
+/** Semantic members fingerprint for classes/interfaces (Shape A2). */
+function membersFingerprint(s: SymbolDoc): string {
+  return JSON.stringify(
+    (s.members ?? []).map((m) => [m.name, m.kind, m.signature ?? ""]),
+  );
+}
+
 function docsFingerprint(s: SymbolDoc): string {
   return JSON.stringify({
     d: s.description ?? "",
     p: s.params.map((p) => [p.name, p.description ?? "", p.default ?? ""]),
     r: [s.returns?.type ?? "", s.returns?.description ?? ""],
     e: s.examples,
+    t: s.throws ?? [],
+    see: s.see ?? [],
+    m: (s.members ?? []).map((m) => [m.name, m.description ?? ""]),
   });
 }
 
@@ -87,7 +111,16 @@ export function diffSymbols(
     const changes: ChangeKind[] = [];
 
     if (old.kind !== sym.kind) changes.push("kind-changed");
-    if (normalizeSig(old) !== normalizeSig(sym)) changes.push("signature-changed");
+    // Prefer the alias-unwrapped fingerprint; textual comparison would flag
+    // `f(x: UserId)` -> `f(x: string)` as breaking when it is not.
+    const oldFp = resolvedSigFingerprint(old);
+    const newFp = resolvedSigFingerprint(sym);
+    const sigChanged =
+      oldFp !== undefined && newFp !== undefined
+        ? oldFp !== newFp
+        : normalizeSig(old) !== normalizeSig(sym);
+    if (sigChanged) changes.push("signature-changed");
+    if (membersBreaking(old, sym)) changes.push("signature-changed");
     if (docsFingerprint(old) !== docsFingerprint(sym)) changes.push("docs-changed");
 
     const wasDeprecated = Boolean(old.deprecated);
@@ -143,6 +176,22 @@ export function diffSymbols(
 
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** Interface members grow breaking; class members grow non-breaking. */
+function membersBreaking(from: SymbolDoc, to: SymbolDoc): boolean {
+  if (!from.members || !to.members) return false;
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  const toByName = new Map(to.members.map((m) => [m.name, m]));
+  for (const m of from.members) {
+    const next = toByName.get(m.name);
+    if (!next) return true;
+    if (norm(m.signature ?? "") !== norm(next.signature ?? "")) return true;
+  }
+  if (from.kind === "interface") {
+    return to.members.some((m) => !from.members!.some((o) => o.name === m.name));
+  }
+  return false;
+}
 
 /** Strip a leading "v"/"V" so tags like "v1.2.0" render as "v1.2.0", not "vv1.2.0". */
 export function versionLabel(version: string): string {

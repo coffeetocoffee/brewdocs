@@ -14,6 +14,10 @@ BrewDocs automatically extracts documentation from:
 - **README** — parsed into sections, with frontmatter support
 - **JSDoc / TSDoc** — pulled from your exported functions, classes, and types
 - **Exported symbols** — resolved via the TypeScript compiler (types, params, returns)
+- **Classes & interfaces** — members (methods, properties, constructors) with
+  visibility/static/readonly modifiers, generic type parameters, `@throws`, `@see`
+- **Cross-links** — type references resolve to their symbol pages, inside
+  signatures, parameter tables, members, and `@throws`/`@see` (Rustdoc-style)
 - **package.json** — name, version, license, keywords, and more
 
 It renders a single, self-contained HTML page with a real theme, client-side
@@ -146,6 +150,13 @@ brewdocs diff ./my-project --from v1.0.0 --to v2.0.0 --json
 On multi-version sites (`brewdocs build-all`), diff pages between
 consecutive versions are generated automatically and linked from the
 version switcher.
+
+Diffing is **semantic**: parameter and return types are compared after
+unwrapping trivial type aliases (`UserId` → `string`), so cosmetic type
+renames don't create false breaking changes. Class/interface member
+shapes are diffed too — removed members or changed member signatures
+count as breaking (added interface members break implementers; added
+class members don't).
 
 ## Web drop-in (for non-devs)
 
