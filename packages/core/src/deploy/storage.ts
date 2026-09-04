@@ -39,11 +39,11 @@ export class LocalStorageAdapter implements StorageAdapter {
 }
 
 export interface S3Options {
-  bucket: string;
-  region: string;
+  bucket?: string;
+  region?: string;
   endpoint?: string;
-  accessKeyId: string;
-  secretAccessKey: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
   /** Domain that serves the bucket, e.g. `brewdocs.dev` -> <sub>.brewdocs.dev */
   publicDomain?: string;
 }
@@ -57,12 +57,24 @@ export class S3StorageAdapter implements StorageAdapter {
   constructor(private opts: S3Options) {}
 
   async deploy(siteDir: string, subdomain: string): Promise<void> {
-    let mod: typeof import("@aws-sdk/client-s3");
+    // Optional peer dependency: the non-literal specifier keeps tsc from
+    // requiring @aws-sdk/client-s3 types when it isn't installed.
+    const spec = "@aws-sdk/client-s3";
+    let mod: any;
     try {
-      mod = await import("@aws-sdk/client-s3");
+      mod = await import(spec);
     } catch {
       throw new Error(
         "S3 storage requires @aws-sdk/client-s3. Install it with: npm i @aws-sdk/client-s3",
+      );
+    }
+    const missing = (
+      ["bucket", "region", "accessKeyId", "secretAccessKey"] as const
+    ).filter((k) => !this.opts[k]);
+    if (missing.length) {
+      throw new Error(
+        `S3 storage is missing: ${missing.join(", ")}. ` +
+          `Set BREWDOCS_S3_* env vars or the s3 block in brewdocs.yml.`,
       );
     }
     const { S3Client, PutObjectCommand } = mod;

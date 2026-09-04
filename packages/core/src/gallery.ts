@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { build } from "./build.js";
-import type { RenderOptions, Source } from "./types.js";
+import type { RenderOptions } from "./render.js";
+import type { Source } from "./types.js";
 
 export interface GalleryEntry {
   name: string;

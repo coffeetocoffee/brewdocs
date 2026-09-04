@@ -11,6 +11,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
     "brewdocs": "tsx packages/cli/src/cli.ts"
   },
   "devDependencies": {

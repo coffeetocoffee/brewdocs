@@ -2,7 +2,7 @@ import ts from "typescript";
 import type { ParamDoc } from "../types.js";
 
 /** Flatten a JSDoc comment (string | NodeArray) into plain text. */
-function commentText(comment: string | ts.NodeArray<unknown> | undefined): string {
+function commentText(comment: string | ts.NodeArray<ts.Node> | undefined): string {
   if (!comment) return "";
   if (typeof comment === "string") return comment.trim();
   const part = (n: unknown): string => {
@@ -63,9 +63,9 @@ export function parseJsDoc(node: ts.Node): JsDocInfo {
       const paramName = pt.name ? pt.name.getText() : "";
       const type = pt.typeExpression?.type.getText();
       const optional = Boolean(pt.isBracketed);
-      const def = pt.default && "expression" in pt.default
-        ? (pt.default as { expression?: { getText(): string } }).expression?.getText()
-        : undefined;
+      const defNode = (pt as unknown as { default?: { expression?: { getText(): string } } })
+        .default;
+      const def = defNode?.expression?.getText();
       const rawDesc = commentText(tag.comment).replace(/^-\s*/, "");
       info.params.push({
         name: paramName,

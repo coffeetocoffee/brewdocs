@@ -37,7 +37,10 @@ export function markdownToHtml(md: string): string {
   while (i < lines.length) {
     const line = lines[i];
 
-    const fence = /^```(\w*)\s*$/.exec(line);
+    // CommonMark allows whitespace between the fence and the info string
+    // (e.g. "``` ts") — without it this line would match no branch and the
+    // paragraph loop below would spin forever without advancing.
+    const fence = /^```[ \t]*(\w*)/.exec(line);
     if (fence) {
       const lang = fence[1] || "";
       const buf: string[] = [];
@@ -133,6 +136,14 @@ export function markdownToHtml(md: string): string {
     ) {
       para.push(lines[i]);
       i++;
+    }
+    // Safety net: if nothing was consumed (the line matched a stop pattern
+    // but no branch above handled it), emit it verbatim and advance so the
+    // outer loop can never spin without progress.
+    if (para.length === 0) {
+      out.push(`<p>${inline(line)}</p>`);
+      i++;
+      continue;
     }
     out.push(`<p>${inline(para.join(" "))}</p>`);
   }

@@ -45,12 +45,25 @@ export function resolveInput(input: string): ResolvedSource {
   );
 }
 
+/**
+ * Run the npm CLI cross-platform. On Windows npm is `npm.cmd`, and spawning
+ * `.cmd` files requires `shell: true` (with manual quoting) on patched Node
+ * versions; plain `execFileSync("npm")` throws ENOENT there.
+ */
+export function runNpm(args: string[], opts: { capture?: boolean } = {}): string {
+  const win = process.platform === "win32";
+  const out = execFileSync(win ? "npm.cmd" : "npm", win ? args.map((a) => `"${a}"`) : args, {
+    stdio: opts.capture ? ["ignore", "pipe", "ignore"] : "ignore",
+    shell: win,
+    encoding: "utf8",
+  });
+  return out ?? "";
+}
+
 function installNpm(name: string): ResolvedSource {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-npm-"));
   try {
-    execFileSync("npm", ["install", name, "--no-save", "--prefix", tmp], {
-      stdio: "ignore",
-    });
+    runNpm(["install", name, "--no-save", "--prefix", tmp]);
   } catch {
     fs.rmSync(tmp, { recursive: true, force: true });
     throw new Error(

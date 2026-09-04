@@ -189,6 +189,7 @@ export function createServer(
           source?: string;
           theme?: string;
           dark?: boolean;
+          name?: string;
         };
         if (!data.source) {
           res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
