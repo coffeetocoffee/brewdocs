@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { build, buildVersions } from "./build.js";
+import { build, buildVersions, buildMulti } from "./build.js";
 import { buildModel } from "./build.js";
 import type { RenderOptions } from "./render.js";
 import type { Source } from "./types.js";
@@ -55,7 +55,9 @@ export async function deploySite(
     ? fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-deploy-"))
     : path.join(hostingDir, subdomain);
   fs.mkdirSync(dir, { recursive: true });
-  const files = await buildVersions(source, dir, options);
+  const files = options.multiPage
+    ? buildMulti(source, dir, options)
+    : await buildVersions(source, dir, options);
 
   if (storage) {
     await storage.deploy(dir, subdomain);

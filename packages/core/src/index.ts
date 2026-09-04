@@ -4,8 +4,8 @@ export { extractReadme } from "./extractors/readme.js";
 export { extractPackage } from "./extractors/package.js";
 export { extractExports } from "./extractors/exports.js";
 export { markdownToHtml } from "./markdown.js";
-export { renderToHtml, type RenderOptions, type VersionLink } from "./render.js";
-export { build, buildModel, buildVersion, buildVersions } from "./build.js";
+export { renderToHtml, renderToHtmlMulti, type RenderOptions, type VersionLink, type RenderedPage } from "./render.js";
+export { build, buildModel, buildVersion, buildVersions, buildMulti } from "./build.js";
 export { buildGallery, type GalleryEntry } from "./gallery.js";
 export {
   type StorageAdapter,
@@ -27,3 +27,4 @@ export {
   type ResolvedSource,
 } from "./resolve.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
+export { loadConfig, type BrewDocsConfig } from "./config.js";

@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractFromSource } from "./extract.js";
-import { renderToHtml, type RenderOptions } from "./render.js";
+import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js";
 import { discoverVersions } from "./versions.js";
 import type { RenderModel, Source } from "./types.js";
 
@@ -44,6 +44,28 @@ export function build(
 
 function dirSafe(version: string): string {
   return version.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/**
+ * Build the render model into multiple HTML files: `index.html` plus one
+ * `symbols/<slug>.html` per exported symbol. Returns the written file paths.
+ */
+export function buildMulti(
+  source: Source,
+  outDir: string,
+  options: RenderOptions = {},
+): string[] {
+  const model = buildModel(source);
+  const pages = renderToHtmlMulti(model, options);
+  fs.mkdirSync(outDir, { recursive: true });
+  const written: string[] = [];
+  for (const page of pages) {
+    const outFile = path.join(outDir, page.path);
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    fs.writeFileSync(outFile, page.html, "utf8");
+    written.push(outFile);
+  }
+  return written;
 }
 
 function pkgVersion(root: string): string {

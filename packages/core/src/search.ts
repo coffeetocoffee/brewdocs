@@ -21,7 +21,7 @@ function stripHtml(html: string): string {
  * sections and exported symbols. Designed to be embedded in the page and
  * queried client-side with no external dependency.
  */
-export function buildSearchIndex(model: RenderModel): SearchDoc[] {
+export function buildSearchIndex(model: RenderModel, multiPage = false): SearchDoc[] {
   const docs: SearchDoc[] = [];
 
   for (const section of model.sections) {
@@ -33,6 +33,12 @@ export function buildSearchIndex(model: RenderModel): SearchDoc[] {
       body: stripHtml(section.html),
     });
   }
+
+  const slug = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
 
   for (const sym of model.symbols) {
     const body = [
@@ -47,7 +53,7 @@ export function buildSearchIndex(model: RenderModel): SearchDoc[] {
       id: `symbol-${sym.name}`,
       title: sym.name,
       kind: sym.kind,
-      url: `#symbol-${sym.name}`,
+      url: multiPage ? `symbols/${slug(sym.name)}.html` : `#symbol-${sym.name}`,
       body,
     });
   }

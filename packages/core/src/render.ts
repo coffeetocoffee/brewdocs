@@ -14,6 +14,7 @@ export interface RenderOptions {
   dark?: boolean;
   versions?: VersionLink[];
   currentVersion?: string;
+  multiPage?: boolean;
 }
 
 function escapeHtml(input: string): string {
@@ -185,6 +186,11 @@ const STRUCTURAL_CSS = `
   .params th { color: var(--muted); width: 30%; }
   .examples h4, .params h4, .returns h4 { margin: 0.9rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .src { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
+  .symbol-index { list-style: none; padding: 0; margin: 1rem 0; }
+  .symbol-index li { padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
+  .symbol-index a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .symbol-page .back { margin-bottom: 1rem; }
+  .symbol-page .back a { color: var(--muted); text-decoration: none; }
   footer { text-align: center; color: var(--muted); padding: 2rem; font-size: 0.85rem; border-top: 1px solid var(--line); }
   .empty-state { padding: 2rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
   footer a { color: var(--accent); }
@@ -271,16 +277,76 @@ const SEARCH_JS = `
 })();
 `;
 
+/** Shared full-document wrapper used by both single- and multi-page output. */
+function pageShell(opts: {
+  title: string;
+  description: string;
+  toc: string;
+  main: string;
+  renderOptions: RenderOptions;
+  indexJson: string;
+}): string {
+  const theme = getTheme(opts.renderOptions.theme);
+  const initial = opts.renderOptions.dark ? "dark" : "light";
+  const title = escapeHtml(opts.title);
+  const desc = opts.description
+    ? `<p class="lede">${escapeHtml(opts.description)}</p>`
+    : "";
+  return `<!doctype html>
+<html lang="en" data-theme="${initial}">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title} · BrewDocs</title>
+<style>
+${themeVars(theme)}
+${STRUCTURAL_CSS}
+</style>
+</head>
+<body>
+${searchOverlay()}
+<header>
+  <div class="header-actions">
+    <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
+    ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion)}
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
+  </div>
+  <div class="cup">☕</div>
+  <h1>${title}</h1>
+  ${desc}
+</header>
+<div class="layout">
+  <nav class="toc"><ul>${opts.toc}</ul></nav>
+  <main>
+    ${opts.main}
+  </main>
+</div>
+<footer>Brewed with <a href="#">BrewDocs</a> — Brew your docs, serve them hot.</footer>
+<script id="search-index" type="application/json">${opts.indexJson}</script>
+<script>
+(function () {
+  var root = document.documentElement;
+  var saved = localStorage.getItem("brewdocs-theme");
+  if (saved) root.setAttribute("data-theme", saved);
+  var btn = document.getElementById("theme-toggle");
+  if (btn) btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    localStorage.setItem("brewdocs-theme", next);
+  });
+})();
+${SEARCH_JS}
+</script>
+</body>
+</html>
+`;
+}
+
 /** Render the model into a complete, standalone, themeable HTML document. */
 export function renderToHtml(model: RenderModel, options: RenderOptions = {}): string {
-  const theme = getTheme(options.theme);
-  const initial = options.dark ? "dark" : "light";
-  const index = buildSearchIndex(model);
+  const index = buildSearchIndex(model, Boolean(options.multiPage));
   const indexJson = JSON.stringify(index).replace(/</g, "\\u003c");
-  const title = escapeHtml(model.title);
-  const desc = model.description
-    ? `<p class="lede">${escapeHtml(model.description)}</p>`
-    : "";
+  const desc = model.description ?? "";
 
   const toc = [
     ...model.sections.map(
@@ -317,55 +383,106 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
         </section>`
       : "";
 
-  return `<!doctype html>
-<html lang="en" data-theme="${initial}">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${title} · BrewDocs</title>
-<style>
-${themeVars(theme)}
-${STRUCTURAL_CSS}
-</style>
-</head>
-<body>
-${searchOverlay()}
-<header>
-  <div class="header-actions">
-    <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
-    ${versionSwitcher(options.versions, options.currentVersion)}
-    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
-  </div>
-  <div class="cup">☕</div>
-  <h1>${title}</h1>
-  ${desc}
-</header>
-<div class="layout">
-  <nav class="toc"><ul>${toc}</ul></nav>
-  <main>
-    ${metaTable(model.pkg)}
-    ${readmeBody}
-    ${api}
-    ${emptyState}
-  </main>
-</div>
-<footer>Brewed with <a href="#">BrewDocs</a> — Brew your docs, serve them hot.</footer>
-<script id="search-index" type="application/json">${indexJson}</script>
-<script>
-(function () {
-  var root = document.documentElement;
-  var saved = localStorage.getItem("brewdocs-theme");
-  if (saved) root.setAttribute("data-theme", saved);
-  var btn = document.getElementById("theme-toggle");
-  if (btn) btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    localStorage.setItem("brewdocs-theme", next);
+  const main = `${metaTable(model.pkg)}${readmeBody}${api}${emptyState}`;
+
+  return pageShell({
+    title: model.title,
+    description: desc,
+    toc,
+    main,
+    renderOptions: options,
+    indexJson,
   });
-})();
-${SEARCH_JS}
-</script>
-</body>
-</html>
-`;
+}
+
+export interface RenderedPage {
+  path: string;
+  html: string;
+}
+
+/**
+ * Render the model into multiple pages: one `index.html` (README + API summary
+ * with links) plus one `symbols/<slug>.html` per exported symbol. The search
+ * index links symbol results to their dedicated pages.
+ */
+export function renderToHtmlMulti(
+  model: RenderModel,
+  options: RenderOptions = {},
+): RenderedPage[] {
+  const index = buildSearchIndex(model, true);
+  const indexJson = JSON.stringify(index).replace(/</g, "\\u003c");
+  const desc = model.description ?? "";
+
+  const symbolSlug = (name: string) => `symbols/${slug(name)}.html`;
+
+  const readmeBody = model.sections.length
+    ? model.sections
+        .map(
+          (s) =>
+            `<section id="${escapeHtml(s.id)}"><h2>${escapeHtml(
+              s.title,
+            )}</h2>${s.html}</section>`,
+        )
+        .join("\n")
+    : (model.readmeHtml ?? "");
+
+  const apiSummary = model.symbols.length
+    ? `<section id="api"><h2>API</h2><ul class="symbol-index">
+        ${model.symbols
+          .map(
+            (s) =>
+              `<li><a href="${escapeHtml(symbolSlug(s.name))}">${escapeHtml(
+                s.name,
+              )}</a> <span class="kind">${escapeHtml(s.kind)}</span>${
+                s.description ? ` — ${escapeHtml(s.description)}` : ""
+              }</li>`,
+          )
+          .join("\n")}
+      </ul></section>`
+    : "";
+
+  const indexToc = [
+    ...model.sections.map(
+      (s) => `<li><a href="#${escapeHtml(s.id)}">${escapeHtml(s.title)}</a></li>`,
+    ),
+    model.symbols.length ? `<li><a href="#api">API</a></li>` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const indexMain = `${metaTable(model.pkg)}${readmeBody}${apiSummary}`;
+
+  const pages: RenderedPage[] = [
+    {
+      path: "index.html",
+      html: pageShell({
+        title: model.title,
+        description: desc,
+        toc: indexToc,
+        main: indexMain,
+        renderOptions: options,
+        indexJson,
+      }),
+    },
+  ];
+
+  for (const sym of model.symbols) {
+    const symToc = `<li><a href="../index.html#api">API</a></li>
+      <li><a href="../index.html">${escapeHtml(model.title)}</a></li>`;
+    const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← Back to docs</a></p>
+      ${renderSymbol(sym)}</section>`;
+    pages.push({
+      path: symbolSlug(sym.name),
+      html: pageShell({
+        title: `${sym.name} · ${model.title}`,
+        description: sym.description ?? "",
+        toc: symToc,
+        main: symMain,
+        renderOptions: options,
+        indexJson,
+      }),
+    });
+  }
+
+  return pages;
 }

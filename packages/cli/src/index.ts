@@ -3,12 +3,17 @@ import {
   buildGallery,
   buildVersion,
   buildVersions,
+  buildMulti,
   createStorage,
   deploySite,
   deriveSubdomain,
   discoverVersions,
   exportSite,
   listThemes,
+  loadConfig,
+  type BrewDocsConfig,
+  type RenderOptions,
+  type StorageAdapter,
 } from "@brewdocs/core";
 import { createServer } from "./server.js";
 import * as fs from "node:fs";
@@ -21,6 +26,8 @@ interface BuildArgs {
   dark: boolean;
   version?: string;
   name?: string;
+  multi: boolean;
+  watch: boolean;
 }
 
 function parseBuild(argv: string[]): BuildArgs {
@@ -30,6 +37,8 @@ function parseBuild(argv: string[]): BuildArgs {
   let dark = false;
   let version: string | undefined;
   let name: string | undefined;
+  let multi = false;
+  let watch = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--out" || arg === "-o") {
@@ -48,6 +57,10 @@ function parseBuild(argv: string[]): BuildArgs {
       name = argv[++i];
     } else if (arg.startsWith("--name=")) {
       name = arg.slice("--name=".length);
+    } else if (arg === "--multi") {
+      multi = true;
+    } else if (arg === "--watch" || arg === "-w") {
+      watch = true;
     } else if (arg === "--dark") {
       dark = true;
     } else if (!arg.startsWith("-") && source === undefined) {
@@ -56,10 +69,36 @@ function parseBuild(argv: string[]): BuildArgs {
   }
   if (!source) {
     throw new Error(
-      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>]",
+      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch]",
     );
   }
-  return { source, out, theme, dark, version, name };
+  return { source, out, theme, dark, version, name, multi, watch };
+}
+
+/** Merge CLI flags over brewdocs.yml defaults into render options. */
+function mergeOptions(args: BuildArgs, config: BrewDocsConfig): RenderOptions {
+  return {
+    theme: args.theme ?? config.theme,
+    dark: args.dark || Boolean(config.dark),
+    multiPage: args.multi || Boolean(config.multi),
+  };
+}
+
+/** Build a storage adapter from --storage flag, env vars, and brewdocs.yml. */
+function buildStorage(kind: string | undefined, config: BrewDocsConfig): StorageAdapter | undefined {
+  const useS3 = kind === "s3" || config.storage === "s3";
+  if (!useS3) return undefined;
+  const s3 = config.s3 ?? {};
+  return createStorage("s3", {
+    s3: {
+      bucket: process.env.BREWDOCS_S3_BUCKET ?? s3.bucket,
+      region: process.env.BREWDOCS_S3_REGION ?? s3.region,
+      endpoint: process.env.BREWDOCS_S3_ENDPOINT ?? s3.endpoint,
+      accessKeyId: process.env.BREWDOCS_S3_ACCESS_KEY_ID ?? s3.accessKeyId,
+      secretAccessKey: process.env.BREWDOCS_S3_SECRET_ACCESS_KEY ?? s3.secretAccessKey,
+      publicDomain: process.env.BREWDOCS_PUBLIC_DOMAIN ?? s3.publicDomain,
+    },
+  });
 }
 
 function getFlag(argv: string[], flag: string): string | undefined {
@@ -68,12 +107,6 @@ function getFlag(argv: string[], flag: string): string | undefined {
     if (argv[i].startsWith(`${flag}=`)) return argv[i].slice(flag.length + 1);
   }
   return undefined;
-}
-
-function env(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required environment variable: ${name}`);
-  return v;
 }
 
 export async function run(argv: string[]): Promise<void> {
@@ -99,66 +132,77 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   if (command === "build-all") {
-    const { source, out, theme, dark } = parseBuild(rest);
-    const outDir = path.resolve(process.cwd(), out);
+    const args = parseBuild(rest);
+    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const outDir = path.resolve(process.cwd(), args.out);
     const files = await buildVersions(
-      { root: path.resolve(process.cwd(), source) },
+      { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name },
       outDir,
-      { theme, dark },
+      mergeOptions(args, config),
     );
     console.log(`☕ Brewed ${files.length} version page(s) -> ${outDir}`);
     return;
   }
 
   if (command === "build") {
-    const { source, out, theme, dark, version } = parseBuild(rest);
-    const outDir = path.resolve(process.cwd(), out);
-    const src = { root: path.resolve(process.cwd(), source) };
-    const opts = { theme, dark };
-    const outFile = version
-      ? await buildVersion(src, outDir, version, opts)
-      : build(src, outDir, opts);
-    console.log(`☕ Brewed docs -> ${outFile}`);
+    const args = parseBuild(rest);
+    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const outDir = path.resolve(process.cwd(), args.out);
+    const src = { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name };
+    const opts = mergeOptions(args, config);
+
+    const doBuild = async (): Promise<void> => {
+      const outFile = args.version
+        ? await buildVersion(src, outDir, args.version, opts)
+        : args.multi
+          ? (await buildMulti(src, outDir, opts))[0]
+          : build(src, outDir, opts);
+      console.log(`☕ Brewed docs -> ${outFile}`);
+    };
+
+    if (args.watch) {
+      await doBuild();
+      console.log(`👀 Watching ${src.root} for changes…  (Ctrl+C to stop)`);
+      let timer: NodeJS.Timeout | undefined;
+      fs.watch(src.root, { recursive: true }, (_event, file) => {
+        if (!file) return;
+        if (!/\.(ts|js|md|json)$/.test(file)) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => void doBuild(), 200);
+      });
+      return;
+    }
+
+    await doBuild();
     return;
   }
 
   if (command === "export") {
-    const { source, out, theme, dark } = parseBuild(rest);
-    const outDir = path.resolve(process.cwd(), out);
+    const args = parseBuild(rest);
+    const config = loadConfig(path.resolve(process.cwd(), args.source));
+    const outDir = path.resolve(process.cwd(), args.out);
     const outFile = await exportSite(
-      { root: path.resolve(process.cwd(), source) },
+      { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name },
       outDir,
-      { theme, dark },
+      mergeOptions(args, config),
     );
     console.log(`📦 Exported static site -> ${outFile}`);
     return;
   }
 
   if (command === "deploy") {
-    const { source, out, theme, dark, name } = parseBuild(rest);
+    const args = parseBuild(rest);
+    const config = loadConfig(path.resolve(process.cwd(), args.source));
     const storageKind = getFlag(rest, "--storage") ?? "local";
-    const src = { root: path.resolve(process.cwd(), source), name };
-    const sub = name ?? deriveSubdomain(src);
-
-    let storage: import("@brewdocs/core").StorageAdapter | undefined;
-    if (storageKind === "s3") {
-      storage = createStorage("s3", {
-        s3: {
-          bucket: env("BREWDOCS_S3_BUCKET"),
-          region: env("BREWDOCS_S3_REGION"),
-          endpoint: process.env.BREWDOCS_S3_ENDPOINT,
-          accessKeyId: env("BREWDOCS_S3_ACCESS_KEY_ID"),
-          secretAccessKey: env("BREWDOCS_S3_SECRET_ACCESS_KEY"),
-          publicDomain: process.env.BREWDOCS_PUBLIC_DOMAIN,
-        },
-      });
-    }
+    const src = { root: path.resolve(process.cwd(), args.source), name: args.name ?? config.name };
+    const sub = args.name ?? config.name ?? deriveSubdomain(src);
+    const storage = buildStorage(storageKind, config);
 
     const result = await deploySite(
       src,
-      path.resolve(process.cwd(), out),
+      path.resolve(process.cwd(), args.out),
       sub,
-      { theme, dark },
+      mergeOptions(args, config),
       storage,
     );
     console.log(`🚀 Deployed -> ${result.url}`);
@@ -172,26 +216,14 @@ export async function run(argv: string[]): Promise<void> {
     );
     const port = Number(getFlag(rest, "--port") ?? "4000");
     const storageKind = getFlag(rest, "--storage") ?? "local";
-
-    let storage: import("@brewdocs/core").StorageAdapter | undefined;
-    if (storageKind === "s3") {
-      storage = createStorage("s3", {
-        s3: {
-          bucket: env("BREWDOCS_S3_BUCKET"),
-          region: env("BREWDOCS_S3_REGION"),
-          endpoint: process.env.BREWDOCS_S3_ENDPOINT,
-          accessKeyId: env("BREWDOCS_S3_ACCESS_KEY_ID"),
-          secretAccessKey: env("BREWDOCS_S3_SECRET_ACCESS_KEY"),
-          publicDomain: process.env.BREWDOCS_PUBLIC_DOMAIN,
-        },
-      });
-    }
+    const config = loadConfig(process.cwd());
+    const storage = buildStorage(storageKind, config);
 
     const server = createServer(hostingDir, storage);
     server.listen(port, () => {
       console.log(`☕ BrewDocs hosting on http://localhost:${port}`);
       console.log(`   serving sites from: ${hostingDir}`);
-      if (storage) console.log(`   storage backend: s3`); 
+      if (storage) console.log(`   storage backend: s3`);
     });
     return;
   }
@@ -226,20 +258,20 @@ function printHelp(): void {
   console.log(`BrewDocs — Brew your docs, serve them hot.
 
 Usage:
-  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>]
+  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
-  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark]
-  brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark]
+  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi]
+  brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
-  brewdocs serve [--hosting <dir>] [--port 4000]
+  brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
   brewdocs versions <source>
 
 Commands:
-  build <source>   Extract docs and write a single index.html (optionally one version)
+  build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
   build-all        Build every discovered version into <out>/<version>/ + root index
   export <source>  Static export: a fully self-contained site in <out>
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
-                  (add --storage s3 with env vars to deploy to S3/R2)
+                   (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2)
   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
   versions <src>   List available versions (git tags, or package version)
   themes           List available themes
@@ -251,6 +283,11 @@ Options:
   --dark           Force dark mode by default
   -v, --version   Build a specific version (git tag)
   -n, --name      Subdomain name for deploy
+  --multi         Emit one HTML page per exported symbol
+  -w, --watch     Rebuild on source changes (build only)
+
+Config: a brewdocs.yml or brewdocs.json in the source dir sets theme, dark,
+name, multi, and storage (local | s3) defaults. CLI flags override it.
 
 Search: press ⌘K / Ctrl+K on any generated page.
 `);

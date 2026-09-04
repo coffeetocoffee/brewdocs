@@ -55,7 +55,9 @@ npx brewdocs build ./examples/lib
 - `--dark` — force dark mode
 - `-v, --version <tag>` — build a specific version (git tag)
 - `-n, --name <sub>` — subdomain name for `deploy`
-- `--storage <local|s3>` — backend for `deploy` (see below)
+- `--storage <local|s3>` — backend for `deploy` / `serve` (see below)
+- `--multi` — emit one HTML page per exported symbol (`symbols/<name>.html`)
+- `-w, --watch` — rebuild on source changes (`build` only)
 
 ## Web drop-in (for non-devs)
 
@@ -75,6 +77,36 @@ layout:
 - **Ink** — editorial black-on-white serif
 - **Matcha** — soft green
 - **Newsprint** — minimal off-white serif
+
+## Configuration (`brewdocs.yml`)
+
+A `brewdocs.yml` (or `brewdocs.json`) in the source directory sets build defaults;
+CLI flags always override it:
+
+```yaml
+theme: ink
+dark: false
+name: mydocs
+multi: true
+storage: s3          # local (default) or s3
+s3:
+  bucket: my-bucket
+  region: auto
+  endpoint: https://<acct>.r2.cloudflarestorage.com
+```
+
+## Auto-publish your docs (GitHub Action)
+
+Add `.github/workflows/brewdocs.yml` (see the repo's own, which builds `./docs`)
+to brew your docs to GitHub Pages on every push:
+
+```yaml
+- run: npx brewdocs build ./docs --out docs-site --theme ink
+- uses: actions/upload-pages-artifact@v3
+  with: { path: docs-site }
+```
+
+Launch copy (Show HN / ProductHunt blurbs) lives in [`PITCH.md`](./PITCH.md).
 
 ## Local API
 

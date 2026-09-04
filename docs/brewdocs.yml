@@ -1,0 +1,5 @@
+theme: ink
+name: brewdocs-docs
+dark: false
+# BrewDocs reads this file (brewdocs.yml) for default build settings.
+# CLI flags always override these values.
