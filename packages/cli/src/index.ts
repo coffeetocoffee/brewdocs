@@ -218,8 +218,9 @@ export async function run(argv: string[]): Promise<void> {
     const storageKind = getFlag(rest, "--storage") ?? "local";
     const config = loadConfig(process.cwd());
     const storage = buildStorage(storageKind, config);
+    const token = process.env.BREWDOCS_TOKEN;
 
-    const server = createServer(hostingDir, storage);
+    const server = createServer(hostingDir, storage, token);
     server.listen(port, () => {
       console.log(`☕ BrewDocs hosting on http://localhost:${port}`);
       console.log(`   serving sites from: ${hostingDir}`);
@@ -264,6 +265,7 @@ Usage:
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
+               (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
   brewdocs versions <source>
 
 Commands:

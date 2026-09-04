@@ -1,0 +1,46 @@
+name: BrewDocs
+description: Brew a documentation site from a repository (README + JSDoc/TSDoc + exported symbols) into a static, themeable HTML site.
+author: coffeetocoffee
+branding:
+  icon: coffee
+  color: brown
+inputs:
+  source:
+    description: Directory to document (default ".").
+    required: false
+    default: "."
+  out:
+    description: Output directory for the built site.
+    required: false
+    default: docs-site
+  theme:
+    description: Theme name — coffee, ink, matcha, or newsprint.
+    required: false
+    default: coffee
+  dark:
+    description: Force dark mode by default.
+    required: false
+    default: "false"
+  multi:
+    description: Emit one HTML page per exported symbol.
+    required: false
+    default: "false"
+  version:
+    description: Build a specific version (git tag).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Brew docs
+      shell: bash
+      run: >
+        npx brewdocs build "${{ inputs.source }}"
+        --out "${{ inputs.out }}"
+        --theme "${{ inputs.theme }}"
+        ${{ inputs.dark == 'true' && '--dark' || '' }}
+        ${{ inputs.multi == 'true' && '--multi' || '' }}
+        ${{ inputs.version != '' && format('--version {0}', inputs.version) || '' }}

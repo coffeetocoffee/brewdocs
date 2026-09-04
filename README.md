@@ -122,6 +122,10 @@ Run `brewdocs serve --storage s3` (with the `BREWDOCS_S3_*` env vars above) to m
 the live server deploy new brews straight to object storage instead of the local
 `hosting/` folder.
 
+> **Securing the hosted server:** when `BREWDOCS_TOKEN` is set, the `/api/build`
+> and `/api/export` endpoints require `Authorization: Bearer <token>`. Set it
+> before exposing `brewdocs serve` to the network.
+
 ## Deploying to real object storage (S3 / Cloudflare R2)
 
 By default `deploy` writes to a local directory. To deploy to S3-compatible

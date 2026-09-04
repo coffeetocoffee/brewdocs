@@ -120,14 +120,26 @@ const DROPIN = path.join(__dirname, "web", "dropin.html");
 export function createServer(
   hostingDir: string,
   storage?: StorageAdapter,
+  token?: string,
 ): http.Server {
   fs.mkdirSync(hostingDir, { recursive: true });
+
+  const requireAuth = (req: http.IncomingMessage): boolean => {
+    if (!token) return true;
+    const header = req.headers["authorization"] ?? "";
+    return header === `Bearer ${token}`;
+  };
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = req.headers.host;
 
     if (url.pathname === "/api/build" && req.method === "POST") {
+      if (!requireAuth(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+
       let body = "";
       for await (const chunk of req) body += chunk;
       try {
@@ -164,6 +176,11 @@ export function createServer(
     }
 
     if (url.pathname === "/api/export" && req.method === "POST") {
+      if (!requireAuth(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+
       let body = "";
       for await (const chunk of req) body += chunk;
       let tmp: string | undefined;
