@@ -1,5 +1,9 @@
 # ☕ BrewDocs
 
+[![CI](https://github.com/coffeetocoffee/brewdocs/actions/workflows/ci.yml/badge.svg)](https://github.com/coffeetocoffee/brewdocs/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/coffeetocoffee/brewdocs)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/@brewdocs/cli)](https://www.npmjs.com/package/@brewdocs/cli)
+
 **Brew your docs, serve them hot.**
 
 Point BrewDocs at a GitHub repo or npm package and get a clean, hosted, one-page
