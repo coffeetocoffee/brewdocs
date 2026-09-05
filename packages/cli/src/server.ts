@@ -9,6 +9,7 @@ import {
   deploySite,
   deriveSubdomain,
   exportSite,
+  buildMarkdown,
   resolveInput,
   type RenderOptions,
   type Source,
@@ -473,6 +474,48 @@ export function createServer(
       return;
     }
 
+    if (url.pathname === "/api/markdown" && req.method === "POST") {
+      if (!requireAuth(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      const limited = limiter.check(clientKey(req));
+      if (!limited.ok) {
+        res
+          .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
+          .end(JSON.stringify({ error: "rate limited", retryAfter: limited.retryAfterSec }));
+        return;
+      }
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      let data: { source?: string; format?: "md" | "mdx"; name?: string };
+      try {
+        data = JSON.parse(body || "{}") as typeof data;
+      } catch {
+        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
+        return;
+      }
+      if (!data.source) {
+        res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
+        return;
+      }
+      try {
+        const out = await queue.enqueue(() => runMarkdown(data));
+        res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" }).end(out);
+      } catch (e) {
+        if (e instanceof BuildQueueFullError) {
+          res
+            .writeHead(503, { "retry-after": "5" })
+            .end(JSON.stringify({ error: "server busy, try again shortly" }));
+          return;
+        }
+        res
+          .writeHead(500)
+          .end(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }));
+      }
+      return;
+    }
+
     if (url.pathname === "/api/stats") {
       const site = url.searchParams.get("site");
       if (site) {
@@ -610,6 +653,22 @@ async function runExport(data: {
     const html = readFileSync(file, "utf8");
     const name = subdomainFor(resolved.source, data.name) ?? "site";
     return { html, name };
+  } finally {
+    resolved.cleanup();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function runMarkdown(data: {
+  source?: string;
+  format?: "md" | "mdx";
+  name?: string;
+}): Promise<string> {
+  const resolved = resolveInput(data.source!);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-md-"));
+  try {
+    const file = await buildMarkdown(resolved.source, tmp, { format: data.format ?? "md" });
+    return readFileSync(file, "utf8");
   } finally {
     resolved.cleanup();
     fs.rmSync(tmp, { recursive: true, force: true });

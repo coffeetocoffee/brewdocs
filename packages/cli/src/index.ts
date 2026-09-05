@@ -20,6 +20,7 @@ import {
   extractFromSource,
   extractVersion,
   gateDecision,
+  buildMarkdown,
   insertChangelogSection,
   loadCoverageHistory,
   postGitHubComment,
@@ -183,6 +184,12 @@ function getFlag(argv: string[], flag: string): string | undefined {
     if (argv[i].startsWith(`${flag}=`)) return argv[i].slice(flag.length + 1);
   }
   return undefined;
+}
+
+/** Resolve `--format mdx` (anything but `md`) to a Markdown dialect. */
+function markdownFormat(argv: string[]): "md" | "mdx" {
+  const f = getFlag(argv, "--format");
+  return f === "mdx" ? "mdx" : "md";
 }
 
 /** PR number from GitHub Actions env (pull_request ref or event payload). */
@@ -650,6 +657,23 @@ export async function run(argv: string[]): Promise<void> {
     try {
       const outFile = await exportSite(src, outDir, mergeOptions(args, config));
       console.log(`📦 Exported static site -> ${outFile}`);
+      if (rest.includes("--markdown")) {
+        const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
+        console.log(`📝 Exported Markdown reference -> ${md}`);
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "markdown") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    const outDir = path.resolve(process.cwd(), args.out);
+    try {
+      const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
+      console.log(`📝 Markdown reference -> ${md}`);
     } finally {
       cleanup();
     }
@@ -693,6 +717,12 @@ export async function run(argv: string[]): Promise<void> {
         console.log(
           `🔒 Private site. Access with token: ${token}\n   (?token=${token} or Authorization: Bearer ${token})`,
         );
+      }
+      if (rest.includes("--markdown")) {
+        const md = buildMarkdown(src, path.resolve(process.cwd(), args.out), {
+          format: markdownFormat(rest),
+        });
+        console.log(`📝 Markdown reference -> ${md}`);
       }
     } finally {
       cleanup();
@@ -752,9 +782,10 @@ function printHelp(): void {
 Usage:
   brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
-  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi]
+  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown]
+  brewdocs markdown <source> [--out <dir>] [--format md|mdx]
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
-                    [--org <name>] [--private [token]]
+                    [--org <name>] [--private [token]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
                (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
@@ -769,7 +800,8 @@ Usage:
 Commands:
   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
   build-all        Build every discovered version into <out>/<version>/ + root index
-  export <source>  Static export: a fully self-contained site in <out>
+  export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md)
+  markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx)
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
                     (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
                      --org <name> namespaces as <org>--<sub>; --private [token] gates reads)

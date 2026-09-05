@@ -24,6 +24,11 @@ export {
   type Visibility,
 } from "./deploy.js";
 export { buildSearchIndex, type SearchDoc } from "./search.js";
+export {
+  renderToMarkdown,
+  buildMarkdown,
+  type MarkdownOptions,
+} from "./markdown-export.js";
 export { discoverVersions, readPackageVersion } from "./versions.js";
 export {
   resolveInput,

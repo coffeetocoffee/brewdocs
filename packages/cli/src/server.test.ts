@@ -244,3 +244,23 @@ describe("Direction D — orgs, private docs, analytics", () => {
     expect(r?.subdomain).toBe("repo-user");
   });
 });
+
+describe("Markdown/MDX API", () => {
+  it("POST /api/markdown returns a Markdown reference", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mdapi-"));
+    const { server, base } = await start(hosting);
+    try {
+      const res = await fetch(`${base}/api/markdown`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: tinyRoot, format: "md" }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/markdown");
+      const text = await res.text();
+      expect(text).toContain("#");
+    } finally {
+      server.close();
+    }
+  });
+});
