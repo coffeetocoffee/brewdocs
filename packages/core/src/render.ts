@@ -17,6 +17,8 @@ export interface RenderOptions {
   versions?: VersionLink[];
   currentVersion?: string;
   multiPage?: boolean;
+  /** Docs coverage score (0–100) from `brewdocs doctor`; renders an in-page chip. */
+  score?: number;
 }
 
 function escapeHtml(input: string): string {
@@ -246,6 +248,11 @@ const STRUCTURAL_CSS = `
   header .cup { font-size: 1.7rem; }
   header h1 { margin: 0.25rem 0 0; font-size: 2.1rem; font-family: var(--heading-font); letter-spacing: -0.01em; }
   .lede { color: var(--muted); margin: 0.5rem 0 0; max-width: 60ch; }
+  .coverage-chip {
+    display: inline-block; margin-top: 0.6rem; padding: 0.2rem 0.6rem; border-radius: 999px;
+    font: 0.78rem var(--font); background: color-mix(in srgb, var(--accent) 16%, var(--card));
+    color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  }
   .theme-toggle {
     position: absolute; top: 1.25rem; right: 1.5rem; cursor: pointer;
     background: var(--card); color: var(--ink); border: 1px solid var(--line);
@@ -421,6 +428,10 @@ function pageShell(opts: {
   const desc = opts.description
     ? `<p class="lede">${escapeHtml(opts.description)}</p>`
     : "";
+  const coverChip =
+    opts.renderOptions.score !== undefined
+      ? `<span class="coverage-chip" title="Docs coverage from brewdocs doctor">🩺 ${opts.renderOptions.score}% documented</span>`
+      : "";
   return `<!doctype html>
 <html lang="en" data-theme="${initial}">
 <head>
@@ -441,8 +452,9 @@ ${searchOverlay()}
     <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
   </div>
   <div class="cup">☕</div>
-  <h1>${title}</h1>
-  ${desc}
+   <h1>${title}</h1>
+   ${desc}
+   ${coverChip}
 </header>
 <div class="layout">
   <nav class="toc"><ul>${opts.toc}</ul></nav>

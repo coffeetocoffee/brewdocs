@@ -6,6 +6,7 @@ import { extractFromSource } from "./extract.js";
 import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js";
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
+import { analyzeSymbols } from "./doctor.js";
 import type { ExtractResult, RenderModel, Source } from "./types.js";
 
 /** Build the render model (no file write). Useful for tests/snapshots. */
@@ -24,6 +25,15 @@ export function buildModel(source: Source): RenderModel {
   };
 }
 
+/** Coverage score (0–100) for the rendered header chip. */
+function coverageScore(model: RenderModel): number {
+  try {
+    return analyzeSymbols(model.title, model.symbols).score;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Orchestrate the Phase 2 pipeline:
  *   extract -> model -> render (theme) -> write index.html
@@ -36,7 +46,7 @@ export function build(
   options: RenderOptions = {},
 ): string {
   const model = buildModel(source);
-  const html = renderToHtml(model, options);
+  const html = renderToHtml(model, { ...options, score: coverageScore(model) });
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "index.html");
   fs.writeFileSync(outFile, html, "utf8");
@@ -110,7 +120,7 @@ export function buildMulti(
   options: RenderOptions = {},
 ): string[] {
   const model = buildModel(source);
-  const pages = renderToHtmlMulti(model, options);
+  const pages = renderToHtmlMulti(model, { ...options, score: coverageScore(model) });
   fs.mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
   for (const page of pages) {
@@ -256,6 +266,7 @@ export async function buildVersions(
       ...options,
       versions: links,
       currentVersion: v,
+      score: coverageScore(model),
     });
 
     const vdir = path.join(outDir, dirSafe(v));
@@ -296,6 +307,7 @@ export async function buildVersions(
       ...options,
       versions: rootLinks,
       currentVersion: latest,
+      score: coverageScore(rootModel),
     }),
     "utf8",
   );

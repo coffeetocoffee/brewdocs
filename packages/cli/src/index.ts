@@ -21,7 +21,6 @@ import {
   extractVersion,
   gateDecision,
   buildMarkdown,
-  insertChangelogSection,
   loadCoverageHistory,
   postGitHubComment,
   readAcknowledgment,
@@ -34,6 +33,7 @@ import {
   sparklineUnicode,
   versionLabel,
   writeAcknowledgment,
+  insertChangelogSection,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
@@ -41,8 +41,10 @@ import {
   type SymbolDoc,
 } from "@brewdocs/core";
 import { createServer } from "./server.js";
+import * as http from "node:http";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 import * as path from "node:path";
 
 interface BuildArgs {
@@ -680,6 +682,50 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "init") {
+    const out = getFlag(rest, "--out") ?? "brewdocs.yml";
+    const target = path.resolve(process.cwd(), out);
+    if (fs.existsSync(target)) {
+      throw new Error(`${out} already exists — remove it or use --out <file>`);
+    }
+    let name = "";
+    let desc = "";
+    try {
+      const p = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
+      if (typeof p.name === "string") name = p.name;
+      if (typeof p.description === "string") desc = p.description;
+    } catch {
+      /* not a package; leave blanks */
+    }
+    const tmpl = `# BrewDocs configuration
+# https://github.com/coffeetocoffee/brewdocs
+name: ${name}
+description: ${desc}
+theme: coffee
+dark: false
+# minCoverage: 80
+# storage: local   # local | s3
+# org: ""           # multi-tenant namespace for hosted deploys
+`;
+    fs.writeFileSync(target, tmpl, "utf8");
+    console.log(`📝 Wrote ${target}`);
+    return;
+  }
+
+  if (command === "preview") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    const config = loadConfig(src.root);
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-preview-"));
+    const files = await buildVersions(src, out, mergeOptions(args, config));
+    const port = Number(getFlag(rest, "--port") ?? "4000");
+    const server = serveStatic(out, port);
+    server.on("close", cleanup);
+    console.log(`👀 Previewing ${files.length} page(s) at http://localhost:${port}`);
+    console.log(`   (Ctrl+C to stop)`);
+    return;
+  }
+
   if (command === "deploy") {
     const args = parseBuild(rest);
     const resolved = resolveCliSource(args.source, args.name);
@@ -776,6 +822,37 @@ export async function run(argv: string[]): Promise<void> {
   process.exitCode = 1;
 }
 
+const STATIC_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".txt": "text/plain; charset=utf-8",
+  ".map": "application/json",
+};
+
+/** Minimal static file server used by `brewdocs preview`. */
+function serveStatic(dir: string, port: number): http.Server {
+  const root = path.resolve(dir);
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    let rel = decodeURIComponent(url.pathname);
+    if (rel.endsWith("/")) rel += "index.html";
+    const filePath = path.join(root, rel);
+    if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
+      return;
+    }
+    const ext = path.extname(filePath);
+    res.writeHead(200, { "content-type": STATIC_TYPES[ext] ?? "application/octet-stream" });
+    fs.createReadStream(filePath).pipe(res);
+  });
+  server.listen(port);
+  return server;
+}
+
 function printHelp(): void {
   console.log(`BrewDocs — Brew your docs, serve them hot.
 
@@ -784,6 +861,8 @@ Usage:
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
   brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown]
   brewdocs markdown <source> [--out <dir>] [--format md|mdx]
+  brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
+  brewdocs preview <source> [--port 4000]  Build and serve locally
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
                     [--org <name>] [--private [token]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
@@ -802,6 +881,8 @@ Commands:
   build-all        Build every discovered version into <out>/<version>/ + root index
   export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md)
   markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx)
+  init             Scaffold a brewdocs.yml in the current directory
+  preview <src>    Build and serve the docs locally for a quick look
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
                     (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
                      --org <name> namespaces as <org>--<sub>; --private [token] gates reads)
