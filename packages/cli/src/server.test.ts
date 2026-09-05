@@ -295,6 +295,34 @@ describe("Launchable hosting — dashboard + cache", () => {
   });
 });
 
+describe("Per-user API keys", () => {
+  it("requires a valid key once keys are configured", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-keysapi-"));
+    // Seed a key store so the server enforces auth.
+    await import("../src/keys.js").then((m) => m.addKey(hosting, { scopes: ["build"] }));
+
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const body = JSON.stringify({ source: tinyRoot });
+      const noAuth = await fetch(`${base}/api/build`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      expect(noAuth.status).toBe(401);
+
+      const admin = await fetch(`${base}/api/build`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer admin" },
+        body,
+      });
+      expect(admin.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe("Markdown/MDX API", () => {
   it("POST /api/markdown returns a Markdown reference", async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mdapi-"));

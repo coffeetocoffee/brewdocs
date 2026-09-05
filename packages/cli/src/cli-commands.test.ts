@@ -31,4 +31,15 @@ describe("Authoring DX commands", () => {
     await run(["init"]);
     await expect(run(["init"])).rejects.toThrow(/already exists/);
   });
+
+  it("brewdocs keys add/list/revoke manages the key store", async () => {
+    await run(["keys", "add", "--hosting", tmp, "--label", "ci"]);
+    const file = path.join(tmp, ".keys.json");
+    expect(fs.existsSync(file)).toBe(true);
+    await run(["keys", "list", "--hosting", tmp]);
+    // revoke by reading the hash from the store
+    const keys = JSON.parse(fs.readFileSync(file, "utf8"));
+    await run(["keys", "revoke", keys[0].hash, "--hosting", tmp]);
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toHaveLength(0);
+  });
 });

@@ -41,6 +41,7 @@ import {
   type SymbolDoc,
 } from "@brewdocs/core";
 import { createServer } from "./server.js";
+import { addKey, listKeys, revokeKey, ALL_SCOPES, type ApiKeyRecord } from "./keys.js";
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
@@ -817,6 +818,37 @@ dark: false
     return;
   }
 
+  if (command === "keys") {
+    const sub = rest[0];
+    const hosting = path.resolve(process.cwd(), getFlag(rest, "--hosting") ?? "./hosting");
+    if (sub === "add") {
+      const scopeFlag = getFlag(rest, "--scope");
+      const scopes = scopeFlag
+        ? scopeFlag.split(",").map((s) => s.trim()).filter(Boolean)
+        : [...ALL_SCOPES];
+      const { key } = addKey(hosting, { scopes, label: getFlag(rest, "--label") });
+      console.log(`🔑 ${key}`);
+      console.log(`   scopes: ${scopes.join(", ")}  (stored in ${hosting}/.keys.json)`);
+    } else if (sub === "list") {
+      const keys = listKeys(hosting);
+      if (!keys.length) {
+        console.log(`No API keys in ${hosting}/.keys.json`);
+      } else {
+        for (const k of keys) {
+          console.log(`- ${k.hash.slice(0, 12)}…  scopes=${k.scopes.join(",")}  sites=${k.ownedSites.length}${k.label ? `  (${k.label})` : ""}`);
+        }
+      }
+    } else if (sub === "revoke") {
+      const target = rest[1];
+      if (!target) throw new Error("usage: brewdocs keys revoke <key-or-hash>");
+      const ok = revokeKey(hosting, target);
+      console.log(ok ? "🔥 revoked" : "key not found");
+    } else {
+      throw new Error("usage: brewdocs keys add|list|revoke");
+    }
+    return;
+  }
+
   console.error(`Unknown command: ${command}`);
   printHelp();
   process.exitCode = 1;
@@ -867,7 +899,8 @@ Usage:
                     [--org <name>] [--private [token]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
-               (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
+                (set BREWDOCS_TOKEN, or add keys via 'brewdocs keys', to require auth)
+  brewdocs keys add|list|revoke [--hosting <dir>] [--scope build,export] [--label <n>]
   brewdocs versions <source>
   brewdocs doctor <source> [--json] [--badge <file.svg>] [--min-coverage <pct>]
                   [--record] [--trend-svg <file.svg>]
@@ -898,6 +931,7 @@ Commands:
   gate <src>       Release gate: fail on breaking changes unless a migration
                    guide is generated (--out) or acknowledged (--acknowledge)
   themes           List available themes
+  keys             Manage per-user API keys (add / list / revoke)
   help             Show this help
 
 Options:

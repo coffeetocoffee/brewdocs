@@ -17,6 +17,7 @@ import {
   type Visibility,
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
+import { loadKeys, validateKey } from "./keys.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -328,6 +329,8 @@ export function createServer(
     numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
   );
   const stats = new StatsStore(path.join(hostingDir, ".analytics.json"));
+  // Require credentials only once *some* auth is configured (admin token or keys).
+  const needsAuth = Boolean(token) || loadKeys(hostingDir).length > 0;
 
   const requireAuth = (req: http.IncomingMessage): boolean => {
     if (!token) return true;
@@ -335,12 +338,22 @@ export function createServer(
     return header === `Bearer ${token}`;
   };
 
+  // Write endpoints: admin token OR a valid per-user API key. Unlike requireAuth,
+  // an absent admin token does NOT open the door when keys are configured.
+  const authenticate = (req: http.IncomingMessage): boolean => {
+    if (!needsAuth) return true;
+    const header = req.headers["authorization"] ?? "";
+    if (token && header === `Bearer ${token}`) return true;
+    const presented = header.replace(/^Bearer\s+/i, "");
+    return validateKey(hostingDir, presented) !== null;
+  };
+
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = req.headers.host;
 
     if (url.pathname === "/api/build" && req.method === "POST") {
-      if (!requireAuth(req)) {
+      if (!authenticate(req)) {
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
@@ -406,7 +419,7 @@ export function createServer(
     }
 
     if (url.pathname === "/api/export" && req.method === "POST") {
-      if (!requireAuth(req)) {
+      if (!authenticate(req)) {
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
@@ -475,7 +488,7 @@ export function createServer(
     }
 
     if (url.pathname === "/api/markdown" && req.method === "POST") {
-      if (!requireAuth(req)) {
+      if (!authenticate(req)) {
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
