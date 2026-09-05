@@ -1,9 +1,11 @@
 import * as http from "node:http";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  combineSubdomain,
   deploySite,
   deriveSubdomain,
   exportSite,
@@ -11,6 +13,7 @@ import {
   type RenderOptions,
   type Source,
   type StorageAdapter,
+  type Visibility,
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
 
@@ -24,6 +27,68 @@ const TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8",
 };
+
+interface SiteManifest {
+  subdomain: string;
+  org?: string;
+  visibility?: Visibility;
+  tokenHash?: string;
+  url?: string;
+  title?: string;
+  generatedAt?: string;
+  pages?: number;
+}
+
+interface SiteStats {
+  views: number;
+  builds: number;
+  lastViewed?: string;
+  lastBuild?: string;
+}
+
+/** Per-site pageview/build counters, persisted next to the hosting dir. */
+class StatsStore {
+  private data = new Map<string, SiteStats>();
+  constructor(private file: string) {
+    this.load();
+  }
+  private load(): void {
+    try {
+      const raw = JSON.parse(readFileSync(this.file, "utf8")) as Record<
+        string,
+        SiteStats
+      >;
+      for (const [k, v] of Object.entries(raw)) this.data.set(k, v);
+    } catch {
+      /* fresh store */
+    }
+  }
+  private save(): void {
+    try {
+      fs.writeFileSync(this.file, JSON.stringify(Object.fromEntries(this.data)), "utf8");
+    } catch {
+      /* best-effort */
+    }
+  }
+  recordBuild(sub: string): void {
+    const s = this.data.get(sub) ?? { views: 0, builds: 0 };
+    s.builds++;
+    s.lastBuild = new Date().toISOString();
+    this.data.set(sub, s);
+    this.save();
+  }
+  recordView(sub: string): void {
+    const s = this.data.get(sub) ?? { views: 0, builds: 0 };
+    s.views++;
+    s.lastViewed = new Date().toISOString();
+    this.data.set(sub, s);
+    this.save();
+  }
+  get(sub?: string): SiteStats | Record<string, SiteStats> {
+    if (sub) return this.data.get(sub) ?? { views: 0, builds: 0 };
+    return Object.fromEntries(this.data);
+  }
+}
 
 export interface ServeOptions {
   hostingDir: string;
@@ -135,9 +200,42 @@ function packageName(root: string): string | undefined {
   return undefined;
 }
 
-function subdomainFor(resolved: Source, requested?: string): string {
-  const base = requested ?? packageName(resolved.root) ?? resolved.name;
-  return deriveSubdomain({ root: resolved.root, name: base });
+function subdomainFor(resolved: Source, requested?: string, org?: string): string {
+  const isGithub = /github\.com/i.test(resolved.name ?? "");
+  const base = requested ?? (isGithub ? resolved.name : packageName(resolved.root) ?? resolved.name);
+  return combineSubdomain(org, deriveSubdomain({ root: resolved.root, name: base }));
+}
+
+function readManifest(
+  hostingDir: string,
+  subdomain: string,
+): SiteManifest | undefined {
+  try {
+    return JSON.parse(
+      readFileSync(path.join(hostingDir, subdomain, ".brewdocs.json"), "utf8"),
+    ) as SiteManifest;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Does the request prove access to a private site (or hold the admin token)? */
+function requireSiteAccess(
+  req: http.IncomingMessage,
+  tokenHash: string | undefined,
+  adminToken: string | undefined,
+): boolean {
+  if (!tokenHash) return true;
+  if (adminToken && req.headers["authorization"] === `Bearer ${adminToken}`) {
+    return true;
+  }
+  const provided =
+    req.headers["authorization"]?.replace(/^Bearer\s+/i, "") ??
+    new URL(req.url ?? "/", "http://localhost").searchParams.get("token") ??
+    "";
+  if (!provided) return false;
+  const hash = crypto.createHash("sha256").update(provided).digest("hex");
+  return hash === tokenHash;
 }
 
 /**
@@ -172,20 +270,22 @@ export function resolveSite(
   return { subdomain: sub, filePath };
 }
 
-function listSites(hostingDir: string): Array<{ subdomain: string; url: string; title?: string }> {
+function listSites(
+  hostingDir: string,
+): Array<{ subdomain: string; url: string; title?: string; org?: string; visibility?: Visibility }> {
   try {
     return fs
       .readdirSync(hostingDir)
       .filter((d) => fs.existsSync(path.join(hostingDir, d, "index.html")))
       .map((d) => {
-        const manifestPath = path.join(hostingDir, d, ".brewdocs.json");
-        let title: string | undefined;
-        try {
-          title = JSON.parse(readFileSync(manifestPath, "utf8")).title;
-        } catch {
-          /* ignore */
-        }
-        return { subdomain: d, url: `https://${d}.brewdocs.dev`, title };
+        const manifest = readManifest(hostingDir, d);
+        return {
+          subdomain: d,
+          url: `https://${d}.brewdocs.dev`,
+          title: manifest?.title,
+          org: manifest?.org,
+          visibility: manifest?.visibility ?? "public",
+        };
       });
   } catch {
     return [];
@@ -226,6 +326,7 @@ export function createServer(
     numOption(protection?.maxConcurrentBuilds, process.env.BREWDOCS_MAX_BUILDS, 2),
     numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
   );
+  const stats = new StatsStore(path.join(hostingDir, ".analytics.json"));
 
   const requireAuth = (req: http.IncomingMessage): boolean => {
     if (!token) return true;
@@ -262,6 +363,9 @@ export function createServer(
         name?: string;
         theme?: string;
         dark?: boolean;
+        org?: string;
+        visibility?: Visibility;
+        token?: string;
       };
       try {
         data = JSON.parse(body || "{}") as typeof data;
@@ -278,6 +382,7 @@ export function createServer(
         const result = await queue.enqueue(() =>
           runBuild(data, hostingDir, storage),
         );
+        stats.recordBuild(result.subdomain);
         res
           .writeHead(200, { "content-type": TYPES[".json"] })
           .end(JSON.stringify(result));
@@ -368,6 +473,34 @@ export function createServer(
       return;
     }
 
+    if (url.pathname === "/api/stats") {
+      const site = url.searchParams.get("site");
+      if (site) {
+        const manifest = readManifest(hostingDir, site);
+        if (
+          manifest?.visibility === "private" &&
+          !requireSiteAccess(req, manifest.tokenHash, token)
+        ) {
+          res
+            .writeHead(401, { "content-type": TYPES[".json"] })
+            .end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        res
+          .writeHead(200, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify(stats.get(site)));
+        return;
+      }
+      if (!requireAuth(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      res
+        .writeHead(200, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify(stats.get()));
+      return;
+    }
+
     if (url.pathname === "/" || url.pathname === "/index.html") {
       try {
         const html = readFileSync(DROPIN, "utf8");
@@ -385,20 +518,63 @@ export function createServer(
       res.writeHead(404, { "content-type": TYPES[".txt"] }).end("Not found");
       return;
     }
+
+    const manifest = readManifest(hostingDir, site.subdomain);
+    if (
+      manifest?.visibility === "private" &&
+      !requireSiteAccess(req, manifest.tokenHash, token)
+    ) {
+      res
+        .writeHead(401, { "content-type": TYPES[".txt"] })
+        .end(
+          "Private site — provide ?token=<access> or Authorization: Bearer <access>",
+        );
+      return;
+    }
+
     const ext = path.extname(site.filePath);
     res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
-    fs.createReadStream(site.filePath).pipe(res);
+
+    if (ext === ".html") {
+      let html = readFileSync(site.filePath, "utf8");
+      // Only public sites get the live views chip (avoids leaking private counts).
+      if (manifest?.visibility !== "private") {
+        html = injectViewsChip(html, site.subdomain);
+        stats.recordView(site.subdomain);
+      }
+      res.end(html);
+    } else {
+      fs.createReadStream(site.filePath).pipe(res);
+    }
   });
 }
 
+/** Append a tiny self-updating views chip to a served page (public sites only). */
+function injectViewsChip(html: string, subdomain: string): string {
+  const safe = encodeURIComponent(subdomain).replace(/'/g, "%27");
+  const chip = `<div id="brewdocs-views" title="Page views" style="position:fixed;bottom:12px;right:12px;z-index:9999;font:12px system-ui,sans-serif;background:#2b2118;color:#f6efe2;padding:4px 10px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25)">👁 …</div><script>
+(function(){var s=document.getElementById('brewdocs-views');fetch('/api/stats?site=${safe}').then(function(r){return r.json();}).then(function(d){if(s)s.textContent='👁 '+(d.views||0)+' views';}).catch(function(){if(s)s.remove();});})();
+</script>`;
+  if (html.includes("</body>")) return html.replace("</body>", `${chip}</body>`);
+  return html + chip;
+}
+
 async function runBuild(
-  data: { source?: string; name?: string; theme?: string; dark?: boolean },
+  data: {
+    source?: string;
+    name?: string;
+    theme?: string;
+    dark?: boolean;
+    org?: string;
+    visibility?: Visibility;
+    token?: string;
+  },
   hostingDir: string,
   storage?: StorageAdapter,
 ): Promise<{ url: string; subdomain: string }> {
   const resolved = resolveInput(data.source!);
   try {
-    const sub = subdomainFor(resolved.source, data.name);
+    const sub = subdomainFor(resolved.source, data.name, data.org);
     const opts: RenderOptions = { theme: data.theme, dark: !!data.dark };
     const result = await deploySite(
       resolved.source,
@@ -406,6 +582,11 @@ async function runBuild(
       sub,
       opts,
       storage,
+      {
+        org: data.org,
+        visibility: data.visibility,
+        token: data.token,
+      },
     );
     return { url: result.url, subdomain: sub };
   } finally {

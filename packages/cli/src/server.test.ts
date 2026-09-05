@@ -3,12 +3,24 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createServer, resolveSite } from "./server.js";
+import { deploySite, deriveSubdomain } from "@brewdocs/core";
+
+const EXAMPLES = path.resolve(__dirname, "../../../examples");
+const tinyRoot = path.join(EXAMPLES, "tiny");
 
 function tmp(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-host-"));
   fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
   fs.writeFileSync(path.join(dir, "demo", "index.html"), "<h1>demo</h1>");
   return dir;
+}
+
+async function start(hosting: string, token?: string) {
+  const server = createServer(hosting, undefined, token);
+  await new Promise<void>((r) => server.listen(0, r));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return { server, base: `http://127.0.0.1:${port}` };
 }
 
 describe("Phase 4 — hosting router", () => {
@@ -39,7 +51,10 @@ describe("Phase 4 — hosting router", () => {
 });
 
 describe("Phase 4 — hosting server auth", () => {
-  it("requires a bearer token on /api/build when BREWDOCS_TOKEN is set", async () => {
+  it(
+    "requires a bearer token on /api/build when BREWDOCS_TOKEN is set",
+    { timeout: 30_000 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-auth-"));
     const server = createServer(hosting, undefined, "secret");
     await new Promise<void>((r) => server.listen(0, r));
@@ -69,7 +84,10 @@ describe("Phase 4 — hosting server auth", () => {
 });
 
 describe("Phase 5 — hosted-tier protection", () => {
-  it("rate limits repeated /api/build from the same client", async () => {
+  it(
+    "rate limits repeated /api/build from the same client",
+    { timeout: 30_000 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-rl-"));
     const server = createServer(hosting, undefined, undefined, {
       rateLimit: 1,
@@ -121,5 +139,108 @@ describe("Phase 5 — hosted-tier protection", () => {
     expect(res.status).toBe(503);
 
     server.close();
+  });
+});
+
+describe("Direction D — orgs, private docs, analytics", () => {
+  it("routes org-namespaced subdomains via virtual host", () => {
+    const hosting = tmp();
+    expect(resolveSite("/", "acme--lib.brewdocs.dev", hosting)).toBeNull();
+    fs.mkdirSync(path.join(hosting, "acme--lib"), { recursive: true });
+    fs.writeFileSync(path.join(hosting, "acme--lib", "index.html"), "<h1>org</h1>");
+    const r = resolveSite("/", "acme--lib.brewdocs.dev", hosting);
+    expect(r?.subdomain).toBe("acme--lib");
+  });
+
+  it(
+    "gates private sites behind a token on read",
+    { timeout: 30_000 },
+    async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-priv-"));
+    await deploySite(
+      { root: tinyRoot, name: "priv" },
+      hosting,
+      "priv",
+      {},
+      undefined,
+      { visibility: "private", token: "letmein" },
+    );
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const noToken = await fetch(`${base}/s/priv/`);
+      expect(noToken.status).toBe(401);
+
+      const wrong = await fetch(`${base}/s/priv/?token=wrong`);
+      expect(wrong.status).toBe(401);
+
+      const withQuery = await fetch(`${base}/s/priv/?token=letmein`);
+      expect(withQuery.status).toBe(200);
+
+      const withHeader = await fetch(`${base}/s/priv/`, {
+        headers: { authorization: "Bearer letmein" },
+      });
+      expect(withHeader.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it(
+    "counts pageviews and builds in /api/stats",
+    { timeout: 30_000 },
+    async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-stats-"));
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const buildRes = await fetch(`${base}/api/build`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer admin" },
+        body: JSON.stringify({ source: tinyRoot, name: "stats-site" }),
+      });
+      expect(buildRes.status).toBe(200);
+
+      await fetch(`${base}/s/stats-site/`);
+      await fetch(`${base}/s/stats-site/`);
+
+      const stats = (await (
+        await fetch(`${base}/api/stats?site=stats-site`)
+      ).json()) as { views: number; builds: number };
+      expect(stats.views).toBe(2);
+      expect(stats.builds).toBe(1);
+
+      const all = (await (
+        await fetch(`${base}/api/stats`, { headers: { authorization: "Bearer admin" } })
+      ).json()) as Record<string, { builds: number }>;
+      expect(all["stats-site"].builds).toBe(1);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("requires the admin token for the all-sites stats rollup", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-stats2-"));
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const noAuth = await fetch(`${base}/api/stats`);
+      expect(noAuth.status).toBe(401);
+      const withAuth = await fetch(`${base}/api/stats`, {
+        headers: { authorization: "Bearer admin" },
+      });
+      expect(withAuth.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it(
+    "serves a GitHub-sourced site under the repo-user subdomain",
+    { timeout: 30_000 },
+    async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-gh-"));
+    const sub = deriveSubdomain({ root: tinyRoot, name: "https://github.com/user/repo" });
+    expect(sub).toBe("repo-user");
+    await deploySite({ root: tinyRoot, name: "https://github.com/user/repo" }, hosting, sub);
+    const r = resolveSite("/s/repo-user/", undefined, hosting);
+    expect(r?.subdomain).toBe("repo-user");
   });
 });

@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { deploySite, deriveSubdomain, exportSite } from "./deploy.js";
+import {
+  combineSubdomain,
+  deploySite,
+  deriveSubdomain,
+  exportSite,
+} from "./deploy.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");
@@ -17,6 +22,21 @@ describe("Phase 4 — deploy", () => {
       "scope-my-lib",
     );
     expect(deriveSubdomain({ root: "/x/my-package" })).toBe("my-package");
+  });
+
+  it("collapses a GitHub URL into the repo-user form", () => {
+    expect(
+      deriveSubdomain({ root: "/x", name: "https://github.com/user/repo" }),
+    ).toBe("repo-user");
+    expect(
+      deriveSubdomain({ root: "/x", name: "https://github.com/acme/my-tool.git" }),
+    ).toBe("my-tool-acme");
+  });
+
+  it("combines an org namespace with the subdomain", () => {
+    expect(combineSubdomain("acme", "my-lib")).toBe("acme--my-lib");
+    expect(combineSubdomain(undefined, "my-lib")).toBe("my-lib");
+    expect(combineSubdomain("Acme Corp", "My Lib!")).toBe("acme-corp--my-lib");
   });
 
   it("exportSite writes a self-contained index.html", async () => {
@@ -42,5 +62,26 @@ describe("Phase 4 — deploy", () => {
     );
     expect(manifest.subdomain).toBe("mylib");
     expect(manifest.url).toBe("https://mylib.brewdocs.dev");
+  });
+
+  it("deploySite records org + private visibility and hashes the token", async () => {
+    const hosting = tmp();
+    const result = await deploySite(
+      { root: libRoot, name: "lib" },
+      hosting,
+      "acme--mylib",
+      {},
+      undefined,
+      { org: "acme", visibility: "private", token: "s3cret" },
+    );
+    expect(result.visibility).toBe("private");
+    expect(result.org).toBe("acme");
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(hosting, "acme--mylib", ".brewdocs.json"), "utf8"),
+    );
+    expect(manifest.visibility).toBe("private");
+    expect(manifest.org).toBe("acme");
+    expect(manifest.tokenHash).toBeTruthy();
+    expect(manifest.tokenHash).not.toBe("s3cret");
   });
 });

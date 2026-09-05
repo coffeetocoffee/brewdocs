@@ -7,6 +7,10 @@ export interface BrewDocsConfig {
   name?: string;
   multi?: boolean;
   storage?: "local" | "s3";
+  /** Org namespace for hosted (multi-tenant) deploys. */
+  org?: string;
+  /** Deploy as a private (token-gated) site. */
+  private?: boolean;
   /** `brewdocs doctor` fails (exit 1) when coverage drops below this. */
   minCoverage?: number;
   s3?: {

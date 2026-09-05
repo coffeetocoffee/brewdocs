@@ -7,6 +7,7 @@ import {
   createStorage,
   deploySite,
   deriveSubdomain,
+  combineSubdomain,
   discoverVersions,
   exportSite,
   listThemes,
@@ -40,6 +41,7 @@ import {
 } from "@brewdocs/core";
 import { createServer } from "./server.js";
 import * as fs from "node:fs";
+import * as crypto from "node:crypto";
 import * as path from "node:path";
 
 interface BuildArgs {
@@ -660,7 +662,21 @@ export async function run(argv: string[]): Promise<void> {
     const { src, cleanup } = resolved;
     const config = loadConfig(src.root);
     const storageKind = getFlag(rest, "--storage") ?? "local";
-    const sub = args.name ?? config.name ?? resolved.name ?? deriveSubdomain(src);
+    const org = getFlag(rest, "--org") ?? config.org;
+    const privateFlag = rest.includes("--private") || rest.some((a) => a.startsWith("--private"));
+    const privateValue = getFlag(rest, "--private");
+    const visibility =
+      privateFlag || config.private ? "private" : "public";
+    // --private without a value auto-generates a token; with a value, use it.
+    const token =
+      privateFlag && privateValue && !privateValue.startsWith("-")
+        ? privateValue
+        : privateFlag
+          ? crypto.randomBytes(16).toString("hex")
+          : undefined;
+    const baseSub =
+      args.name ?? config.name ?? resolved.name ?? deriveSubdomain(src);
+    const sub = org ? combineSubdomain(org, baseSub) : baseSub;
     const storage = buildStorage(storageKind, config);
 
     try {
@@ -670,8 +686,14 @@ export async function run(argv: string[]): Promise<void> {
         sub,
         mergeOptions(args, config),
         storage,
+        { org, visibility, token },
       );
       console.log(`🚀 Deployed -> ${result.url}`);
+      if (result.visibility === "private") {
+        console.log(
+          `🔒 Private site. Access with token: ${token}\n   (?token=${token} or Authorization: Bearer ${token})`,
+        );
+      }
     } finally {
       cleanup();
     }
@@ -732,6 +754,7 @@ Usage:
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
   brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi]
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
+                    [--org <name>] [--private [token]]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
                (set BREWDOCS_TOKEN to require auth on /api/build and /api/export)
@@ -748,7 +771,8 @@ Commands:
   build-all        Build every discovered version into <out>/<version>/ + root index
   export <source>  Static export: a fully self-contained site in <out>
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
-                   (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2)
+                    (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
+                     --org <name> namespaces as <org>--<sub>; --private [token] gates reads)
   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
   versions <src>   List available versions (git tags, or package version)
   doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate,

@@ -18,7 +18,10 @@ export {
   exportSite,
   deploySite,
   deriveSubdomain,
+  combineSubdomain,
   type DeployResult,
+  type DeploySiteOptions,
+  type Visibility,
 } from "./deploy.js";
 export { buildSearchIndex, type SearchDoc } from "./search.js";
 export { discoverVersions, readPackageVersion } from "./versions.js";
