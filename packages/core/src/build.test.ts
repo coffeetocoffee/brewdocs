@@ -35,4 +35,14 @@ describe("BrewDocs build (Phase 0)", () => {
     expect(html).toContain("coverage-chip");
     expect(html).toMatch(/documented/);
   });
+
+  it("emits accessible markup (skip link, labelled nav, labelled search)", () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-"));
+    const outFile = build({ root: TINY }, out);
+    const html = fs.readFileSync(outFile, "utf8");
+    expect(html).toContain('class="skip-link"');
+    expect(html).toContain('id="main-content"');
+    expect(html).toContain('aria-label="Table of contents"');
+    expect(html).toContain('aria-label="Search documentation"');
+  });
 });

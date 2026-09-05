@@ -35,6 +35,24 @@ function slug(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Per-version search-index cache. Building the index is O(symbols) and the
+ * latest version's model is rendered twice (its own page + the root index),
+ * so memoizing by model identity avoids rebuilding it. ROADMAP Phase 3 open
+ * item: "cache index per version to avoid rebuilds".
+ */
+const searchIndexCache = new WeakMap<RenderModel, string>();
+function searchIndexJson(model: RenderModel, multiPage: boolean): string {
+  const cached = searchIndexCache.get(model);
+  if (cached) return cached;
+  const json = JSON.stringify(buildSearchIndex(model, multiPage)).replace(
+    /</g,
+    "\\u003c",
+  );
+  searchIndexCache.set(model, json);
+  return json;
+}
+
 /** Exported symbol name -> link target on the current page layout. */
 type SymbolLinks = Map<string, string>;
 
@@ -327,13 +345,25 @@ const STRUCTURAL_CSS = `
   .empty-state { padding: 2rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
   footer a { color: var(--accent); }
   @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } nav.toc { display: none; } header { position: relative; } }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  html { scroll-behavior: smooth; }
+  main p, main li { text-wrap: pretty; }
+  main h2, main h3, main h4 { text-wrap: balance; scroll-margin-top: 1rem; }
+  .skip-link {
+    position: absolute; left: -999px; top: 0; background: var(--accent); color: #fff;
+    padding: 0.5rem 0.9rem; border-radius: 0 0 8px 0; z-index: 50;
+  }
+  .skip-link:focus { left: 0; }
+  nav.toc { font-size: 0.92rem; }
+  nav.toc a { color: var(--muted); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
 `;
 
 function searchOverlay(): string {
   return `
 <div class="search-overlay" id="search-overlay" hidden>
   <div class="search-box" role="dialog" aria-label="Search">
-    <input id="search-input" type="text" placeholder="Search docs…  (⌘K / Ctrl+K)" autocomplete="off" />
+    <input id="search-input" type="text" placeholder="Search docs…  (⌘K / Ctrl+K)" autocomplete="off" aria-label="Search documentation" />
     <ul id="search-results"></ul>
   </div>
 </div>`;
@@ -443,9 +473,10 @@ ${themeVars(theme)}
 ${STRUCTURAL_CSS}
 </style>
 </head>
-<body>
-${searchOverlay()}
-<header>
+ <body>
+ <a class="skip-link" href="#main-content">Skip to content</a>
+ ${searchOverlay()}
+ <header>
   <div class="header-actions">
     <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
     ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion)}
@@ -456,12 +487,12 @@ ${searchOverlay()}
    ${desc}
    ${coverChip}
 </header>
-<div class="layout">
-  <nav class="toc"><ul>${opts.toc}</ul></nav>
-  <main>
-    ${opts.main}
-  </main>
-</div>
+ <div class="layout">
+   <nav class="toc" aria-label="Table of contents"><ul>${opts.toc}</ul></nav>
+   <main id="main-content">
+     ${opts.main}
+   </main>
+ </div>
 <footer>Brewed with <a href="#">BrewDocs</a> — Brew your docs, serve them hot.</footer>
 <script id="search-index" type="application/json">${opts.indexJson}</script>
 <script>
@@ -485,8 +516,7 @@ ${SEARCH_JS}
 
 /** Render the model into a complete, standalone, themeable HTML document. */
 export function renderToHtml(model: RenderModel, options: RenderOptions = {}): string {
-  const index = buildSearchIndex(model, Boolean(options.multiPage));
-  const indexJson = JSON.stringify(index).replace(/</g, "\\u003c");
+  const indexJson = searchIndexJson(model, Boolean(options.multiPage));
   const desc = model.description ?? "";
   const links = symbolLinks(model, (name) => `#symbol-${slug(name)}`);
 
@@ -551,8 +581,7 @@ export function renderToHtmlMulti(
   model: RenderModel,
   options: RenderOptions = {},
 ): RenderedPage[] {
-  const index = buildSearchIndex(model, true);
-  const indexJson = JSON.stringify(index).replace(/</g, "\\u003c");
+  const indexJson = searchIndexJson(model, true);
   const desc = model.description ?? "";
 
   const symbolSlug = (name: string) => `symbols/${slug(name)}.html`;
