@@ -245,6 +245,56 @@ describe("Direction D — orgs, private docs, analytics", () => {
   });
 });
 
+describe("Launchable hosting — dashboard + cache", () => {
+  it("serves an owner dashboard for a deployed site", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-dash-"));
+    await deploySite({ root: tinyRoot, name: "dash" }, hosting, "dash");
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const res = await fetch(`${base}/dashboard?site=dash`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("page views");
+      expect(html).toContain("dash.brewdocs.dev");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("gates a private site's dashboard behind its token", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-dashp-"));
+    await deploySite(
+      { root: tinyRoot, name: "dashp" },
+      hosting,
+      "dashp",
+      {},
+      undefined,
+      { visibility: "private", token: "owner" },
+    );
+    const { server, base } = await start(hosting, "admin");
+    try {
+      const noToken = await fetch(`${base}/dashboard?site=dashp`);
+      expect(noToken.status).toBe(401);
+      const ok = await fetch(`${base}/dashboard?site=dashp&token=owner`);
+      expect(ok.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("sets no-cache on HTML and cache on assets", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-cache-"));
+    await deploySite({ root: tinyRoot, name: "cache" }, hosting, "cache");
+    const { server, base } = await start(hosting);
+    try {
+      const html = await fetch(`${base}/s/cache/`);
+      expect(html.headers.get("cache-control")).toContain("no-cache");
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe("Markdown/MDX API", () => {
   it("POST /api/markdown returns a Markdown reference", async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mdapi-"));

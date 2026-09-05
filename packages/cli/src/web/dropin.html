@@ -36,6 +36,18 @@
     border: none; border-radius: 10px; background: var(--accent); color: #fff;
   }
   .brew-box button:disabled { opacity: 0.6; cursor: default; }
+  details.opts {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 0.25rem 1.25rem; margin-top: 0.75rem;
+  }
+  details.opts summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
+  .opts-grid { display: grid; gap: 0.75rem; padding: 0.5rem 0 1rem; }
+  .opts-grid label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+  .opts-grid input[type="text"] {
+    padding: 0.55rem 0.7rem; font: inherit; border: 1px solid var(--line);
+    border-radius: 8px; background: #fff; color: var(--ink);
+  }
+  .opts-grid .row { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--ink); }
   .hint { color: var(--muted); font-size: 0.85rem; margin: 0.6rem 0 0; }
   .hint code { background: #f0e7d8; padding: 0.05rem 0.35rem; border-radius: 4px; }
   #status { margin-top: 1rem; min-height: 1.2rem; }
@@ -49,7 +61,7 @@
     border-bottom: 1px solid var(--line);
   }
   .result-head .url { font-weight: 600; color: var(--accent); word-break: break-all; }
-  .result-head .actions { margin-left: auto; display: flex; gap: 0.5rem; }
+  .result-head .actions { margin-left: auto; display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .result-head .actions button, .result-head .actions a {
     font: inherit; font-size: 0.85rem; text-decoration: none; cursor: pointer;
     border: 1px solid var(--line); background: #fff; color: var(--ink);
@@ -58,6 +70,11 @@
   .result-head .actions a.primary, .result-head .actions button.primary {
     background: var(--accent); color: #fff; border-color: var(--accent);
   }
+  .token-box {
+    margin: 0 1.1rem 1rem; padding: 0.7rem 0.9rem; border: 1px dashed var(--accent);
+    border-radius: 10px; background: #fff; font-size: 0.85rem;
+  }
+  .token-box code { user-select: all; font-weight: 600; color: var(--accent); }
   iframe { width: 100%; height: 60vh; border: 0; background: #fff; }
   .sites { margin-top: 2.5rem; }
   .sites h2 { font-family: Georgia, serif; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
@@ -85,6 +102,17 @@
            value="./examples/lib" />
     <button id="brew">Brew 🍵</button>
   </div>
+  <details class="opts">
+    <summary>Options (org, privacy)</summary>
+    <div class="opts-grid">
+      <label>Org namespace (multi-tenant)
+        <input id="org" type="text" placeholder="acme" autocomplete="off" />
+      </label>
+      <label class="row">
+        <input id="private" type="checkbox" /> Make this site private (token-gated)
+      </label>
+    </div>
+  </details>
   <p class="hint">
     Try a local example like <code>./examples/lib</code>, an npm name like <code>left-pad</code>,
     or a GitHub URL. Devs can also use the CLI: <code>brewdocs build &lt;src&gt;</code>.
@@ -96,9 +124,14 @@
       <span class="url" id="result-url"></span>
       <span class="actions">
         <a id="open-link" target="_blank" rel="noopener">Open ↗</a>
+        <a id="stats-link" target="_blank" rel="noopener">📊 Stats</a>
         <button id="export-btn">Export HTML</button>
         <button id="redeploy-btn">Re-brew</button>
       </span>
+    </div>
+    <div id="token-box" class="token-box" hidden>
+      🔒 Private site. Access token: <code id="token-value"></code>
+      <br />Append <code>?token=…</code> or use <code>Authorization: Bearer</code>.
     </div>
     <iframe id="preview" title="Doc preview"></iframe>
   </div>
@@ -112,12 +145,17 @@
 
 <script>
   var urlInput = document.getElementById("url");
+  var orgInput = document.getElementById("org");
+  var privateBox = document.getElementById("private");
   var brewBtn = document.getElementById("brew");
   var statusEl = document.getElementById("status");
   var resultEl = document.getElementById("result");
   var resultUrl = document.getElementById("result-url");
   var openLink = document.getElementById("open-link");
+  var statsLink = document.getElementById("stats-link");
   var preview = document.getElementById("preview");
+  var tokenBox = document.getElementById("token-box");
+  var tokenValue = document.getElementById("token-value");
   var exportBtn = document.getElementById("export-btn");
   var redeployBtn = document.getElementById("redeploy-btn");
   var sitesList = document.getElementById("sites-list");
@@ -125,6 +163,12 @@
   function setStatus(msg, isError) {
     statusEl.textContent = msg || "";
     statusEl.className = isError ? "error" : "";
+  }
+
+  function randToken() {
+    var b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b, function (x) { return x.toString(16).padStart(2, "0"); }).join("");
   }
 
   function refreshSites() {
@@ -136,7 +180,7 @@
       sitesList.innerHTML = sites.map(function (s) {
         return '<li><a href="/s/' + s.subdomain + '/"><span class="sub">' +
           s.subdomain + '.brewdocs.dev</span><span>' +
-          (s.title ? s.title : "") + '</span></a></li>';
+          (s.title ? s.title : "") + (s.visibility === "private" ? " 🔒" : "") + '</span></a></li>';
       }).join("");
     }).catch(function () {
       sitesList.innerHTML = '<li class="empty">Could not load sites.</li>';
@@ -146,20 +190,33 @@
   function brew() {
     var source = urlInput.value.trim();
     if (!source) { setStatus("Enter a repo, package, or path.", true); return; }
+    var isPrivate = privateBox.checked;
+    var token = isPrivate ? randToken() : undefined;
     brewBtn.disabled = true;
     setStatus("Brewing…");
     resultEl.hidden = true;
+    tokenBox.hidden = true;
     fetch("/api/build", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source: source }),
+      body: JSON.stringify({
+        source: source,
+        org: orgInput.value.trim() || undefined,
+        visibility: isPrivate ? "private" : "public",
+        token: token,
+      }),
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.j.error || "Build failed");
         var sub = res.j.subdomain;
         resultUrl.textContent = sub + ".brewdocs.dev";
         openLink.href = "/s/" + sub + "/";
+        statsLink.href = "/dashboard?site=" + encodeURIComponent(sub);
         preview.src = "/s/" + sub + "/";
+        if (token) {
+          tokenValue.textContent = token;
+          tokenBox.hidden = false;
+        }
         resultEl.hidden = false;
         setStatus("");
         refreshSites();

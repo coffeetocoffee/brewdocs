@@ -556,6 +556,33 @@ export function createServer(
       return;
     }
 
+    if (url.pathname === "/dashboard" && req.method === "GET") {
+      const site = url.searchParams.get("site");
+      if (!site) {
+        res.writeHead(400, { "content-type": TYPES[".txt"] }).end("missing ?site=");
+        return;
+      }
+      const manifest = readManifest(hostingDir, site);
+      if (!manifest) {
+        res.writeHead(404, { "content-type": TYPES[".txt"] }).end("site not found");
+        return;
+      }
+      if (
+        manifest.visibility === "private" &&
+        !requireSiteAccess(req, manifest.tokenHash, token)
+      ) {
+        res
+          .writeHead(401, { "content-type": TYPES[".txt"] })
+          .end("Private site — provide ?token=<access> or Authorization: Bearer <access>");
+        return;
+      }
+      const data = stats.get(site) as { views: number; builds: number };
+      res
+        .writeHead(200, { "content-type": TYPES[".html"] })
+        .end(dashboardHtml(site, manifest, data));
+      return;
+    }
+
     const site = resolveSite(url.pathname, host, hostingDir);
     if (!site) {
       res.writeHead(404, { "content-type": TYPES[".txt"] }).end("Not found");
@@ -576,7 +603,16 @@ export function createServer(
     }
 
     const ext = path.extname(site.filePath);
-    res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
+    // HTML is mutable (re-deploys) so never cache it; static assets can cache
+    // briefly. A `?v=<token>` query (ignored by routing) lets deploys bust caches.
+    const cache =
+      ext === ".html"
+        ? "no-cache"
+        : "public, max-age=3600, stale-while-revalidate=86400";
+    res.writeHead(200, {
+      "content-type": TYPES[ext] ?? "application/octet-stream",
+      "cache-control": cache,
+    });
 
     if (ext === ".html") {
       let html = readFileSync(site.filePath, "utf8");
@@ -600,6 +636,36 @@ function injectViewsChip(html: string, subdomain: string): string {
 </script>`;
   if (html.includes("</body>")) return html.replace("</body>", `${chip}</body>`);
   return html + chip;
+}
+
+/** Minimal owner-facing analytics view for a hosted site. */
+function dashboardHtml(
+  site: string,
+  manifest: SiteManifest,
+  data: { views: number; builds: number },
+): string {
+  const visibility = manifest.visibility ?? "public";
+  const title = manifest.title ? escapeText(manifest.title) : site;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stats — ${escapeText(site)} · BrewDocs</title>
+<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:3rem auto;padding:0 1rem;color:#2b2118}
+h1{font-family:Georgia,serif}.card{display:flex;gap:2rem;margin:1.5rem 0}
+.stat{background:#fffdf9;border:1px solid #e7ddd0;border-radius:12px;padding:1.2rem 1.6rem}
+.stat .n{font-size:2.2rem;font-weight:700;color:#b5651d}.stat .l{color:#7a6a58;font-size:.85rem}
+a{color:#b5651d}</style></head>
+<body><h1>📊 ${title}</h1>
+<p><code>${escapeText(site)}.brewdocs.dev</code> · ${visibility}${manifest.org ? " · org: " + escapeText(manifest.org) : ""}</p>
+<div class="card">
+  <div class="stat"><div class="n">${data.views}</div><div class="l">page views</div></div>
+  <div class="stat"><div class="n">${data.builds}</div><div class="l">builds</div></div>
+</div>
+<p><a href="/s/${encodeURIComponent(site)}/">View site ↗</a> · <a href="/">← BrewDocs</a></p>
+</body></html>`;
+}
+
+function escapeText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 async function runBuild(
