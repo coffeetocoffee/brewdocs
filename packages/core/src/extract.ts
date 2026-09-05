@@ -4,6 +4,7 @@ import type { ExtractResult, PackageInfo, Source } from "./types.js";
 import { extractReadme } from "./extractors/readme.js";
 import { extractPackage } from "./extractors/package.js";
 import { extractExports } from "./extractors/exports.js";
+import { resolveReplacements } from "./replacements.js";
 
 const PKG_FILE = "package.json";
 const README_FILES = ["README.md", "readme.md", "Readme.md"];
@@ -59,6 +60,13 @@ export function extractFromSource(source: Source): ExtractResult {
       );
       symbols = [];
     }
+  }
+
+  // Direction C: resolve deprecation -> replacement links once, at the
+  // source, so every surface (HTML, Markdown, artifact, diff) gets them.
+  const replacements = resolveReplacements(symbols);
+  for (const sym of symbols) {
+    if (replacements[sym.name]) sym.replacements = replacements[sym.name];
   }
 
   return { title, description, readme, pkg, metadata, symbols };

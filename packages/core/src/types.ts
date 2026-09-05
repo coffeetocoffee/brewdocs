@@ -75,6 +75,12 @@ export interface SymbolDoc {
   resolvedParams?: string[];
   /** Alias-unwrapped return type. */
   resolvedReturn?: string;
+  /**
+   * Explicit successor links (Direction C): when a symbol is `@deprecated`
+   * and its note or `@see` names another exported symbol, those successors
+   * land here so docs, diff, and changelog can say "use X instead".
+   */
+  replacements?: string[];
 }
 
 /** Key/value pairs pulled from README frontmatter. */

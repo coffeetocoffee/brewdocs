@@ -27,9 +27,29 @@ export { buildSearchIndex, type SearchDoc } from "./search.js";
 export {
   renderToMarkdown,
   buildMarkdown,
+  buildMarkdownMulti,
+  renderToMarkdownMulti,
   type MarkdownOptions,
+  type MarkdownPage,
+  type FreshnessStamp,
 } from "./markdown-export.js";
+export { renderSymbolText, symbolSlug } from "./doc-text.js";
+export {
+  resolveReplacements,
+  replacementHint,
+} from "./replacements.js";
 export { discoverVersions, readPackageVersion } from "./versions.js";
+export { gitShaOf } from "./git.js";
+export {
+  buildDocModel,
+  docModelArtifact,
+  renderDocModelJson,
+  DOCMODEL_SCHEMA,
+  type DocModelArtifact,
+  type DocModelMeta,
+  type DocModelCoverage,
+  type DocModelPackage,
+} from "./docmodel.js";
 export {
   resolveInput,
   type ResolvedSource,

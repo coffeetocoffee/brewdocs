@@ -1,4 +1,5 @@
 import type { SymbolDoc } from "./types.js";
+import { replacementHint } from "./replacements.js";
 
 export type ChangeKind =
   | "added"
@@ -74,8 +75,10 @@ export function describeChange(kind: ChangeKind, c: SymbolChange): string {
       return `kind changed ${c.from?.kind ?? "?"} -> ${c.to?.kind ?? "?"}`;
     case "signature-changed":
       return "signature changed";
-    case "deprecated":
-      return "deprecated";
+    case "deprecated": {
+      const hint = replacementHint(c.to?.replacements);
+      return hint ? `deprecated — ${hint}` : "deprecated";
+    }
     case "undeprecated":
       return "deprecation removed";
     case "added":

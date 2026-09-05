@@ -1,7 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { buildModel } from "./build.js";
-import type { RenderModel, Source, SymbolDoc } from "./types.js";
+import { gitShaOf } from "./git.js";
+import { renderSymbolText, symbolSlug, symbolPageFrontmatter } from "./doc-text.js";
+import type { RenderModel, Source } from "./types.js";
 
 export interface MarkdownOptions {
   /** Output dialect. Both are Markdown; `mdx` adds a YAML frontmatter block. */
@@ -30,100 +32,34 @@ function readRawReadme(root: string): string | undefined {
   return undefined;
 }
 
-function code(lang: string, body: string): string {
-  return "```" + lang + "\n" + body.replace(/\n+$/, "") + "\n```";
+/**
+ * Freshness stamp (Direction C): package version + git sha + build date,
+ * shared by the Markdown footer so stale copies are detectable.
+ */
+export interface FreshnessStamp {
+  version?: string;
+  gitSha?: string;
+  generatedAt?: string;
 }
 
-function renderSymbol(sym: SymbolDoc, indent = 0): string {
-  const pad = "#".repeat(3 + indent);
-  const lines: string[] = [];
-  const tag = sym.deprecated ? " ⚠️ deprecated" : "";
-  lines.push(`${pad} \`${sym.name}\` _(${sym.kind})${tag}_`);
-
-  if (sym.signature) lines.push(code("ts", sym.signature));
-  if (sym.deprecated) {
-    const note =
-      typeof sym.deprecated === "string" ? sym.deprecated : "deprecated";
-    lines.push(`> ⚠️ Deprecated: ${note}`);
-  }
-  if (sym.description) lines.push(sym.description.trim());
-
-  if (sym.typeParams && sym.typeParams.length) {
-    lines.push("**Type Parameters**");
-    for (const t of sym.typeParams) {
-      const bits = [`\`${t.name}\``];
-      if (t.constraint) bits.push(`_${t.constraint}_`);
-      if (t.default) bits.push(`= \`${t.default}\``);
-      lines.push(`- ${bits.join(" ")}`);
-    }
-  }
-
-  if (sym.params.length) {
-    lines.push("**Parameters**");
-    for (const p of sym.params) {
-      const bits = [`\`${p.name}\``];
-      if (p.type) bits.push(`_${p.type}_`);
-      let line = `- ${bits.join(" ")}`;
-      if (p.optional) line += " _(optional)_";
-      if (p.description) line += ` — ${p.description}`;
-      if (p.default) line += ` (default: \`${p.default}\`)`;
-      lines.push(line);
-    }
-  }
-
-  if (sym.returns) {
-    const r = `_${sym.returns.type ?? "void"}_`;
-    lines.push(`**Returns**`);
-    lines.push(
-      sym.returns.description ? `${r} — ${sym.returns.description}` : r,
-    );
-  }
-
-  if (sym.throws && sym.throws.length) {
-    lines.push("**Throws**");
-    for (const t of sym.throws) lines.push(`- ${t}`);
-  }
-
-  if (sym.see && sym.see.length) {
-    lines.push("**See**");
-    for (const s of sym.see) lines.push(`- ${s}`);
-  }
-
-  if (sym.members && sym.members.length) {
-    lines.push("**Members**");
-    for (const m of sym.members) {
-      const mods = [
-        m.static ? "static" : "",
-        m.readonly ? "readonly" : "",
-        m.visibility ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const head = m.signature ?? (m.type ? `${m.name}: ${m.type}` : m.name);
-      lines.push(`${"#".repeat(4 + indent)} \`${head}\`${mods ? ` _(${mods})_` : ""}`);
-      if (typeof m.deprecated === "string") {
-        lines.push(`> ⚠️ Deprecated: ${m.deprecated}`);
-      }
-      if (m.description) lines.push(m.description.trim());
-    }
-  }
-
-  if (sym.examples.length) {
-    lines.push("**Examples**");
-    for (const ex of sym.examples) lines.push(code("ts", ex));
-  }
-
-  return lines.join("\n");
+function freshnessLine(stamp: FreshnessStamp | undefined): string | null {
+  if (!stamp) return null;
+  const bits: string[] = [];
+  if (stamp.version) bits.push(`v${stamp.version.replace(/^v/, "")}`);
+  if (stamp.gitSha) bits.push(`rev ${stamp.gitSha.slice(0, 7)}`);
+  if (stamp.generatedAt) bits.push(stamp.generatedAt.slice(0, 10));
+  return bits.length ? `_Docs brewed by BrewDocs — ${bits.join(" · ")}._` : null;
 }
 
 /**
- * Render the DocModel to Markdown/MDX. This is a pure consumer of the model —
- * the same structured data the HTML renderer uses, emitted as text so it can be
- * dropped into a wiki, README, or static-site generator.
+ * Render the DocModel to Markdown/MDX. Pure consumer of the shared text
+ * pipeline (`doc-text.ts`) — the same structured data the HTML renderer
+ * uses, emitted as text so it can be dropped into a wiki, README, or
+ * static-site generator.
  */
 export function renderToMarkdown(
   model: RenderModel,
-  opts: MarkdownOptions = {},
+  opts: MarkdownOptions & { freshness?: FreshnessStamp } = {},
 ): string {
   const format = opts.format ?? "md";
   const out: string[] = [];
@@ -159,10 +95,70 @@ export function renderToMarkdown(
 
   if (model.symbols.length) {
     out.push("", "## API Reference", "");
-    for (const sym of model.symbols) out.push("", renderSymbol(sym));
+    for (const sym of model.symbols) {
+      out.push("", renderSymbolText(sym));
+    }
   }
 
+  const fresh = freshnessLine(opts.freshness);
+  if (fresh) out.push("", "---", "", fresh);
+
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+/** One page of the multi-file Markdown export. */
+export interface MarkdownPage {
+  /** Repo-relative path inside the output dir, e.g. `symbols/brew.md`. */
+  path: string;
+  body: string;
+}
+
+/**
+ * Per-symbol Markdown pages (Direction C) — the same shape as `--multi`
+ * HTML: an index page linking to one portable, diffable page per symbol.
+ * All symbol content goes through the shared `renderSymbolText` pipeline.
+ */
+export function renderToMarkdownMulti(
+  model: RenderModel,
+  opts: MarkdownOptions & { freshness?: FreshnessStamp } = {},
+): MarkdownPage[] {
+  const links: Record<string, string> = {};
+  for (const sym of model.symbols) {
+    links[sym.name] = `./symbols/${symbolSlug(sym.name)}.md`;
+  }
+
+  const pages: MarkdownPage[] = [];
+
+  const index: string[] = [`# ${model.title}`];
+  if (model.description) index.push("", model.description);
+  if (model.pkg?.version) index.push("", `**Version:** ${model.pkg.version}`);
+  if (model.symbols.length) {
+    index.push("", "## API Reference", "");
+    for (const sym of model.symbols) {
+      const dep = sym.deprecated ? " ⚠️ deprecated" : "";
+      const desc = sym.description ? ` — ${sym.description.split("\n")[0]}` : "";
+      index.push(`- ${mdLink(sym.name, links)} _(${sym.kind})${dep}_${desc}`);
+    }
+  }
+  const indexFresh = freshnessLine(opts.freshness);
+  if (indexFresh) index.push("", "---", "", indexFresh);
+  pages.push({ path: "index.md", body: index.join("\n").replace(/\n{3,}/g, "\n\n") + "\n" });
+
+  for (const sym of model.symbols) {
+    const body: string[] = symbolPageFrontmatter(sym, model);
+    body.push("");
+    // Cross-page links, minus the page's own symbol (self-links excluded,
+    // same convention as the --multi HTML output).
+    const own = { ...links };
+    delete own[sym.name];
+    body.push(renderSymbolText(sym, { level: 1, links: own }));
+    pages.push({
+      path: `symbols/${symbolSlug(sym.name)}.md`,
+      body: body.join("\n") + "\n",
+    });
+  }
+
+  return pages;
 }
 
 /**
@@ -183,9 +179,50 @@ export function buildMarkdown(
     model.metadata = { ...model.metadata, __readme: cleaned };
   }
   const ext = opts.format === "mdx" ? "mdx" : "md";
-  const md = renderToMarkdown(model, opts);
+  const md = renderToMarkdown(model, {
+    ...opts,
+    freshness: {
+      version: model.pkg?.version,
+      gitSha: gitShaOf(source.root),
+      generatedAt: new Date().toISOString(),
+    },
+  });
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, `docs.${ext}`);
   fs.writeFileSync(outFile, md, "utf8");
   return outFile;
+}
+
+/**
+ * Build per-symbol Markdown pages into `outDir` (`index.md` plus one
+ * `symbols/<slug>.md` per exported symbol). Returns the written paths.
+ */
+export function buildMarkdownMulti(
+  source: Source,
+  outDir: string,
+  opts: MarkdownOptions = {},
+): string[] {
+  const model = buildModel(source);
+  const pages = renderToMarkdownMulti(model, {
+    ...opts,
+    freshness: {
+      version: model.pkg?.version,
+      gitSha: gitShaOf(source.root),
+      generatedAt: new Date().toISOString(),
+    },
+  });
+  fs.mkdirSync(outDir, { recursive: true });
+  const written: string[] = [];
+  for (const page of pages) {
+    const outFile = path.join(outDir, page.path);
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    fs.writeFileSync(outFile, page.body, "utf8");
+    written.push(outFile);
+  }
+  return written;
+}
+
+function mdLink(name: string, links?: Record<string, string>): string {
+  const href = links?.[name];
+  return href ? `[\`${name}\`](${href})` : `\`${name}\``;
 }

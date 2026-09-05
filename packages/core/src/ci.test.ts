@@ -20,7 +20,7 @@ import {
   writeAcknowledgment,
   type CoverageRecord,
 } from "./ci.js";
-import { diffSymbols } from "./diff.js";
+import { diffSymbols, describeChange } from "./diff.js";
 import type { DoctorReport } from "./doctor.js";
 import type { SymbolDoc } from "./types.js";
 
@@ -141,6 +141,36 @@ describe("CI guardian — changelog", () => {
     );
     expect(md).toContain("No breaking changes.");
     expect(md).toContain("drop-in compatible");
+  });
+
+  it("says 'use X instead' when the removed symbol named its successor", () => {
+    const diff = diffSymbols(
+      "1.0.0",
+      [
+        sym({
+          name: "gone",
+          deprecated: "use better instead",
+          see: ["better"],
+          replacements: ["better"],
+        }),
+      ],
+      "2.0.0",
+      [sym({ name: "better", description: "d" })],
+    );
+    const md = renderChangelogMarkdown(diff, "mylib");
+    expect(md).toContain("`gone` was removed — use `better` instead");
+  });
+
+  it("says 'use X instead' for a newly deprecated symbol on the diff page", () => {
+    const diff = diffSymbols(
+      "1.0.0",
+      [sym({ name: "f", signature: "f(): void" })],
+      "2.0.0",
+      [sym({ name: "f", signature: "f(): void", deprecated: true, replacements: ["g"] })],
+    );
+    const changed = diff.changed.find((c) => c.name === "f")!;
+    expect(changed.changes).toContain("deprecated");
+    expect(describeChange("deprecated", changed)).toBe("deprecated — use `g` instead");
   });
 
   it("exposes breaking changes as removed + breaking-changed", () => {

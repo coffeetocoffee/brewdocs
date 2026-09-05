@@ -17,10 +17,12 @@ import {
   analyzeSymbols,
   diagnose,
   diffSymbols,
+  buildDocModel,
   extractFromSource,
   extractVersion,
   gateDecision,
   buildMarkdown,
+  buildMarkdownMulti,
   loadCoverageHistory,
   postGitHubComment,
   readAcknowledgment,
@@ -664,6 +666,10 @@ export async function run(argv: string[]): Promise<void> {
         const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
         console.log(`📝 Exported Markdown reference -> ${md}`);
       }
+      if (rest.includes("--json")) {
+        const jsonFile = buildDocModel(src, outDir);
+        console.log(`🧊 Exported DocModel JSON -> ${jsonFile}`);
+      }
     } finally {
       cleanup();
     }
@@ -675,8 +681,26 @@ export async function run(argv: string[]): Promise<void> {
     const { src, cleanup } = resolveCliSource(args.source, args.name);
     const outDir = path.resolve(process.cwd(), args.out);
     try {
-      const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
-      console.log(`📝 Markdown reference -> ${md}`);
+      if (args.multi) {
+        const files = buildMarkdownMulti(src, outDir, { format: markdownFormat(rest) });
+        console.log(`📝 Markdown reference (${files.length} files) -> ${outDir}`);
+      } else {
+        const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
+        console.log(`📝 Markdown reference -> ${md}`);
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "docmodel") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    const outDir = path.resolve(process.cwd(), args.out);
+    try {
+      const file = buildDocModel(src, outDir);
+      console.log(`🧊 DocModel JSON -> ${file}`);
     } finally {
       cleanup();
     }
@@ -891,8 +915,9 @@ function printHelp(): void {
 Usage:
   brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
-  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown]
-  brewdocs markdown <source> [--out <dir>] [--format md|mdx]
+  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json]
+  brewdocs markdown <source> [--out <dir>] [--format md|mdx] [--multi]
+  brewdocs docmodel <source> [--out <dir>]   Machine-readable DocModel artifact
   brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
   brewdocs preview <source> [--port 4000]  Build and serve locally
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
@@ -912,8 +937,11 @@ Usage:
 Commands:
   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
   build-all        Build every discovered version into <out>/<version>/ + root index
-  export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md)
-  markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx)
+   export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md, --json for docmodel.json)
+   markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx);
+                    --multi emits index.md + one symbols/<name>.md per symbol
+   docmodel <src>   Write docmodel.json: the structured API knowledge (symbols,
+                    resolved types, coverage, freshness stamp) for bots and tooling
   init             Scaffold a brewdocs.yml in the current directory
   preview <src>    Build and serve the docs locally for a quick look
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev

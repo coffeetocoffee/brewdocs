@@ -7,7 +7,13 @@ import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
 import { analyzeSymbols } from "./doctor.js";
+import { gitShaOf } from "./git.js";
 import type { ExtractResult, RenderModel, Source } from "./types.js";
+
+/** Freshness stamp for every artifact this build writes (Direction C). */
+function freshness(source: Source): { gitSha?: string; generatedAt: string } {
+  return { gitSha: gitShaOf(source.root), generatedAt: new Date().toISOString() };
+}
 
 /** Build the render model (no file write). Useful for tests/snapshots. */
 export function buildModel(source: Source): RenderModel {
@@ -46,7 +52,11 @@ export function build(
   options: RenderOptions = {},
 ): string {
   const model = buildModel(source);
-  const html = renderToHtml(model, { ...options, score: coverageScore(model) });
+  const html = renderToHtml(model, {
+    ...options,
+    score: coverageScore(model),
+    freshness: freshness(source),
+  });
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "index.html");
   fs.writeFileSync(outFile, html, "utf8");
@@ -120,7 +130,11 @@ export function buildMulti(
   options: RenderOptions = {},
 ): string[] {
   const model = buildModel(source);
-  const pages = renderToHtmlMulti(model, { ...options, score: coverageScore(model) });
+  const pages = renderToHtmlMulti(model, {
+    ...options,
+    score: coverageScore(model),
+    freshness: freshness(source),
+  });
   fs.mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
   for (const page of pages) {
@@ -267,6 +281,7 @@ export async function buildVersions(
       versions: links,
       currentVersion: v,
       score: coverageScore(model),
+      freshness: freshness({ root: srcRoot, name: source.name }),
     });
 
     const vdir = path.join(outDir, dirSafe(v));
@@ -308,6 +323,7 @@ export async function buildVersions(
       versions: rootLinks,
       currentVersion: latest,
       score: coverageScore(rootModel),
+      freshness: freshness({ root, name: source.name }),
     }),
     "utf8",
   );

@@ -171,6 +171,9 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
           "type": "string",
         },
       ],
+      "replacements": [
+        "brew",
+      ],
       "resolvedParams": [
         "string",
       ],

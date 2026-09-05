@@ -19,6 +19,8 @@ export interface RenderOptions {
   multiPage?: boolean;
   /** Docs coverage score (0–100) from `brewdocs doctor`; renders an in-page chip. */
   score?: number;
+  /** Freshness stamp (Direction C): renders "brewed rev abc1234 · 2026-09-05" in the footer. */
+  freshness?: { gitSha?: string; generatedAt?: string };
 }
 
 function escapeHtml(input: string): string {
@@ -443,8 +445,16 @@ const SEARCH_JS = `
 })();
 `;
 
-/** Shared full-document wrapper used by both single- and multi-page output. */
-function pageShell(opts: {
+/** Footer freshness stamp: rev + build date so stale pages are detectable. */
+function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): string {
+  if (!fresh) return "";
+  const bits: string[] = [];
+  if (fresh.gitSha) bits.push(`rev ${escapeHtml(fresh.gitSha.slice(0, 7))}`);
+  if (fresh.generatedAt) bits.push(escapeHtml(fresh.generatedAt.slice(0, 10)));
+  return bits.length ? ` <span class="freshness">· ${bits.join(" · ")}</span>` : "";
+}
+
+/** Shared full-document wrapper used by both single- and multi-page output. */function pageShell(opts: {
   title: string;
   description: string;
   toc: string;
@@ -493,7 +503,7 @@ ${STRUCTURAL_CSS}
      ${opts.main}
    </main>
  </div>
-<footer>Brewed with <a href="#">BrewDocs</a> — Brew your docs, serve them hot.</footer>
+<footer>Brewed with <a href="#">BrewDocs</a>${freshnessHtml(opts.renderOptions.freshness)} — Brew your docs, serve them hot.</footer>
 <script id="search-index" type="application/json">${opts.indexJson}</script>
 <script>
 (function () {

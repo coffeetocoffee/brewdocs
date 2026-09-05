@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describeChange, versionLabel, type SymbolChange, type VersionDiff } from "./diff.js";
 import { colorFor, type DoctorReport } from "./doctor.js";
+import { replacementHint } from "./replacements.js";
 
 /**
  * CI guardian — Direction B. Everything here turns doctor + diff output into
@@ -114,7 +115,14 @@ function sigLines(c: SymbolChange): string[] {
 function migrationHint(c: SymbolChange): string {
   const parts: string[] = [];
   if (c.changes.includes("removed")) {
-    parts.push("was removed — update usages to its replacement");
+    // Direction C: when the removed symbol pointed at a successor via
+    // `@see`/`@deprecated`, say "use X instead" instead of a generic nudge.
+    const hint = replacementHint(c.from?.replacements);
+    parts.push(
+      hint
+        ? `was removed — ${hint}`
+        : "was removed — update usages to its replacement",
+    );
   }
   if (c.changes.includes("kind-changed")) {
     parts.push(
@@ -123,6 +131,10 @@ function migrationHint(c: SymbolChange): string {
   }
   if (c.changes.includes("signature-changed")) {
     parts.push("changed signature — update call sites to the new arguments");
+  }
+  if (c.changes.includes("deprecated")) {
+    const hint = replacementHint(c.to?.replacements);
+    if (hint) parts.push(hint);
   }
   return parts.join("; ");
 }
