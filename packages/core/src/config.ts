@@ -13,6 +13,8 @@ export interface BrewDocsConfig {
   private?: boolean;
   /** `brewdocs doctor` fails (exit 1) when coverage drops below this. */
   minCoverage?: number;
+  /** Ship `docmodel.json` with every build (default true; `docmodel: false` opts out). */
+  docmodel?: boolean;
   s3?: {
     bucket?: string;
     region?: string;

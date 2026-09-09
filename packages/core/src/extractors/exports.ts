@@ -71,6 +71,23 @@ function declarationOf(symbol: ts.Symbol, checker: ts.TypeChecker): ts.Declarati
 }
 
 /**
+ * JSDoc for `export const X = ...` sits on the enclosing VariableStatement,
+ * not the VariableDeclaration the checker hands us — read the comment from
+ * the statement when it carries one, so constants are not falsely flagged
+ * undocumented by doctor/draft.
+ */
+function docNodeOf(decl: ts.Declaration): ts.Node {
+  if (ts.isVariableDeclaration(decl)) {
+    const stmt = decl.parent?.parent;
+    if (stmt && ts.isVariableStatement(stmt)) {
+      const jsDoc = (stmt as unknown as { jsDoc?: ts.JSDoc[] }).jsDoc;
+      if (jsDoc && jsDoc.length > 0) return stmt;
+    }
+  }
+  return decl;
+}
+
+/**
  * Build one SymbolDoc from a declaration, enriching JSDoc with real AST
  * types (JSDoc often omits types, which live on the declaration instead).
  * `docNode` is where the JSDoc comment is attached — the declaration itself,
@@ -326,7 +343,9 @@ export function extractExports(root: string, pkg: Record<string, unknown>): Symb
       try {
         const decl = declarationOf(sym, checker);
         if (!decl) continue;
-        symbols.push(symbolFromDecl(sym.getName(), decl, decl, checker, root));
+        symbols.push(
+          symbolFromDecl(sym.getName(), decl, docNodeOf(decl), checker, root),
+        );
       } catch {
         // Skip a single malformed export rather than failing the whole build.
         continue;

@@ -21,6 +21,11 @@ export interface RenderOptions {
   score?: number;
   /** Freshness stamp (Direction C): renders "brewed rev abc1234 · 2026-09-05" in the footer. */
   freshness?: { gitSha?: string; generatedAt?: string };
+  /**
+   * Ship `docmodel.json` next to the built HTML (C.5: on by default).
+   * Set false for HTML-only output (`docmodel: false` in brewdocs.yml).
+   */
+  emitDocmodel?: boolean;
 }
 
 function escapeHtml(input: string): string {

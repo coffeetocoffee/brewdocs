@@ -1,4 +1,5 @@
 import { extractFromSource } from "./extract.js";
+import { proveSource, proveSummary } from "./prove.js";
 import type { SymbolDoc } from "./types.js";
 
 export interface DoctorIssue {
@@ -19,6 +20,10 @@ export interface DoctorReport {
   returnsTotal: number;
   returnsDocumented: number;
   examplesTotal: number;
+  /** Examples typechecked by `prove` (undefined when prove was not run). */
+  examplesRun?: number;
+  /** Examples that passed `prove` (undefined when prove was not run). */
+  examplesPassed?: number;
   issues: DoctorIssue[];
 }
 
@@ -161,6 +166,16 @@ export function diagnose(source: { root: string; name?: string }): DoctorReport 
 } {
   const extracted = extractFromSource(source);
   const report = analyzeSymbols(extracted.title, extracted.symbols);
+  try {
+    const proven = proveSource(source);
+    if (proven.length) {
+      const s = proveSummary(proven);
+      report.examplesRun = s.proven;
+      report.examplesPassed = s.passed;
+    }
+  } catch {
+    /* prove is additive; never fail the doctor report on it */
+  }
   return { title: extracted.title, ...report };
 }
 

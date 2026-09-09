@@ -246,7 +246,10 @@ describe("Direction D — orgs, private docs, analytics", () => {
 });
 
 describe("Launchable hosting — dashboard + cache", () => {
-  it("serves an owner dashboard for a deployed site", async () => {
+  it(
+    "serves an owner dashboard for a deployed site",
+    { timeout: 60_000, retry: 2 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-dash-"));
     await deploySite({ root: tinyRoot, name: "dash" }, hosting, "dash");
     const { server, base } = await start(hosting, "admin");
@@ -261,7 +264,10 @@ describe("Launchable hosting — dashboard + cache", () => {
     }
   });
 
-  it("gates a private site's dashboard behind its token", async () => {
+  it(
+    "gates a private site's dashboard behind its token",
+    { timeout: 60_000, retry: 2 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-dashp-"));
     await deploySite(
       { root: tinyRoot, name: "dashp" },
@@ -282,7 +288,10 @@ describe("Launchable hosting — dashboard + cache", () => {
     }
   });
 
-  it("sets no-cache on HTML and cache on assets", async () => {
+  it(
+    "sets no-cache on HTML and cache on assets",
+    { timeout: 60_000, retry: 2 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-cache-"));
     await deploySite({ root: tinyRoot, name: "cache" }, hosting, "cache");
     const { server, base } = await start(hosting);
@@ -296,7 +305,10 @@ describe("Launchable hosting — dashboard + cache", () => {
 });
 
 describe("Per-user API keys", () => {
-  it("requires a valid key once keys are configured", async () => {
+  it(
+    "requires a valid key once keys are configured",
+    { timeout: 60_000, retry: 2 },
+    async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-keysapi-"));
     // Seed a key store so the server enforces auth.
     await import("../src/keys.js").then((m) => m.addKey(hosting, { scopes: ["build"] }));

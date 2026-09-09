@@ -7,12 +7,32 @@ import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
 import { analyzeSymbols } from "./doctor.js";
+import { renderDocModelJson } from "./docmodel.js";
 import { gitShaOf } from "./git.js";
 import type { ExtractResult, RenderModel, Source } from "./types.js";
 
 /** Freshness stamp for every artifact this build writes (Direction C). */
 function freshness(source: Source): { gitSha?: string; generatedAt: string } {
   return { gitSha: gitShaOf(source.root), generatedAt: new Date().toISOString() };
+}
+
+/**
+ * C.5: every brewed site ships its data artifact (`docmodel.json`) next to
+ * the HTML unless the caller opts out (`emitDocmodel: false`).
+ */
+function emitDocModelArtifact(
+  model: RenderModel,
+  outDir: string,
+  fresh: { gitSha?: string; generatedAt: string },
+): void {
+  fs.writeFileSync(
+    path.join(outDir, "docmodel.json"),
+    renderDocModelJson(model, {
+      generatedAt: fresh.generatedAt,
+      gitSha: fresh.gitSha,
+    }),
+    "utf8",
+  );
 }
 
 /** Build the render model (no file write). Useful for tests/snapshots. */
@@ -52,14 +72,18 @@ export function build(
   options: RenderOptions = {},
 ): string {
   const model = buildModel(source);
+  const fresh = freshness(source);
   const html = renderToHtml(model, {
     ...options,
     score: coverageScore(model),
-    freshness: freshness(source),
+    freshness: fresh,
   });
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "index.html");
   fs.writeFileSync(outFile, html, "utf8");
+  if (options.emitDocmodel !== false) {
+    emitDocModelArtifact(model, outDir, fresh);
+  }
   return outFile;
 }
 
@@ -130,10 +154,11 @@ export function buildMulti(
   options: RenderOptions = {},
 ): string[] {
   const model = buildModel(source);
+  const fresh = freshness(source);
   const pages = renderToHtmlMulti(model, {
     ...options,
     score: coverageScore(model),
-    freshness: freshness(source),
+    freshness: fresh,
   });
   fs.mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
@@ -142,6 +167,9 @@ export function buildMulti(
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, page.html, "utf8");
     written.push(outFile);
+  }
+  if (options.emitDocmodel !== false) {
+    emitDocModelArtifact(model, outDir, fresh);
   }
   return written;
 }
@@ -276,12 +304,13 @@ export async function buildVersions(
         ? `../${dirSafe(o)}/diff.html`
         : undefined,
     }));
+    const fresh = freshness({ root: srcRoot, name: source.name });
     const html = renderToHtml(model, {
       ...options,
       versions: links,
       currentVersion: v,
       score: coverageScore(model),
-      freshness: freshness({ root: srcRoot, name: source.name }),
+      freshness: fresh,
     });
 
     const vdir = path.join(outDir, dirSafe(v));
@@ -289,6 +318,9 @@ export async function buildVersions(
     const outFile = path.join(vdir, "index.html");
     fs.writeFileSync(outFile, html, "utf8");
     built.push(outFile);
+    if (options.emitDocmodel !== false) {
+      emitDocModelArtifact(model, vdir, fresh);
+    }
     if (cleanup) cleanup();
   }
 
@@ -316,6 +348,7 @@ export async function buildVersions(
       : undefined,
   }));
   const rootFile = path.join(outDir, "index.html");
+  const rootFresh = freshness({ root, name: source.name });
   fs.writeFileSync(
     rootFile,
     renderToHtml(rootModel, {
@@ -323,9 +356,12 @@ export async function buildVersions(
       versions: rootLinks,
       currentVersion: latest,
       score: coverageScore(rootModel),
-      freshness: freshness({ root, name: source.name }),
+      freshness: rootFresh,
     }),
     "utf8",
   );
+  if (options.emitDocmodel !== false) {
+    emitDocModelArtifact(rootModel, outDir, rootFresh);
+  }
   return [rootFile, ...built];
 }

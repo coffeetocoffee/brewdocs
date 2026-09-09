@@ -33,10 +33,26 @@ inputs:
     description: Fail the action when docs coverage is below this percentage.
     required: false
     default: ""
+  badge:
+    description: Write a docs-coverage SVG badge to this path (relative to the repo root).
+    required: false
+    default: ""
+  trend-svg:
+    description: Write a coverage trend sparkline SVG to this path. Implies record keeps history.
+    required: false
+    default: ""
+  record:
+    description: Record the coverage score to .brewdocs/coverage.json so the trend persists across runs.
+    required: false
+    default: "false"
   pr-comment:
     description: On pull_request events, run `brewdocs ci` against the base and post/update a single PR comment.
     required: false
     default: "false"
+outputs:
+  coverage:
+    description: Docs coverage percentage (0-100) measured by `brewdocs doctor`.
+    value: ${{ steps.doctor.outputs.coverage }}
 runs:
   using: composite
   steps:
@@ -54,10 +70,19 @@ runs:
         ${{ inputs.multi == 'true' && 'ARGS+=(--multi)' || '' }}
         ${{ inputs.version != '' && format('ARGS+=(--version "{0}")', inputs.version) || '' }}
         brewdocs "${ARGS[@]}"
-    - name: Docs coverage gate
-      if: ${{ inputs.min-coverage != '' }}
+    - name: Docs coverage (doctor)
+      id: doctor
       shell: bash
-      run: brewdocs doctor "${{ inputs.source }}" --min-coverage "${{ inputs.min-coverage }}"
+      run: |
+        ARGS=(doctor "${{ inputs.source }}" --json)
+        ${{ inputs.record == 'true' && 'ARGS+=(--record)' || '' }}
+        ${{ inputs.badge != '' && format('ARGS+=(--badge "{0}")', inputs.badge) || '' }}
+        ${{ (inputs.trend-svg != '' || inputs.record == 'true') && 'ARGS+=(--record)' || '' }}
+        ${{ inputs.trend-svg != '' && format('ARGS+=(--trend-svg "{0}")', inputs.trend-svg) || '' }}
+        ${{ inputs.min-coverage != '' && format('ARGS+=(--min-coverage "{0}")', inputs.min-coverage) || '' }}
+        REPORT=$(brewdocs "${ARGS[@]}")
+        SCORE=$(echo "$REPORT" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(String(JSON.parse(d).score)))")
+        echo "coverage=$SCORE" >> "$GITHUB_OUTPUT"
     - name: CI guardian (PR comment)
       if: ${{ inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
       shell: bash

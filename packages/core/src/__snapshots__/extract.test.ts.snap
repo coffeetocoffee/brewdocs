@@ -232,7 +232,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
     },
     {
       "deprecated": undefined,
-      "description": undefined,
+      "description": "Current released version of the library.",
       "examples": [],
       "kind": "constant",
       "members": undefined,

@@ -54,6 +54,9 @@ npx @brewdocs/cli build ./examples/lib
 | `brewdocs changelog <src>` | Auto changelog section from an API diff |
 | `brewdocs ci <src>` | PR report: coverage delta + API diff vs base (--post to comment) |
 | `brewdocs gate <src>` | Release gate: breaking changes need a guide or acknowledgment |
+| `brewdocs draft <src>` | Scaffold JSDoc for undocumented exported symbols |
+| `brewdocs prove <src>` | Typecheck every `@example` against the package |
+| `brewdocs harvest <src>` | Propose `@example` snippets from README + tests |
 | `brewdocs themes` | List available themes |
 | `brewdocs gallery` | Build a gallery of example sites |
 
@@ -157,6 +160,39 @@ renames don't create false breaking changes. Class/interface member
 shapes are diffed too — removed members or changed member signatures
 count as breaking (added interface members break implementers; added
 class members don't).
+
+## Docs as data (`docmodel.json`)
+
+HTML is only one rendering of the DocModel — the structured API
+knowledge (symbols, resolved types, params, examples, deprecations,
+coverage, freshness stamp) also ships as a first-class JSON artifact for
+bots, CI jobs, and editors. Every `brewdocs build` / `export` writes
+`docmodel.json` next to the HTML (opt out with `docmodel: false` in
+`brewdocs.yml` or `--no-docmodel`):
+
+```bash
+brewdocs docmodel ./my-project --out dist          # write it explicitly
+brewdocs docmodel ./my-project --out dist --schema # also write the published JSON Schema
+```
+
+The artifact is schema-versioned (`"schema": "brewdocs/docmodel@1"`) and
+validates against the published contract at
+[`packages/core/schemas/docmodel@1.schema.json`](packages/core/schemas/docmodel@1.schema.json)
+(`https://brewdocs.dev/schemas/docmodel@1.schema.json`). The freshness
+stamp — package `version`, `source.gitSha`, `generatedAt` — lets a
+consumer reject stale docs (`version` differs from the running code)
+before trusting the content:
+
+```bash
+# A CI bot answering "what does `brew` take, and what's deprecated?"
+node -e "
+const d = require('./dist/docmodel.json');
+if (d.version !== require('./package.json').version) throw new Error('stale docs');
+console.log('exports:', d.symbols.map(s => s.name).join(', '));
+console.log('params of brew:', JSON.stringify(d.symbols.find(s => s.name === 'brew')?.params));
+console.log('deprecated:', d.symbols.filter(s => s.deprecated).map(s => s.name + ' -> ' + (s.replacements ?? []).join(', ')));
+"
+```
 
 ## Web drop-in (for non-devs)
 

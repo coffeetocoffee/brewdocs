@@ -51,9 +51,29 @@ export {
   type DocModelPackage,
 } from "./docmodel.js";
 export {
+  DOCMODEL_SCHEMA_ID,
+  DOCMODEL_SCHEMA_OBJECT,
+  docModelSchemaJson,
+} from "./schema.js";
+export {
   resolveInput,
   type ResolvedSource,
 } from "./resolve.js";
+export {
+  buildDrafts,
+  applyDrafts,
+  jsdocStub,
+  type DraftProposal,
+} from "./draft.js";
+export {
+  proveSource,
+  proveSummary,
+  type ProveResult,
+} from "./prove.js";
+export {
+  harvestExamples,
+  type HarvestProposal,
+} from "./harvest.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
 export { loadConfig, type BrewDocsConfig } from "./config.js";
 export {

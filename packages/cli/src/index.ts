@@ -36,6 +36,12 @@ import {
   versionLabel,
   writeAcknowledgment,
   insertChangelogSection,
+  buildDrafts,
+  applyDrafts,
+  proveSource,
+  proveSummary,
+  harvestExamples,
+  docModelSchemaJson,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
@@ -59,6 +65,7 @@ interface BuildArgs {
   name?: string;
   multi: boolean;
   watch: boolean;
+  noDocmodel: boolean;
 }
 
 function parseBuild(argv: string[]): BuildArgs {
@@ -70,6 +77,7 @@ function parseBuild(argv: string[]): BuildArgs {
   let name: string | undefined;
   let multi = false;
   let watch = false;
+  let noDocmodel = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--out" || arg === "-o") {
@@ -94,6 +102,8 @@ function parseBuild(argv: string[]): BuildArgs {
       // inline form, nothing to skip
     } else if (arg === "--multi") {
       multi = true;
+    } else if (arg === "--no-docmodel") {
+      noDocmodel = true;
     } else if (arg === "--watch" || arg === "-w") {
       watch = true;
     } else if (arg === "--dark") {
@@ -104,16 +114,20 @@ function parseBuild(argv: string[]): BuildArgs {
   }
   if (!source) {
     throw new Error(
-      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch]",
+      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel]",
     );
   }
-  return { source, out, theme, dark, version, name, multi, watch };
+  return { source, out, theme, dark, version, name, multi, watch, noDocmodel };
 }
 
 function printDoctorReport(report: ReturnType<typeof diagnose>): void {
   console.log(`🩺 ${report.title} — docs coverage: ${report.score}%`);
+  const examplesNote =
+    report.examplesRun !== undefined
+      ? ` · examples proven: ${report.examplesPassed}/${report.examplesRun}`
+      : "";
   console.log(
-    `   symbols: ${report.documentedSymbols}/${report.totalSymbols} documented · params: ${report.paramsDocumented}/${report.paramsTotal} · returns: ${report.returnsDocumented}/${report.returnsTotal} · examples: ${report.examplesTotal}`,
+    `   symbols: ${report.documentedSymbols}/${report.totalSymbols} documented · params: ${report.paramsDocumented}/${report.paramsTotal} · returns: ${report.returnsDocumented}/${report.returnsTotal} · examples: ${report.examplesTotal}${examplesNote}`,
   );
   if (report.issues.length === 0) {
     console.log("   no issues found. Well brewed! ☕");
@@ -142,6 +156,7 @@ function printDoctorReport(report: ReturnType<typeof diagnose>): void {
     theme: args.theme ?? config.theme,
     dark: args.dark || Boolean(config.dark),
     multiPage: args.multi || Boolean(config.multi),
+    emitDocmodel: !args.noDocmodel && config.docmodel !== false,
   };
 }
 
@@ -261,6 +276,21 @@ async function runCi(rest: string[]): Promise<void> {
     const minCoverage =
       Number(getFlag(rest, "--min-coverage")) || config.minCoverage || undefined;
 
+    // Prove runs as part of the CI report (skippable via --no-prove since
+    // it compiles each example).
+    let proveProven: { passed: number; total: number } | undefined;
+    if (!rest.includes("--no-prove")) {
+      try {
+        const proven = proveSource(src);
+        if (proven.length) {
+          const s = proveSummary(proven);
+          proveProven = { passed: s.passed, total: s.proven };
+        }
+      } catch {
+        /* prove is additive; never fail the CI report on it */
+      }
+    }
+
     // The current build joins the trend for the comment; persistence is
     // opt-in via `brewdocs doctor --record`.
     const history: ReturnType<typeof loadCoverageHistory> = [
@@ -283,6 +313,7 @@ async function runCi(rest: string[]): Promise<void> {
       baseVersion: base,
       headVersion,
       minCoverage,
+      examplesProven: proveProven,
     });
 
     const outFlag = getFlag(rest, "--out");
@@ -326,6 +357,12 @@ async function runCi(rest: string[]): Promise<void> {
       process.exitCode = 1;
     } else if (rest.includes("--fail-on-breaking") && diff && diff.breakingCount > 0) {
       console.error(`x ${diff.breakingCount} breaking change(s) vs ${base}`);
+      process.exitCode = 1;
+    }
+    if (proveProven && proveProven.passed < proveProven.total) {
+      console.error(
+        `x ${proveProven.total - proveProven.passed} doc example(s) fail typecheck`,
+      );
       process.exitCode = 1;
     }
   } finally {
@@ -385,10 +422,22 @@ async function runGate(rest: string[]): Promise<void> {
       console.log(`Acknowledgment recorded -> ${file}`);
     }
 
+    let unprovenExamples: number | undefined;
+    if (rest.includes("--require-proven")) {
+      try {
+        const proven = proveSource(src);
+        const s = proveSummary(proven);
+        unprovenExamples = s.failed;
+      } catch {
+        /* prove is additive; never fail the gate on it */
+      }
+    }
+
     const decision = gateDecision({
       breakingCount: diff.breakingCount,
       guideGenerated,
       acknowledged,
+      unprovenExamples,
     });
 
     if (getFlag(rest, "--json")) {
@@ -701,6 +750,106 @@ export async function run(argv: string[]): Promise<void> {
     try {
       const file = buildDocModel(src, outDir);
       console.log(`🧊 DocModel JSON -> ${file}`);
+      if (rest.includes("--schema")) {
+        const schemaFile = path.join(outDir, "docmodel.schema.json");
+        fs.writeFileSync(schemaFile, docModelSchemaJson(), "utf8");
+        console.log(`📐 DocModel schema -> ${schemaFile}`);
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "draft") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    try {
+      const proposals = buildDrafts(src);
+      if (proposals.length === 0) {
+        console.log("☕ Nothing to draft — every exported symbol is documented.");
+        return;
+      }
+
+      if (rest.includes("--fix")) {
+        const changed = applyDrafts(proposals);
+        console.log(`✍️  Drafted JSDoc for ${proposals.length} symbol(s) in:`);
+        for (const f of changed) console.log(`   ${f}`);
+        return;
+      }
+
+      console.log(
+        `✍️  ${proposals.length} undocumented exported symbol(s) — run with --fix to write them:`,
+      );
+      for (const p of proposals) {
+        console.log(`   ${p.file}:${p.line}  ${p.kind} ${p.symbol}`);
+        for (const line of p.jsdoc.split("\n")) console.log(`     ${line}`);
+        console.log("");
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "prove") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    try {
+      const results = proveSource(src);
+      if (results.length === 0) {
+        console.log("☕ No examples to prove.");
+        return;
+      }
+      let pass = 0;
+      let fail = 0;
+      for (const r of results) {
+        if (r.skipped) {
+          console.log(`· ${r.symbol} example#${r.index} — skipped (not code)`);
+          continue;
+        }
+        if (r.ok) {
+          pass++;
+          console.log(`✓ ${r.symbol} example#${r.index}`);
+        } else {
+          fail++;
+          console.log(`✗ ${r.symbol} example#${r.index}`);
+          for (const line of (r.error ?? "").split("\n")) console.log(`   ${line}`);
+        }
+      }
+      const total = pass + fail;
+      console.log(
+        `🔬 Proved ${pass}/${total} examples typecheck` +
+          (results.some((r) => r.skipped) ? " (some skipped as non-code)" : ""),
+      );
+      if (rest.includes("--strict") && fail > 0) process.exitCode = 1;
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "harvest") {
+    const args = parseBuild(rest);
+    const { src, cleanup } = resolveCliSource(args.source, args.name);
+    try {
+      const proposals = harvestExamples(src);
+      if (proposals.length === 0) {
+        console.log("☕ Nothing to harvest — every exported symbol has an example.");
+        return;
+      }
+      if (getFlag(rest, "--json")) {
+        console.log(JSON.stringify(proposals, null, 2));
+        return;
+      }
+      console.log(
+        `🌾 ${proposals.length} example proposal(s) from README + tests:`,
+      );
+      for (const p of proposals) {
+        console.log(`   ${p.symbol} (${p.kind}) — from ${p.origin}`);
+        for (const line of p.snippet.split("\n")) console.log(`     ${line}`);
+        console.log("");
+      }
     } finally {
       cleanup();
     }
@@ -913,11 +1062,14 @@ function printHelp(): void {
   console.log(`BrewDocs — Brew your docs, serve them hot.
 
 Usage:
-  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch]
+  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
   brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json]
   brewdocs markdown <source> [--out <dir>] [--format md|mdx] [--multi]
-  brewdocs docmodel <source> [--out <dir>]   Machine-readable DocModel artifact
+  brewdocs docmodel <source> [--out <dir>] [--schema]   Machine-readable DocModel artifact
+  brewdocs draft <source> [--fix]   Scaffold JSDoc for undocumented symbols
+  brewdocs prove <source> [--strict]   Typecheck every @example against the package
+  brewdocs harvest <source> [--json]   Propose examples from README + tests
   brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
   brewdocs preview <source> [--port 4000]  Build and serve locally
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
@@ -935,14 +1087,21 @@ Usage:
   brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
 
 Commands:
-  build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
+   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
+                     every build also emits docmodel.json unless --no-docmodel
   build-all        Build every discovered version into <out>/<version>/ + root index
    export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md, --json for docmodel.json)
    markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx);
                     --multi emits index.md + one symbols/<name>.md per symbol
    docmodel <src>   Write docmodel.json: the structured API knowledge (symbols,
-                    resolved types, coverage, freshness stamp) for bots and tooling
-  init             Scaffold a brewdocs.yml in the current directory
+                     resolved types, coverage, freshness stamp) for bots and tooling
+                     (add --schema to also write the published JSON Schema)
+   draft <src>      Scaffold JSDoc skeletons for undocumented exported symbols
+                     (add --fix to write them into the source files)
+   prove <src>      Typecheck every @example against the package
+                     (add --strict to exit 1 on a failing example)
+   harvest <src>    Propose @example snippets found in the README + test files
+   init             Scaffold a brewdocs.yml in the current directory
   preview <src>    Build and serve the docs locally for a quick look
   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
                     (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
@@ -953,11 +1112,14 @@ Commands:
                    --record trend history, --trend-svg sparkline)
   diff <src>       API diff between two git tags: --from <tag> --to <tag>
   changelog <src>  Auto-generated changelog section (markdown) from an API diff
-  ci <src>         CI guardian: coverage + API diff vs --base <ref>;
-                   --post comments on the PR (GITHUB_TOKEN); gate with
-                   --min-coverage / --fail-on-breaking
-  gate <src>       Release gate: fail on breaking changes unless a migration
-                   guide is generated (--out) or acknowledged (--acknowledge)
+   ci <src>         CI guardian: coverage + API diff vs --base <ref>;
+                    --post comments on the PR (GITHUB_TOKEN); gate with
+                    --min-coverage / --fail-on-breaking. Proves examples
+                    by default (--no-prove to skip)
+   gate <src>       Release gate: fail on breaking changes unless a migration
+                    guide is generated (--out) or acknowledged (--acknowledge);
+                    add --require-proven to also fail on examples that
+                    no longer typecheck
   themes           List available themes
   keys             Manage per-user API keys (add / list / revoke)
   help             Show this help

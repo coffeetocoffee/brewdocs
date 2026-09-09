@@ -219,6 +219,8 @@ export interface CiReportInput {
   headVersion?: string;
   /** Surface a warning in the comment when coverage is below this. */
   minCoverage?: number;
+  /** `brewdocs prove` result when the CI run typechecked examples. */
+  examplesProven?: { passed: number; total: number };
 }
 
 /** The PR comment: coverage delta + trend sparkline + API diff summary. */
@@ -242,6 +244,16 @@ export function renderCiMarkdown(input: CiReportInput): string {
 
   if (input.minCoverage !== undefined && head.score < input.minCoverage) {
     lines.push("", `> ⚠ Coverage is below the configured minimum of ${input.minCoverage}%.`);
+  }
+
+  if (input.examplesProven && input.examplesProven.total > 0) {
+    const { passed, total } = input.examplesProven;
+    const icon = passed === total ? "✅" : "❌";
+    lines.push(
+      "",
+      `${icon} **Examples proven:** ${passed}/${total} typecheck` +
+        (passed === total ? "" : " — a doc example no longer compiles"),
+    );
   }
 
   if (history.length >= 2) {
@@ -334,6 +346,8 @@ export interface GateInput {
   guideGenerated: boolean;
   /** A human acknowledged the breaking changes (flag or ack file). */
   acknowledged: boolean;
+  /** `brewdocs prove` failures block the gate when set. */
+  unprovenExamples?: number;
 }
 
 export interface GateDecision {
@@ -343,9 +357,17 @@ export interface GateDecision {
 
 /**
  * Release gate: breaking changes block the release unless a migration guide
- * was generated or the break is explicitly acknowledged.
+ * was generated or the break is explicitly acknowledged. When example
+ * proving ran, a failing doc example blocks too — with an override path via
+ * the same acknowledgment.
  */
 export function gateDecision(input: GateInput): GateDecision {
+  if ((input.unprovenExamples ?? 0) > 0 && !input.acknowledged) {
+    return {
+      ok: false,
+      reason: `${input.unprovenExamples} doc example(s) no longer typecheck — fix them with \`brewdocs draft\`, or pass --acknowledge`,
+    };
+  }
   if (input.breakingCount === 0) {
     return { ok: true, reason: "no breaking changes" };
   }
