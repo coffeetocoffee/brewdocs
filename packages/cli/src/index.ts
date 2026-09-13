@@ -42,6 +42,12 @@ import {
   proveSummary,
   harvestExamples,
   docModelSchemaJson,
+  buildModel,
+  buildWorkspaces,
+  detectWorkspaces,
+  rollupCoverage,
+  runMcpServer,
+  setDraftExpiry,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
@@ -490,6 +496,45 @@ export async function run(argv: string[]): Promise<void> {
     const args = parseBuild(rest);
     const { src, cleanup } = resolveCliSource(args.source, args.name);
     try {
+      // v1.2 workspace mode: doctor runs per package, then rolls up.
+      if (rest.includes("--workspaces")) {
+        const members = detectWorkspaces(src.root);
+        if (members.length === 0) {
+          throw new Error(
+            `no workspaces found in ${src.root} (expected "workspaces" in package.json)`,
+          );
+        }
+        const models = new Map();
+        for (const m of members) {
+          models.set(
+            m.name,
+            buildModel({ root: m.root, name: m.name }),
+          );
+        }
+        const rollup = rollupCoverage(members, models);
+        if (getFlag(rest, "--json")) {
+          console.log(JSON.stringify(rollup, null, 2));
+        } else {
+          console.log(
+            `🩺 workspace — docs coverage: ${rollup.score}% (${members.length} packages)`,
+          );
+          for (const p of rollup.packages) {
+            console.log(
+              `   ${p.name}: ${p.score}% (${p.report.documentedSymbols}/${p.report.totalSymbols} documented)`,
+            );
+          }
+        }
+        const threshold =
+          Number(getFlag(rest, "--min-coverage")) ||
+          loadConfig(src.root).minCoverage;
+        if (threshold !== undefined && rollup.score < threshold) {
+          console.error(
+            `✗ workspace docs coverage ${rollup.score}% is below the ${threshold}% minimum`,
+          );
+          process.exitCode = 1;
+        }
+        return;
+      }
       const report = diagnose(src);
       const json = getFlag(rest, "--json");
       const badge = getFlag(rest, "--badge");
@@ -660,6 +705,11 @@ export async function run(argv: string[]): Promise<void> {
     const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
     try {
+      if (rest.includes("--workspaces")) {
+        const files = buildWorkspaces(src, outDir, mergeOptions(args, config));
+        console.log(`☕ Brewed ${files.length} workspace site(s) -> ${outDir}`);
+        return;
+      }
       const files = await buildVersions(src, outDir, mergeOptions(args, config));
       console.log(`☕ Brewed ${files.length} version page(s) -> ${outDir}`);
     } finally {
@@ -909,13 +959,22 @@ dark: false
     const org = getFlag(rest, "--org") ?? config.org;
     const privateFlag = rest.includes("--private") || rest.some((a) => a.startsWith("--private"));
     const privateValue = getFlag(rest, "--private");
+    const draftFlag = rest.includes("--draft");
     const visibility =
-      privateFlag || config.private ? "private" : "public";
+      privateFlag || config.private || draftFlag ? "private" : "public";
+    if (draftFlag && !(privateFlag || config.private)) {
+      throw new Error("--draft requires --private (draft links are token-gated)");
+    }
+    // --draft defaults to a 24h link unless --draft-expires sets one.
+    const draftHours = Number(getFlag(rest, "--draft-hours") ?? "24");
+    const draftExpires = draftFlag
+      ? new Date(Date.now() + draftHours * 3600_000).toISOString()
+      : undefined;
     // --private without a value auto-generates a token; with a value, use it.
     const token =
       privateFlag && privateValue && !privateValue.startsWith("-")
         ? privateValue
-        : privateFlag
+        : privateFlag || draftFlag
           ? crypto.randomBytes(16).toString("hex")
           : undefined;
     const baseSub =
@@ -930,13 +989,18 @@ dark: false
         sub,
         mergeOptions(args, config),
         storage,
-        { org, visibility, token },
+        { org, visibility, token, draft: draftFlag, draftExpires },
       );
       console.log(`🚀 Deployed -> ${result.url}`);
       if (result.visibility === "private") {
         console.log(
           `🔒 Private site. Access with token: ${token}\n   (?token=${token} or Authorization: Bearer ${token})`,
         );
+        if (draftFlag) {
+          console.log(
+            `✏️  Shareable draft link: ${result.url}/?token=${token}\n   expires ${draftExpires} (extend via 'brewdocs drafts extend ${sub}')`,
+          );
+        }
       }
       if (rest.includes("--markdown")) {
         const md = buildMarkdown(src, path.resolve(process.cwd(), args.out), {
@@ -1022,6 +1086,55 @@ dark: false
     return;
   }
 
+  if (command === "drafts") {
+    const sub = rest[0];
+    const hosting = path.resolve(process.cwd(), getFlag(rest, "--hosting") ?? "./hosting");
+    if (sub === "list") {
+      for (const d of fs.readdirSync(hosting)) {
+        const manifestPath = path.join(hosting, d, ".brewdocs.json");
+        if (!fs.existsSync(manifestPath)) continue;
+        try {
+          const m = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+            draft?: boolean;
+            draftExpires?: string;
+          };
+          if (m.draft) {
+            console.log(`- ${d}${m.draftExpires ? `  expires ${m.draftExpires}` : "  no expiry"}`);
+          }
+        } catch {
+          /* skip unreadable manifests */
+        }
+      }
+    } else if (sub === "extend") {
+      const target = rest[1];
+      const hours = Number(getFlag(rest, "--hours") ?? "24");
+      if (!target) throw new Error("usage: brewdocs drafts extend <subdomain> [--hours 24]");
+      const expires = new Date(Date.now() + hours * 3600_000).toISOString();
+      const ok = setDraftExpiry(hosting, target, expires);
+      console.log(ok ? `⏳ draft ${target} extended to ${expires}` : `no site named ${target}`);
+    } else if (sub === "revoke") {
+      const target = rest[1];
+      if (!target) throw new Error("usage: brewdocs drafts revoke <subdomain>");
+      const ok = setDraftExpiry(hosting, target, null);
+      console.log(ok ? `🔥 draft ${target} revoked` : `no site named ${target}`);
+    } else {
+      throw new Error("usage: brewdocs drafts list|extend|revoke");
+    }
+    return;
+  }
+
+  if (command === "mcp") {
+    const file = rest[0] ?? getFlag(rest, "--docmodel") ?? "docmodel.json";
+    const resolved = path.resolve(process.cwd(), file);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(
+        `${resolved} not found — run \`brewdocs build <src> --out <dir>\` first (docmodel.json is emitted by default)`,
+      );
+    }
+    await runMcpServer(resolved);
+    return;
+  }
+
   console.error(`Unknown command: ${command}`);
   printHelp();
   process.exitCode = 1;
@@ -1063,7 +1176,7 @@ function printHelp(): void {
 
 Usage:
   brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel]
-  brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark]
+  brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark] [--workspaces]
   brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json]
   brewdocs markdown <source> [--out <dir>] [--format md|mdx] [--multi]
   brewdocs docmodel <source> [--out <dir>] [--schema]   Machine-readable DocModel artifact
@@ -1073,11 +1186,15 @@ Usage:
   brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
   brewdocs preview <source> [--port 4000]  Build and serve locally
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
-                    [--org <name>] [--private [token]] [--markdown]
+                    [--org <name>] [--private [token]] [--draft [--draft-hours N]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
   brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
                 (set BREWDOCS_TOKEN, or add keys via 'brewdocs keys', to require auth)
   brewdocs keys add|list|revoke [--hosting <dir>] [--scope build,export] [--label <n>]
+  brewdocs drafts list|extend|revoke [--hosting <dir>]   Manage private draft links
+  brewdocs mcp [docmodel.json]   MCP stdio server over a docmodel.json artifact
+                                 (tools: search_symbols, symbol_signature,
+                                  deprecated_replacements; freshness-checked)
   brewdocs versions <source>
   brewdocs doctor <source> [--json] [--badge <file.svg>] [--min-coverage <pct>]
                   [--record] [--trend-svg <file.svg>]
@@ -1089,7 +1206,9 @@ Usage:
 Commands:
    build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
                      every build also emits docmodel.json unless --no-docmodel
-  build-all        Build every discovered version into <out>/<version>/ + root index
+   build-all        Build every discovered version into <out>/<version>/ + root index
+                     (add --workspaces for npm/yarn/pnpm monorepos: one site per
+                      package under <out>/<pkg>/ + root index, cross-linked)
    export <source>  Static export: a fully self-contained site in <out> (add --markdown for docs.md, --json for docmodel.json)
    markdown <src>   Render the DocModel to Markdown/MDX (docs.md / docs.mdx);
                     --multi emits index.md + one symbols/<name>.md per symbol
@@ -1103,13 +1222,15 @@ Commands:
    harvest <src>    Propose @example snippets found in the README + test files
    init             Scaffold a brewdocs.yml in the current directory
   preview <src>    Build and serve the docs locally for a quick look
-  deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
-                    (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
-                     --org <name> namespaces as <org>--<sub>; --private [token] gates reads)
+   deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
+                     (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
+                      --org <name> namespaces as <org>--<sub>; --private [token] gates reads;
+                      add --draft for a time-limited shareable ?token= preview link)
   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
   versions <src>   List available versions (git tags, or package version)
-  doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate,
-                   --record trend history, --trend-svg sparkline)
+   doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate,
+                    --record trend history, --trend-svg sparkline);
+                    add --workspaces for per-package reports + rollup score
   diff <src>       API diff between two git tags: --from <tag> --to <tag>
   changelog <src>  Auto-generated changelog section (markdown) from an API diff
    ci <src>         CI guardian: coverage + API diff vs --base <ref>;
@@ -1120,9 +1241,11 @@ Commands:
                     guide is generated (--out) or acknowledged (--acknowledge);
                     add --require-proven to also fail on examples that
                     no longer typecheck
-  themes           List available themes
-  keys             Manage per-user API keys (add / list / revoke)
-  help             Show this help
+   themes           List available themes
+   keys             Manage per-user API keys (add / list / revoke)
+   drafts           Manage private draft links (list / extend / revoke)
+   mcp              MCP stdio server over docmodel.json for agent workflows
+   help             Show this help
 
 Options:
   -o, --out <dir>  Output/hosting directory (default: dist / ./hosting)

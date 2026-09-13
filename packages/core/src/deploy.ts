@@ -18,6 +18,12 @@ export interface DeploySiteOptions {
   visibility?: Visibility;
   /** Plaintext access token for private sites; hashed before storage. */
   token?: string;
+  /**
+   * v1.2 private drafts: deploy as a time-limited draft link. `draftExpires`
+   * (ISO 8601) sets the expiry recorded in the manifest.
+   */
+  draft?: boolean;
+  draftExpires?: string;
 }
 
 /** GitHub repo URLs (`github.com/user/repo[.git]`) matched here. */
@@ -106,6 +112,10 @@ export async function deploySite(
 
   const visibility: Visibility = deployOpts.visibility ?? "public";
   const tokenHash = deployOpts.token ? sha256(deployOpts.token) : undefined;
+  const isDraft = Boolean(deployOpts.draft);
+  if (isDraft && visibility !== "private") {
+    throw new Error("--draft requires --private (draft links are token-gated)");
+  }
 
   if (storage) {
     await storage.deploy(dir, subdomain);
@@ -123,6 +133,8 @@ export async function deploySite(
     org: deployOpts.org,
     visibility,
     tokenHash,
+    draft: isDraft || undefined,
+    draftExpires: isDraft ? deployOpts.draftExpires : undefined,
     url: `https://${subdomain}.${HOST_SUFFIX}`,
     title: model.title,
     generatedAt: new Date().toISOString(),
@@ -140,4 +152,46 @@ export async function deploySite(
     visibility,
     org: deployOpts.org,
   };
+}
+
+/**
+ * v1.2 private drafts: expire/extend a draft's link. Updates the site
+ * manifest's `draftExpires`; passing `null` revokes the draft (the site
+ * stays private but the draft flag and its expiry are cleared).
+ * Returns true when the manifest was updated.
+ */
+export function setDraftExpiry(
+  hostingDir: string,
+  subdomain: string,
+  expires: string | null,
+): boolean {
+  const manifestPath = path.join(hostingDir, subdomain, ".brewdocs.json");
+  if (!fs.existsSync(manifestPath)) return false;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      draft?: boolean;
+      draftExpires?: string;
+    };
+    if (expires === null) {
+      delete manifest.draft;
+      delete manifest.draftExpires;
+    } else {
+      manifest.draft = true;
+      manifest.draftExpires = expires;
+    }
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Has a site's draft link expired? (Non-drafts never expire.) */
+export function draftExpired(manifest: {
+  draft?: boolean;
+  draftExpires?: string;
+}): boolean {
+  if (!manifest.draft || !manifest.draftExpires) return false;
+  const t = Date.parse(manifest.draftExpires);
+  return !Number.isNaN(t) && Date.now() > t;
 }

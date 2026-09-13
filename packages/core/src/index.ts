@@ -19,6 +19,8 @@ export {
   deploySite,
   deriveSubdomain,
   combineSubdomain,
+  setDraftExpiry,
+  draftExpired,
   type DeployResult,
   type DeploySiteOptions,
   type Visibility,
@@ -59,6 +61,26 @@ export {
   resolveInput,
   type ResolvedSource,
 } from "./resolve.js";
+export {
+  detectWorkspaces,
+  crossPackageLinks,
+  externalLinksFor,
+  rollupCoverage,
+  buildWorkspaces,
+  type WorkspacePackage,
+  type WorkspaceRollup,
+} from "./workspaces.js";
+export {
+  runMcpServer,
+  loadDocModel,
+  validateAgainstSchema,
+  checkFreshness,
+  searchSymbols,
+  symbolSignature,
+  deprecatedReplacements,
+  MCP_TOOLS,
+  type McpToolName,
+} from "./mcp.js";
 export {
   buildDrafts,
   applyDrafts,

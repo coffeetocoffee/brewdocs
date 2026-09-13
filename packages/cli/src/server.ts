@@ -8,6 +8,7 @@ import {
   combineSubdomain,
   deploySite,
   deriveSubdomain,
+  draftExpired,
   exportSite,
   buildMarkdown,
   resolveInput,
@@ -35,6 +36,9 @@ interface SiteManifest {
   org?: string;
   visibility?: Visibility;
   tokenHash?: string;
+  /** v1.2 private drafts: draft flag + expiry (ISO 8601). */
+  draft?: boolean;
+  draftExpires?: string;
   url?: string;
   title?: string;
   generatedAt?: string;
@@ -582,6 +586,15 @@ export function createServer(
       }
       if (
         manifest.visibility === "private" &&
+        draftExpired(manifest)
+      ) {
+        res
+          .writeHead(410, { "content-type": TYPES[".txt"] })
+          .end("Draft link expired — ask the owner to re-deploy or extend it.");
+        return;
+      }
+      if (
+        manifest.visibility === "private" &&
         !requireSiteAccess(req, manifest.tokenHash, token)
       ) {
         res
@@ -603,6 +616,14 @@ export function createServer(
     }
 
     const manifest = readManifest(hostingDir, site.subdomain);
+    // v1.2 private drafts: an expired draft link is revoked for everyone
+    // (admin token included) — re-deploy or extend to restore access.
+    if (manifest?.draft && draftExpired(manifest)) {
+      res
+        .writeHead(410, { "content-type": TYPES[".txt"] })
+        .end("Draft link expired — ask the owner to re-deploy or extend it.");
+      return;
+    }
     if (
       manifest?.visibility === "private" &&
       !requireSiteAccess(req, manifest.tokenHash, token)
