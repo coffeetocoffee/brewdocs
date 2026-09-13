@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/core",
-  "version": "0.8.0",
+  "version": "1.2.0",
   "description": "Core extraction pipeline for BrewDocs.",
   "type": "module",
   "license": "MIT",
@@ -40,6 +40,8 @@
     "src/draft.ts",
     "src/prove.ts",
     "src/harvest.ts",
+    "src/workspaces.ts",
+    "src/mcp.ts",
     "src/schema.ts",
     "schemas/docmodel@1.schema.json",
     "src/extractors/readme.ts",
