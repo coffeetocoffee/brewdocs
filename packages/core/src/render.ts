@@ -19,8 +19,16 @@ export interface RenderOptions {
   multiPage?: boolean;
   /** Docs coverage score (0–100) from `brewdocs doctor`; renders an in-page chip. */
   score?: number;
-  /** Freshness stamp (Direction C): renders "brewed rev abc1234 · 2026-09-05" in the footer. */
+  /**
+   * Freshness stamp (Direction C): renders "brewed rev abc1234 · 2026-09-05" in the footer.
+   */
   freshness?: { gitSha?: string; generatedAt?: string };
+  /**
+   * Cross-package link resolver (v1.2 workspace mode): maps exported
+   * symbol names of *other* workspace packages to hrefs on their pages.
+   * In-page anchors win; only unresolved names fall through to this map.
+   */
+  externalLinks?: Map<string, string>;
   /**
    * Ship `docmodel.json` next to the built HTML (C.5: on by default).
    * Set false for HTML-only output (`docmodel: false` in brewdocs.yml).
@@ -67,10 +75,18 @@ function symbolLinks(
   model: RenderModel,
   hrefFor: (name: string) => string,
   exclude?: string,
+  external?: Map<string, string>,
 ): SymbolLinks {
   const map: SymbolLinks = new Map();
   for (const s of model.symbols) {
     if (s.name !== exclude) map.set(s.name, hrefFor(s.name));
+  }
+  // Cross-package links fill the gaps: local anchors win, other workspace
+  // members' symbols fall through to their pages (v1.2 workspace mode).
+  if (external) {
+    for (const [name, href] of external) {
+      if (!map.has(name)) map.set(name, href);
+    }
   }
   return map;
 }
@@ -263,12 +279,15 @@ const STRUCTURAL_CSS = `
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 16px/1.65 var(--font);
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
     transition: background .25s ease, color .25s ease;
   }
   .layout { display: grid; grid-template-columns: 250px 1fr; gap: 2.5rem; max-width: 1140px; margin: 0 auto; }
   header {
     padding: 2.75rem 1.5rem 1.5rem; border-bottom: 1px solid var(--line);
     background: linear-gradient(180deg, var(--card), var(--bg));
+    box-shadow: 0 1px 0 var(--line), 0 10px 30px rgba(0,0,0,0.03);
   }
   header .cup { font-size: 1.7rem; }
   header h1 { margin: 0.25rem 0 0; font-size: 2.1rem; font-family: var(--heading-font); letter-spacing: -0.01em; }
@@ -330,7 +349,10 @@ const STRUCTURAL_CSS = `
   table:not(.pkg-meta) { width: 100%; border-collapse: collapse; margin: 1rem 0; }
   table:not(.pkg-meta) th, table:not(.pkg-meta) td { border: 1px solid var(--line); padding: 0.45rem 0.6rem; text-align: left; }
   hr { border: none; border-top: 1px solid var(--line); margin: 2rem 0; }
-  .symbol { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 1.1rem 1.3rem; margin: 1rem 0; scroll-margin-top: 1rem; }
+  .symbol { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 1.1rem 1.3rem; margin: 1rem 0; scroll-margin-top: 1rem; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+  .symbol:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); box-shadow: 0 6px 24px rgba(0,0,0,0.06); }
+  main a:not(.type-ref):not(.version-diff) { color: var(--accent); text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; }
+  main a:not(.type-ref):not(.version-diff):hover { text-decoration-color: var(--accent); }
   .symbol h3 { margin: 0 0 0.5rem; }
   .kind { font-size: 0.72rem; color: var(--muted); font-weight: 400; font-family: var(--font); }
   .badge.dep { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem; }
@@ -533,7 +555,12 @@ ${SEARCH_JS}
 export function renderToHtml(model: RenderModel, options: RenderOptions = {}): string {
   const indexJson = searchIndexJson(model, Boolean(options.multiPage));
   const desc = model.description ?? "";
-  const links = symbolLinks(model, (name) => `#symbol-${slug(name)}`);
+  const links = symbolLinks(
+    model,
+    (name) => `#symbol-${slug(name)}`,
+    undefined,
+    options.externalLinks,
+  );
 
   const toc = [
     ...model.sections.map(
@@ -600,7 +627,7 @@ export function renderToHtmlMulti(
   const desc = model.description ?? "";
 
   const symbolSlug = (name: string) => `symbols/${slug(name)}.html`;
-  const links = symbolLinks(model, symbolSlug);
+  const links = symbolLinks(model, symbolSlug, undefined, options.externalLinks);
 
   const readmeBody = model.sections.length
     ? model.sections
@@ -657,7 +684,7 @@ export function renderToHtmlMulti(
     const symToc = `<li><a href="../index.html#api">API</a></li>
       <li><a href="../index.html">${escapeHtml(model.title)}</a></li>`;
     const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← Back to docs</a></p>
-      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name))}</section>`;
+      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks))}</section>`;
     pages.push({
       path: symbolSlug(sym.name),
       html: pageShell({

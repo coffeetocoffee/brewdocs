@@ -44,7 +44,7 @@ npx @brewdocs/cli build ./examples/lib
 | Command | Description |
 | --- | --- |
 | `brewdocs build <src>` | Extract docs into a single `index.html` |
-| `brewdocs build-all <src>` | Build every discovered version |
+| `brewdocs build-all <src>` | Build every discovered version (`--workspaces`: one site per workspace package + root index) |
 | `brewdocs export <src>` | Static export (fully self-contained) |
 | `brewdocs deploy <src>` | Deploy to a local `*.brewdocs.dev` subdomain |
 | `brewdocs serve` | Start the local hosting server + web drop-in |
@@ -59,6 +59,8 @@ npx @brewdocs/cli build ./examples/lib
 | `brewdocs harvest <src>` | Propose `@example` snippets from README + tests |
 | `brewdocs themes` | List available themes |
 | `brewdocs gallery` | Build a gallery of example sites |
+| `brewdocs mcp` | MCP stdio server over a `docmodel.json` (for agent workflows) |
+| `brewdocs drafts` | Manage private draft links (`list` / `extend` / `revoke`) |
 
 ### Common options
 
@@ -80,6 +82,7 @@ brewdocs doctor ./my-project               # terminal report (score + issues)
 brewdocs doctor ./my-project --json        # machine-readable report
 brewdocs doctor ./my-project --badge docs-coverage.svg   # codecov-style SVG badge
 brewdocs doctor ./my-project --min-coverage 80   # exit 1 below 80%
+brewdocs doctor ./my-project --workspaces  # per-package reports + rollup score
 ```
 
 The score weighs documented symbols (60%), documented params (20%),
@@ -193,6 +196,23 @@ console.log('params of brew:', JSON.stringify(d.symbols.find(s => s.name === 'br
 console.log('deprecated:', d.symbols.filter(s => s.deprecated).map(s => s.name + ' -> ' + (s.replacements ?? []).join(', ')));
 "
 ```
+
+## MCP server (for agent workflows)
+
+`brewdocs mcp` serves the validated `docmodel.json` over stdio using the
+Model Context Protocol — three tools, freshness-checked on every call so
+agents never trust stale docs:
+
+```bash
+brewdocs build ./my-project --out dist   # emits dist/docmodel.json
+brewdocs mcp dist/docmodel.json
+```
+
+Tools: `search_symbols` (fuzzy name/description search), `symbol_signature`
+(full signature + params + docs + deprecation), `deprecated_replacements`
+(deprecated symbols with their successors). Every result is prefixed with
+the freshness stamp (`version`, `gitSha`, `generatedAt`); pass
+`expectedVersion` to have mismatches reported as stale docs.
 
 ## Web drop-in (for non-devs)
 

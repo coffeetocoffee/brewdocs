@@ -53,6 +53,12 @@ outputs:
   coverage:
     description: Docs coverage percentage (0-100) measured by `brewdocs doctor`.
     value: ${{ steps.doctor.outputs.coverage }}
+  badge:
+    description: Path to the docs-coverage SVG badge written by the doctor step.
+    value: ${{ steps.doctor.outputs.badge }}
+  trend-svg:
+    description: Path to the coverage-trend sparkline SVG written by the doctor step.
+    value: ${{ steps.doctor.outputs.trend-svg }}
 runs:
   using: composite
   steps:
@@ -83,6 +89,8 @@ runs:
         REPORT=$(brewdocs "${ARGS[@]}")
         SCORE=$(echo "$REPORT" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(String(JSON.parse(d).score)))")
         echo "coverage=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "badge=${{ inputs.badge }}" >> "$GITHUB_OUTPUT"
+        echo "trend-svg=${{ inputs.trend-svg }}" >> "$GITHUB_OUTPUT"
     - name: CI guardian (PR comment)
       if: ${{ inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
       shell: bash
