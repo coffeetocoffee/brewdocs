@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/plugin-sdk",
-  "version": "2.0.0",
+  "version": "2.5.0",
   "description": "SDK for writing BrewDocs plugins: language adapters, lifecycle hooks, theme contributions.",
   "type": "module",
   "license": "MIT",
@@ -28,7 +28,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@brewdocs/core": "^2.0.0",
+    "@brewdocs/core": "^2.5.0",
     "@types/node": "^20.19.43"
   }
 }
