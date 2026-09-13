@@ -27,3 +27,7 @@ jobs:
         run: npm publish --workspace=@brewdocs/cli --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish @brewdocs/plugin-sdk
+        run: npm publish --workspace=@brewdocs/plugin-sdk --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
