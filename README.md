@@ -4,413 +4,167 @@
 [![License: MIT](https://img.shields.io/github/license/coffeetocoffee/brewdocs)](./LICENSE)
 [![npm version](https://img.shields.io/npm/v/@brewdocs/cli)](https://www.npmjs.com/package/@brewdocs/cli)
 
-**Brew your docs, serve them hot.**
+**Brew your docs, serve them hot.** Point it at code, get a beautiful doc site. Zero config, one command, done.
 
-Point BrewDocs at a GitHub repo or npm package and get a clean, hosted, one-page
-doc site. Devs get an API/CLI; non-devs get a web drop-in.
-
-BrewDocs automatically extracts documentation from:
-
-- **README** — parsed into sections, with frontmatter support
-- **JSDoc / TSDoc** — pulled from your exported functions, classes, and types
-- **Exported symbols** — resolved via the TypeScript compiler (types, params, returns)
-- **Classes & interfaces** — members (methods, properties, constructors) with
-  visibility/static/readonly modifiers, generic type parameters, `@throws`, `@see`
-- **Cross-links** — type references resolve to their symbol pages, inside
-  signatures, parameter tables, members, and `@throws`/`@see` (Rustdoc-style)
-- **package.json** — name, version, license, keywords, and more
-
-It renders a single, self-contained HTML page with a real theme, client-side
-search (`⌘K` / `Ctrl+K`), a version switcher, and a light/dark toggle.
+```bash
+npx @brewdocs/cli build ./my-project --out dist
+# open dist/index.html ☕
+```
 
 ---
 
-## Quick start
+## 🆕 Fresh out of the oven — v2.0
+
+The big one. BrewDocs grew up (but still fits in one cup):
+
+| New roast | Taste |
+| --- | --- |
+| 🐍🐹 **Python + Go support** | Not just TypeScript anymore. `brewdocs build ./python-package` just works — AST docstrings, Go doc comments, the whole pot |
+| 🔌 **Plugin SDK** | `definePlugin()` + `defineAdapter()` — teach BrewDocs new languages, hook the pipeline, theme it. [`@brewdocs/plugin-sdk`](./packages/plugin-sdk) |
+| 📝 **Guides + MDX** | Drop `.md`/`.mdx` in `content/`, get real guide pages with sidebar nav (`nav.yml`) and `<Callout>`-style components |
+| 🎨 **Theme manifests** | `themes/brand.yml` — extend `ink`, override vars, inject slot HTML. Your brand, our layout |
+| ⚡ **`--cache`** | Content-hash the source, skip the re-brew. Extraction cached in `.brewdocs/extract.json` |
+
+```bash
+brewdocs build ./my-project --out dist --theme brand --cache --plugins ./plugin.cjs
+```
+
+---
+
+## 😋 Quick taste
 
 ```bash
 npm install -g @brewdocs/cli
 brewdocs build ./my-project --out dist
-# open dist/index.html
 ```
 
-Or without installing:
+No install? No problem:
 
 ```bash
 npx @brewdocs/cli build ./examples/lib
 ```
 
-## CLI
+Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 
-| Command | Description |
+## 🫘 What's inside
+
+- **README** → sections + frontmatter, **JSDoc/TSDoc** → params, returns, examples, **`package.json`** → version, license, keywords
+- **Classes, generics, `@throws`, `@see`** with Rustdoc-style cross-links
+- One self-contained HTML page: real theme, `⌘K` search, version switcher, light/dark toggle
+- `docmodel.json` next to every build — your docs as queryable data (MCP-ready 🤖)
+
+## 📖 Full menu
+
+<details>
+<summary><b>Brew it</b> — build, export, deploy, serve</summary>
+
+| Command | Does what |
 | --- | --- |
-| `brewdocs build <src>` | Extract docs into a single `index.html` |
-| `brewdocs build-all <src>` | Build every discovered version (`--workspaces`: one site per workspace package + root index) |
-| `brewdocs export <src>` | Static export (fully self-contained) |
-| `brewdocs deploy <src>` | Deploy to a local `*.brewdocs.dev` subdomain |
-| `brewdocs serve` | Start the local hosting server + web drop-in |
-| `brewdocs versions <src>` | List available versions |
-| `brewdocs doctor <src>` | Docs coverage report (+ badge, JSON, CI gate, trend) |
-| `brewdocs diff <src>` | API diff between two git tags (migration guide) |
-| `brewdocs changelog <src>` | Auto changelog section from an API diff |
-| `brewdocs ci <src>` | PR report: coverage delta + API diff vs base (--post to comment) |
-| `brewdocs gate <src>` | Release gate: breaking changes need a guide or acknowledgment |
-| `brewdocs draft <src>` | Scaffold JSDoc for undocumented exported symbols |
-| `brewdocs prove <src>` | Typecheck every `@example` against the package |
-| `brewdocs harvest <src>` | Propose `@example` snippets from README + tests |
-| `brewdocs themes` | List available themes |
-| `brewdocs gallery` | Build a gallery of example sites |
-| `brewdocs mcp` | MCP stdio server over a `docmodel.json` (for agent workflows) |
-| `brewdocs drafts` | Manage private draft links (`list` / `extend` / `revoke`) |
+| `build <src>` | One `index.html` (`--multi` for per-symbol pages, `--watch` to re-brew, `--cache` to skip) |
+| `build-all <src>` | Every version (`--workspaces` for monorepos) |
+| `export <src>` | Fully self-contained static site (+ `--markdown`, `--json`) |
+| `markdown <src>` | Markdown/MDX reference (`--format md\|mdx`, `--multi`) |
+| `docmodel <src>` | Machine-readable API knowledge (`--schema` for the JSON Schema) |
+| `deploy <src>` | Ship to `*.brewdocs.dev` (`--storage s3`, `--org`, `--private`, `--draft`) |
+| `serve` | Local hosting + web drop-in (`/api/build`, `/api/export`, `/api/sites`) |
+| `preview <src>` | Build + serve locally |
+| `gallery` | Example-sites gallery |
+| `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
 
-### Common options
+Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `--storage`, `--multi`, `-w/--watch`, `--plugins <a,b>`, `--cache`, `--no-docmodel`.
 
-- `-o, --out <dir>` — output directory (default `dist`)
-- `-t, --theme <name>` — `coffee` (default), `ink`, `matcha`, `newsprint` — or a v2.0 theme manifest name
-- `--dark` — force dark mode
-- `-v, --version <tag>` — build a specific version (git tag)
-- `-n, --name <sub>` — subdomain name for `deploy`
-- `--storage <local|s3>` — backend for `deploy` / `serve` (see below)
-- `--multi` — emit one HTML page per exported symbol (`symbols/<name>.html`)
-- `-w, --watch` — rebuild on source changes (`build` only)
-- `--plugins <a,b>` — v2.0: plugin modules (paths relative to the source, or package names)
-- `--cache` — v2.0: incremental extraction cache (`.brewdocs/extract.json`)
+</details>
 
-## Docs coverage (`brewdocs doctor`)
+<details>
+<summary><b>Guard it</b> — coverage, diffs, CI gates</summary>
 
-Score your API documentation and gate CI on it:
+- `doctor` — docs coverage score + badge + `--min-coverage` gate + `--record` trends
+- `diff --from v1 --to v2` — **semantic** API diff (alias-aware, member shapes included)
+- `changelog` — "what broke / migration notes" from a diff
+- `ci --base origin/main` — PR report, `--post` to comment, `--fail-on-breaking`
+- `gate --from v1` — block breaking releases without a guide or acknowledgment
 
-```bash
-brewdocs doctor ./my-project               # terminal report (score + issues)
-brewdocs doctor ./my-project --json        # machine-readable report
-brewdocs doctor ./my-project --badge docs-coverage.svg   # codecov-style SVG badge
-brewdocs doctor ./my-project --min-coverage 80   # exit 1 below 80%
-brewdocs doctor ./my-project --workspaces  # per-package reports + rollup score
-```
+</details>
 
-The score weighs documented symbols (60%), documented params (20%),
-documented return types (10%), and usage examples (10%). Set a
-persistent threshold in `brewdocs.yml` with `minCoverage: 80`.
+<details>
+<summary><b>Grow it</b> — drafts, proofs, harvests, agents</summary>
 
-### Coverage trends
+- `draft [--fix]` — scaffold JSDoc for undocumented symbols
+- `prove [--strict]` — typecheck every `@example` (yes, really)
+- `harvest` — propose examples from README + tests
+- `mcp [docmodel.json]` — MCP stdio server: `search_symbols`, `symbol_signature`, `deprecated_replacements` (freshness-checked, so agents never sip stale docs)
+- `drafts` / `keys` — private draft links + API keys
 
-Record the score on every build and watch the trend (one record per
-version, capped at 100 entries; commit `.brewdocs/coverage.json` to keep
-the trend across CI runs):
+</details>
 
-```bash
-brewdocs doctor ./my-project --record                  # append score to .brewdocs/coverage.json
-brewdocs doctor ./my-project                           # shows the trend when history exists
-brewdocs doctor ./my-project --trend-svg docs-trend.svg  # sparkline SVG for your README
-```
-
-## CI guardian
-
-`brewdocs ci` compares the working tree against a base ref and reports
-coverage changes plus the API diff — built for PRs:
-
-```bash
-brewdocs ci . --base origin/main                       # print the markdown report
-brewdocs ci . --base origin/main --post                # post/update one PR comment (marker-tracked)
-brewdocs ci . --base origin/main --post --min-coverage 80 --fail-on-breaking   # gate the PR
-```
-
-`--post` needs `GITHUB_TOKEN` and a PR number (`--pr N`, `GITHUB_REF`, or the
-pull_request event payload). It finds the existing comment by the
-`<!-- brewdocs:ci -->` marker and updates it instead of spamming. With the
-bundled GitHub Action, set `pr-comment: true` (and optionally
-`min-coverage`) to wire this up; the workflow needs
-`permissions: pull-requests: write`.
-
-## Release gate
-
-Block a release that breaks the API unless a migration guide is generated
-or the break is explicitly acknowledged:
-
-```bash
-brewdocs gate . --from v1.0.0                    # exit 1 when breaking changes are unhandled
-brewdocs gate . --from v1.0.0 --out dist         # passes: writes dist/MIGRATION.md + dist/diff.html
-brewdocs gate . --from v1.0.0 --acknowledge "reviewed"   # passes: records .brewdocs/*.ack.json
-```
-
-## Auto-generated changelog sections
-
-Turn an API diff into a "What's new / What broke / Migration notes"
-markdown section (plain text, or inserted after the H1 of an existing
-CHANGELOG):
-
-```bash
-brewdocs changelog . --from v1.0.0 --to v2.0.0                 # print the section
-brewdocs changelog . --from v1.0.0 --to v2.0.0 --out section.md
-brewdocs changelog . --from v1.0.0 --to v2.0.0 --file CHANGELOG.md
-```
-
-## Migration guides (`brewdocs diff`)
-
-Diff the exported API between two git tags and generate a standalone
-"What's new / What broke" page:
-
-```bash
-brewdocs diff ./my-project --from v1.0.0 --to v2.0.0 --out dist
-# -> dist/diff.html (added / removed / changed, breaking changes highlighted)
-brewdocs diff ./my-project --from v1.0.0 --to v2.0.0 --json
-```
-
-On multi-version sites (`brewdocs build-all`), diff pages between
-consecutive versions are generated automatically and linked from the
-version switcher.
-
-Diffing is **semantic**: parameter and return types are compared after
-unwrapping trivial type aliases (`UserId` → `string`), so cosmetic type
-renames don't create false breaking changes. Class/interface member
-shapes are diffed too — removed members or changed member signatures
-count as breaking (added interface members break implementers; added
-class members don't).
-
-## Docs as data (`docmodel.json`)
-
-HTML is only one rendering of the DocModel — the structured API
-knowledge (symbols, resolved types, params, examples, deprecations,
-coverage, freshness stamp) also ships as a first-class JSON artifact for
-bots, CI jobs, and editors. Every `brewdocs build` / `export` writes
-`docmodel.json` next to the HTML (opt out with `docmodel: false` in
-`brewdocs.yml` or `--no-docmodel`):
-
-```bash
-brewdocs docmodel ./my-project --out dist          # write it explicitly
-brewdocs docmodel ./my-project --out dist --schema # also write the published JSON Schema
-```
-
-The artifact is schema-versioned (`"schema": "brewdocs/docmodel@1"`) and
-validates against the published contract at
-[`packages/core/schemas/docmodel@1.schema.json`](packages/core/schemas/docmodel@1.schema.json)
-(`https://brewdocs.dev/schemas/docmodel@1.schema.json`). The freshness
-stamp — package `version`, `source.gitSha`, `generatedAt` — lets a
-consumer reject stale docs (`version` differs from the running code)
-before trusting the content:
-
-```bash
-# A CI bot answering "what does `brew` take, and what's deprecated?"
-node -e "
-const d = require('./dist/docmodel.json');
-if (d.version !== require('./package.json').version) throw new Error('stale docs');
-console.log('exports:', d.symbols.map(s => s.name).join(', '));
-console.log('params of brew:', JSON.stringify(d.symbols.find(s => s.name === 'brew')?.params));
-console.log('deprecated:', d.symbols.filter(s => s.deprecated).map(s => s.name + ' -> ' + (s.replacements ?? []).join(', ')));
-"
-```
-
-## MCP server (for agent workflows)
-
-`brewdocs mcp` serves the validated `docmodel.json` over stdio using the
-Model Context Protocol — three tools, freshness-checked on every call so
-agents never trust stale docs:
-
-```bash
-brewdocs build ./my-project --out dist   # emits dist/docmodel.json
-brewdocs mcp dist/docmodel.json
-```
-
-Tools: `search_symbols` (fuzzy name/description search), `symbol_signature`
-(full signature + params + docs + deprecation), `deprecated_replacements`
-(deprecated symbols with their successors). Every result is prefixed with
-the freshness stamp (`version`, `gitSha`, `generatedAt`); pass
-`expectedVersion` to have mismatches reported as stale docs.
-
-## Web drop-in (for non-devs)
-
-```bash
-brewdocs serve
-```
-
-Open the printed URL, paste a GitHub repo / npm package / local path, hit **Brew**,
-and get a live preview with **Open**, **Export HTML**, and **Re-brew** actions.
-
-## Themes
-
-Each theme is just a set of CSS custom properties, so switching never touches
-layout:
-
-- **Coffee** — warm, serif headings (default)
-- **Ink** — editorial black-on-white serif
-- **Matcha** — soft green
-- **Newsprint** — minimal off-white serif
-
-### Theme manifests (v2.0)
-
-Drop a `themes/<name>.yml` (or `.json`) next to your source to extend a built-in
-base, override palette vars, add custom CSS, and fill layout slots
-(`head` / `header` / `mainBefore` / `mainAfter` / `footer`, inline HTML or
-partial files). Use it with `--theme <name>`:
+## 🎨 Make it yours
 
 ```yaml
-# themes/brand.yml
+# brewdocs.yml — CLI flags always win
+theme: ink
+dark: false
+plugins:
+  - ./plugin.cjs
+cache: true
+contentDir: content
+```
+
+```yaml
+# themes/brand.yml — extend a base, add your flavor
 base: ink
 vars:
   --accent: "#ff0000"
-css: "h1 { text-transform: uppercase; }"
 slots:
-  footer: partials/brand-footer.html   # or inline HTML
+  footer: partials/brand-footer.html
 ```
 
-## Guides & MDX (`content/`) — v2.0
-
-Put `.md` / `.mdx` pages in a `content/` directory (rename via `contentDir:`)
-and they are published under `content/<slug>.html`, linked from the index and
-the sidebar. Pages support frontmatter (`title`, `description`, `order`,
-`slug`). An optional `nav.yml` groups sidebar links:
-
 ```yaml
+# nav.yml — sidebar for your guides
 Guides:
   Getting started: content/getting-started.html
-  Advanced: content/advanced.html
 ```
-
-MDX-lite: `<Callout type="tip">…</Callout>`-style components compile to
-`<div class="mdx" data-component="Callout" data-type="tip">…</div>`
-placeholders (style/hydrate them via theme slots); import/export lines are
-stripped.
-
-## Plugins & languages (v2.0)
-
-BrewDocs is no longer TS-only. Built-in language adapters extract symbols from
-**Python** packages (AST + docstrings, via `python`) and **Go** modules — they
-kick in automatically when no JS/TS exports are found, so `brewdocs build
-./python-package` just works.
-
-Third-party plugins (`brewdocs build ./src --plugins ./plugin.cjs` or
-`plugins:` in `brewdocs.yml`) can register adapters and hook the pipeline via
-[`@brewdocs/plugin-sdk`](./packages/plugin-sdk):
 
 ```ts
-import { definePlugin, defineAdapter } from "@brewdocs/plugin-sdk";
-
-export default definePlugin({
+// plugin.cjs — hooks + adapters + theme in one object
+module.exports = {
   name: "my-plugin",
-  adapters: [defineAdapter({
-    id: "mylang",
-    detect: (ctx) => /* is this my language? */ false,
-    extract: (ctx) => [/* SymbolDoc[] */],
-  })],
-  onExtract(result) { /* mutate the ExtractResult */ },
-  onRender(html, page) { return html; },           // per-page HTML hook
-  theme: { vars: { "--accent": "#123456" } },      // palette contributions
-});
+  onExtract: (result) => result,
+  onRender: (html) => html,
+  theme: { vars: { "--accent": "#123456" } },
+};
 ```
 
-### Incremental builds (v2.0)
+## 🤖 Docs as data
 
-`--cache` (or `cache: true` in `brewdocs.yml`) content-hashes the source tree
-and caches the extraction step in `.brewdocs/extract.json`; unchanged sources
-skip the TS compile entirely. Rendering stays per-build, so theme/content
-changes are always reflected.
+Every build emits `docmodel.json` (schema: `brewdocs/docmodel@1`) — symbols, types, coverage, freshness stamp. Bots, CI, and editors welcome:
 
-## Configuration (`brewdocs.yml`)
-
-A `brewdocs.yml` (or `brewdocs.json`) in the source directory sets build defaults;
-CLI flags always override it:
-
-```yaml
-theme: ink
-dark: false
-name: mydocs
-multi: true
-storage: s3          # local (default) or s3
-plugins:             # v2.0: paths (relative to the source) or package names
-  - ./plugin.cjs
-cache: true          # v2.0: incremental extraction cache
-contentDir: content  # v2.0: guide pages directory (default "content")
-s3:
-  bucket: my-bucket
-  region: auto
-  endpoint: https://<acct>.r2.cloudflarestorage.com
+```bash
+brewdocs mcp dist/docmodel.json   # agents, come get your docs
 ```
 
-## Auto-publish your docs (GitHub Action)
-
-Add `.github/workflows/brewdocs.yml` (see the repo's own, which builds `./docs`)
-to brew your docs to GitHub Pages on every push:
+## 🚀 Ship it
 
 ```yaml
+# .github/workflows/brewdocs.yml
 - run: npx @brewdocs/cli build ./docs --out docs-site --theme ink
 - uses: actions/upload-pages-artifact@v3
   with: { path: docs-site }
 ```
 
-Launch copy (Show HN / ProductHunt blurbs) lives in [`PITCH.md`](./PITCH.md).
+S3/R2 deploys, private token-gated sites, draft links with expiry, rate-limited hosting — it all works, details in the code and `brewdocs <cmd> --help`.
 
-## Local API
+## 🧱 Under the lid
 
-When you run `brewdocs serve`, these endpoints are available:
-
-- `POST /api/build` — `{ "source": "./examples/lib" }` → `{ "url": "https://lib.brewdocs.dev", "subdomain": "lib" }`
-- `POST /api/export` — returns the built HTML as a download
-- `GET /api/sites` — list deployed sites
-
-`source` may be a local path, an npm package name, or a GitHub URL.
-
-Run `brewdocs serve --storage s3` (with the `BREWDOCS_S3_*` env vars above) to make
-the live server deploy new brews straight to object storage instead of the local
-`hosting/` folder.
-
-> **Securing the hosted server:** when `BREWDOCS_TOKEN` is set, the `/api/build`
-> and `/api/export` endpoints require `Authorization: Bearer <token>`. Set it
-> before exposing `brewdocs serve` to the network.
->
-> By default those endpoints are also protected from abuse: a per-IP rate
-> limiter (env `BREWDOCS_RATE_LIMIT`, `BREWDOCS_RATE_WINDOW_MS`; defaults 10
-> req / 60s) and a bounded build job queue (env `BREWDOCS_MAX_BUILDS`,
-> `BREWDOCS_MAX_QUEUE`; defaults 2 concurrent, 8 queued). Excess requests get
-> `429` (rate limited) or `503` (queue full) with a `Retry-After` header, so a
-> synchronous git-clone + TS-compile per request can't be used to OOM the box.
-
-## Deploying to real object storage (S3 / Cloudflare R2)
-
-By default `deploy` writes to a local directory. To deploy to S3-compatible
-storage (e.g. Cloudflare R2), install the AWS SDK and set environment variables:
-
-```bash
-npm i @aws-sdk/client-s3
-
-export BREWDOCS_S3_BUCKET=my-bucket
-export BREWDOCS_S3_REGION=auto
-export BREWDOCS_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
-export BREWDOCS_S3_ACCESS_KEY_ID=...
-export BREWDOCS_S3_SECRET_ACCESS_KEY=...
-export BREWDOCS_PUBLIC_DOMAIN=brewdocs.dev   # serves <sub>.brewdocs.dev
-
-brewdocs deploy ./examples/lib --name lib --storage s3
-```
-
-BrewDocs uploads the whole built site to `<bucket>/<subdomain>/...` and prints
-the public URL. Point a wildcard DNS record (`*.<public-domain>`) at your bucket
-to serve every subdomain.
-
-> The local backend keeps the project dependency-free; the S3 adapter loads
-> `@aws-sdk/client-s3` only when `--storage s3` is selected.
-
-## Architecture
-
-Monorepo (npm workspaces):
-
-- `@brewdocs/core` — extractors, markdown + syntax highlighter, themes, search
-  index, versioning, deploy/storage adapters, gallery
-- `@brewdocs/cli` — the command line interface + local hosting server + web drop-in
-
-The core pipeline is a pure flow:
+Monorepo: `@brewdocs/core` (pipeline) + `@brewdocs/cli` (commands + server) + `@brewdocs/plugin-sdk` (contracts). Zero runtime deps besides `typescript`.
 
 ```
 Source → ExtractResult → RenderModel → standalone HTML
 ```
 
-## Development
-
 ```bash
 npm install
-npm test          # 40+ tests across extractors, render, search, deploy, API
-npm run brewdocs -- build ./docs --theme ink --out docs-site   # dogfood docs
-npm run brewdocs -- gallery --out gallery                      # example gallery
+npm test          # 215 tests, all green
+npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
 
-## License
-
-MIT
+Launch blurbs live in [`PITCH.md`](./PITCH.md). License: MIT. Go brew something. ☕
