@@ -1,8 +1,10 @@
-import type { PackageInfo, RenderModel, SymbolDoc } from "./types.js";
+import type { ContentPage, PackageInfo, RenderModel, SymbolDoc } from "./types.js";
 import { markdownToHtml } from "./markdown.js";
 import { highlightCode } from "./highlight.js";
 import { getTheme, type Theme } from "./themes.js";
 import { buildSearchIndex } from "./search.js";
+import { themeFromRef, type Slots } from "./theme-manifest.js";
+import { applyOnRender, mergePluginThemes, type BrewDocsPlugin } from "./plugins.js";
 
 export interface VersionLink {
   version: string;
@@ -34,6 +36,19 @@ export interface RenderOptions {
    * Set false for HTML-only output (`docmodel: false` in brewdocs.yml).
    */
   emitDocmodel?: boolean;
+  /**
+   * v2.0: source root used to resolve theme manifests, `content/` dirs and
+   * config defaults. Without it the renderer stays purely functional.
+   */
+  root?: string;
+  /** v2.0: layout-slot partials (head/header/mainBefore/mainAfter/footer). */
+  slots?: Slots;
+  /** v2.0: loaded plugins (onRender hook + theme var contributions). */
+  plugins?: BrewDocsPlugin[];
+  /** v2.0: enable incremental extraction caching for this build. */
+  cache?: boolean;
+  /** v2.0: set false to skip the `content/` layer entirely. */
+  content?: boolean;
 }
 
 function escapeHtml(input: string): string {
@@ -141,11 +156,11 @@ function linkifyHighlighted(code: string, links?: SymbolLinks): string {
   return out;
 }
 
-function themeVars(theme: Theme): string {
-  const light = Object.entries(theme.light)
+function themeVars(theme: Theme, extra?: { vars?: Record<string, string>; darkVars?: Record<string, string> }): string {
+  const light = Object.entries({ ...theme.light, ...(extra?.vars ?? {}) })
     .map(([k, v]) => `  ${k}: ${v};`)
     .join("\n");
-  const dark = Object.entries(theme.dark)
+  const dark = Object.entries({ ...theme.dark, ...(extra?.darkVars ?? {}) })
     .map(([k, v]) => `  ${k}: ${v};`)
     .join("\n");
   return `:root, [data-theme="light"] {\n${light}\n}\n[data-theme="dark"] {\n${dark}\n}`;
@@ -386,6 +401,11 @@ const STRUCTURAL_CSS = `
   nav.toc { font-size: 0.92rem; }
   nav.toc a { color: var(--muted); text-decoration: none; }
   nav.toc a:hover { color: var(--accent); }
+  .mdx { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  .mdx::before { content: attr(data-component); display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+  .nav-group { margin: 0.75rem 0; padding: 0; border: none; }
+  nav.toc .nav-group li { border-left: 2px solid var(--line); }
+  nav.toc .nav-heading { color: var(--ink); font-weight: 600; padding: 0.25rem 0.9rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
 `;
 
 function searchOverlay(): string {
@@ -489,7 +509,9 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
   renderOptions: RenderOptions;
   indexJson: string;
 }): string {
-  const theme = getTheme(opts.renderOptions.theme);
+  const theme = themeFromRef(opts.renderOptions.theme, opts.renderOptions.root);
+  const pluginTheme = mergePluginThemes(opts.renderOptions.plugins ?? []);
+  const slots = opts.renderOptions.slots ?? {};
   const initial = opts.renderOptions.dark ? "dark" : "light";
   const title = escapeHtml(opts.title);
   const desc = opts.description
@@ -499,6 +521,7 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
     opts.renderOptions.score !== undefined
       ? `<span class="coverage-chip" title="Docs coverage from brewdocs doctor">🩺 ${opts.renderOptions.score}% documented</span>`
       : "";
+  const extraCss = theme.css ? `\n${theme.css}\n` : "";
   return `<!doctype html>
 <html lang="en" data-theme="${initial}">
 <head>
@@ -506,31 +529,35 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${title} · BrewDocs</title>
 <style>
-${themeVars(theme)}
-${STRUCTURAL_CSS}
+${themeVars(theme, pluginTheme)}
+${STRUCTURAL_CSS}${extraCss}
 </style>
+${slots.head ?? ""}
 </head>
- <body>
- <a class="skip-link" href="#main-content">Skip to content</a>
- ${searchOverlay()}
- <header>
-  <div class="header-actions">
-    <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
-    ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion)}
-    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
-  </div>
-  <div class="cup">☕</div>
-   <h1>${title}</h1>
-   ${desc}
-   ${coverChip}
+  <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  ${searchOverlay()}
+  <header>
+   <div class="header-actions">
+     <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
+     ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion)}
+     <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
+   </div>
+   ${slots.header ?? ""}
+   <div class="cup">☕</div>
+    <h1>${title}</h1>
+    ${desc}
+    ${coverChip}
 </header>
- <div class="layout">
-   <nav class="toc" aria-label="Table of contents"><ul>${opts.toc}</ul></nav>
-   <main id="main-content">
-     ${opts.main}
-   </main>
- </div>
-<footer>Brewed with <a href="#">BrewDocs</a>${freshnessHtml(opts.renderOptions.freshness)} — Brew your docs, serve them hot.</footer>
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents"><ul>${opts.toc}</ul></nav>
+    <main id="main-content">
+      ${slots.mainBefore ?? ""}
+      ${opts.main}
+      ${slots.mainAfter ?? ""}
+    </main>
+  </div>
+<footer>Brewed with <a href="#">BrewDocs</a>${freshnessHtml(opts.renderOptions.freshness)} — Brew your docs, serve them hot.${slots.footer ? `\n${slots.footer}` : ""}</footer>
 <script id="search-index" type="application/json">${opts.indexJson}</script>
 <script>
 (function () {
@@ -567,6 +594,7 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
       (s) => `<li><a href="#${escapeHtml(s.id)}">${escapeHtml(s.title)}</a></li>`,
     ),
     model.symbols.length ? `<li><a href="#api">API</a></li>` : "",
+    contentIndexToc(model),
   ]
     .filter(Boolean)
     .join("\n");
@@ -597,16 +625,20 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
         </section>`
       : "";
 
-  const main = `${metaTable(model.pkg)}${readmeBody}${api}${emptyState}`;
+  const main = `${metaTable(model.pkg)}${readmeBody}${api}${contentIndexSection(model)}${emptyState}`;
 
-  return pageShell({
-    title: model.title,
-    description: desc,
-    toc,
-    main,
-    renderOptions: options,
-    indexJson,
-  });
+  return applyOnRender(
+    options.plugins ?? [],
+    pageShell({
+      title: model.title,
+      description: desc,
+      toc,
+      main,
+      renderOptions: options,
+      indexJson,
+    }),
+    { path: "index.html" },
+  );
 }
 
 export interface RenderedPage {
@@ -660,11 +692,12 @@ export function renderToHtmlMulti(
       (s) => `<li><a href="#${escapeHtml(s.id)}">${escapeHtml(s.title)}</a></li>`,
     ),
     model.symbols.length ? `<li><a href="#api">API</a></li>` : "",
+    contentIndexToc(model),
   ]
     .filter(Boolean)
     .join("\n");
 
-  const indexMain = `${metaTable(model.pkg)}${readmeBody}${apiSummary}`;
+  const indexMain = `${metaTable(model.pkg)}${readmeBody}${apiSummary}${contentIndexSection(model)}`;
 
   const pages: RenderedPage[] = [
     {
@@ -687,16 +720,118 @@ export function renderToHtmlMulti(
       ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks))}</section>`;
     pages.push({
       path: symbolSlug(sym.name),
-      html: pageShell({
-        title: `${sym.name} · ${model.title}`,
-        description: sym.description ?? "",
-        toc: symToc,
-        main: symMain,
-        renderOptions: options,
-        indexJson,
-      }),
+      html: applyOnRender(
+        options.plugins ?? [],
+        pageShell({
+          title: `${sym.name} · ${model.title}`,
+          description: sym.description ?? "",
+          toc: symToc,
+          main: symMain,
+          renderOptions: options,
+          indexJson,
+        }),
+        { path: symbolSlug(sym.name) },
+      ),
     });
   }
 
   return pages;
+}
+
+/* ------------------------------------------------------------------ *
+ * v2.0 content pages: authored guides rendered through the same     *
+ * page shell, with a "Guides" nav group and an in-page heading TOC. *
+ * ------------------------------------------------------------------ */
+
+/** Escape/resolve helper so guide links work from content/<page>.html depth. */
+function relToRoot(depth: number): string {
+  return "../".repeat(depth);
+}
+
+function navGroupsFor(model: RenderModel, pages: ContentPage[], base: string): string {
+  const href = (link: string) =>
+    link.startsWith("http") || link.startsWith("/") || link.startsWith("#")
+      ? link
+      : `${base}${link}`;
+  const groups = model.nav?.length
+    ? model.nav
+    : [{ title: "Guides", items: pages.map((p) => ({ text: p.title, link: `content/${p.slug}.html` })) }];
+  return groups
+    .map(
+      (g) =>
+        `<li class="nav-group"><span class="nav-heading">${escapeHtml(g.title)}</span><ul>${g.items
+          .map((i) => `<li><a href="${escapeHtml(href(i.link))}">${escapeHtml(i.text)}</a></li>`)
+          .join("")}</ul></li>`,
+    )
+    .join("");
+}
+
+/** Render every guide page of the model (used by build()/buildMulti()). */
+export function renderContentPages(
+  model: RenderModel,
+  options: RenderOptions = {},
+): RenderedPage[] {
+  const pages = model.content ?? [];
+  if (pages.length === 0) return [];
+  const indexJson = searchIndexJson(model, true);
+  const out: RenderedPage[] = [];
+  for (const page of pages) {
+    const depth = page.slug.split("/").length; // content/<...>/<name>.html
+    const base = relToRoot(depth); // back to site root
+    const toc = [
+      `<li><a href="${base}index.html">${escapeHtml(model.title)}</a></li>`,
+      navGroupsFor(model, pages, base),
+      page.headings.length
+        ? `<li class="nav-group"><span class="nav-heading">On this page</span><ul>${page.headings
+            .map((h) => `<li><a href="#${escapeHtml(h.id)}">${escapeHtml(h.title)}</a></li>`)
+            .join("")}</ul></li>`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("");
+    const headingsWithIds = page.html.replace(
+      /<h([23])>([^<]+)<\/h\1>/g,
+      (_m, lvl, text) => `<h${lvl} id="${slug(String(text))}">${text}</h${lvl}>`,
+    );
+    const main = `<article class="content-page"><h2>${escapeHtml(page.title)}</h2>${headingsWithIds}</article>`;
+    out.push({
+      path: page.path,
+      html: applyOnRender(
+        options.plugins ?? [],
+        pageShell({
+          title: `${page.title} · ${model.title}`,
+          description: page.description ?? "",
+          toc,
+          main,
+          renderOptions: options,
+          indexJson,
+        }),
+        { path: page.path },
+      ),
+    });
+  }
+  return out;
+}
+
+/** Links (toc entries) for the guide section on the main index page. */
+export function contentIndexToc(model: RenderModel): string {
+  const pages = model.content ?? [];
+  if (pages.length === 0) return "";
+  return `<li><a href="#guides">Guides</a></li>`;
+}
+
+/** HTML block listing guide pages, appended to the index page body. */
+export function contentIndexSection(model: RenderModel): string {
+  const pages = model.content ?? [];
+  if (pages.length === 0) return "";
+  return `<section id="guides"><h2>Guides</h2><ul class="symbol-index">
+    ${pages
+      .map(
+        (p) =>
+          `<li><a href="${escapeHtml(p.path)}">${escapeHtml(p.title)}</a>${
+            p.description ? ` — ${escapeHtml(p.description)}` : ""
+          }</li>`,
+      )
+      .join("\n")}
+  </ul></section>`;
 }

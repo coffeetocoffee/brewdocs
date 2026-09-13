@@ -9,5 +9,12 @@ docs-site/
 gallery/
 *.tsbuildinfo
 
+# v2.0 incremental extraction cache (keep .brewdocs/coverage.json trend history)
+.brewdocs/extract.json
+
+# Python (adapter test artifacts)
+__pycache__/
+*.pyc
+
 # Local-only planning doc (per request)
 ROADMAP.md

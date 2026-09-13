@@ -45,6 +45,7 @@ import {
   buildModel,
   buildWorkspaces,
   detectWorkspaces,
+  loadPlugins,
   rollupCoverage,
   runMcpServer,
   setDraftExpiry,
@@ -72,6 +73,9 @@ interface BuildArgs {
   multi: boolean;
   watch: boolean;
   noDocmodel: boolean;
+  plugins: string[];
+  /** undefined = follow brewdocs.yml, true/false = explicit CLI override. */
+  cache?: boolean;
 }
 
 function parseBuild(argv: string[]): BuildArgs {
@@ -84,6 +88,8 @@ function parseBuild(argv: string[]): BuildArgs {
   let multi = false;
   let watch = false;
   let noDocmodel = false;
+  let cache: boolean | undefined;
+  const plugins: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--out" || arg === "-o") {
@@ -102,6 +108,15 @@ function parseBuild(argv: string[]): BuildArgs {
       name = argv[++i];
     } else if (arg.startsWith("--name=")) {
       name = arg.slice("--name=".length);
+    } else if (arg === "--plugins") {
+      const list = argv[++i] ?? "";
+      for (const p of list.split(",")) if (p.trim()) plugins.push(p.trim());
+    } else if (arg.startsWith("--plugins=")) {
+      for (const p of arg.slice("--plugins=".length).split(",")) if (p.trim()) plugins.push(p.trim());
+    } else if (arg === "--cache") {
+      cache = true;
+    } else if (arg === "--no-cache") {
+      cache = false;
     } else if (arg === "--badge" || arg === "--min-coverage") {
       i++; // value-taking flags the builder ignores, but their values must not become <source>
     } else if (arg.startsWith("--badge=") || arg.startsWith("--min-coverage=")) {
@@ -120,10 +135,10 @@ function parseBuild(argv: string[]): BuildArgs {
   }
   if (!source) {
     throw new Error(
-      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel]",
+      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache]",
     );
   }
-  return { source, out, theme, dark, version, name, multi, watch, noDocmodel };
+  return { source, out, theme, dark, version, name, multi, watch, noDocmodel, plugins, cache };
 }
 
 function printDoctorReport(report: ReturnType<typeof diagnose>): void {
@@ -157,12 +172,18 @@ function printDoctorReport(report: ReturnType<typeof diagnose>): void {
   }
 }
 
-/** Merge CLI flags over brewdocs.yml defaults into render options. */function mergeOptions(args: BuildArgs, config: BrewDocsConfig): RenderOptions {
+/** Merge CLI flags over brewdocs.yml defaults into render options. */function mergeOptions(
+  args: BuildArgs,
+  config: BrewDocsConfig,
+  sourceRoot: string,
+): RenderOptions {
   return {
     theme: args.theme ?? config.theme,
     dark: args.dark || Boolean(config.dark),
     multiPage: args.multi || Boolean(config.multi),
     emitDocmodel: !args.noDocmodel && config.docmodel !== false,
+    plugins: loadPlugins(args.plugins, sourceRoot),
+    cache: args.cache,
   };
 }
 
@@ -706,11 +727,11 @@ export async function run(argv: string[]): Promise<void> {
     const outDir = path.resolve(process.cwd(), args.out);
     try {
       if (rest.includes("--workspaces")) {
-        const files = buildWorkspaces(src, outDir, mergeOptions(args, config));
+        const files = buildWorkspaces(src, outDir, mergeOptions(args, config, src.root));
         console.log(`☕ Brewed ${files.length} workspace site(s) -> ${outDir}`);
         return;
       }
-      const files = await buildVersions(src, outDir, mergeOptions(args, config));
+      const files = await buildVersions(src, outDir, mergeOptions(args, config, src.root));
       console.log(`☕ Brewed ${files.length} version page(s) -> ${outDir}`);
     } finally {
       cleanup();
@@ -724,7 +745,7 @@ export async function run(argv: string[]): Promise<void> {
     const { src, cleanup } = resolved;
     const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
-    const opts = mergeOptions(args, config);
+    const opts = mergeOptions(args, config, src.root);
 
     const doBuild = async (): Promise<void> => {
       const outFile = args.version
@@ -759,7 +780,7 @@ export async function run(argv: string[]): Promise<void> {
     const config = loadConfig(src.root);
     const outDir = path.resolve(process.cwd(), args.out);
     try {
-      const outFile = await exportSite(src, outDir, mergeOptions(args, config));
+      const outFile = await exportSite(src, outDir, mergeOptions(args, config, src.root));
       console.log(`📦 Exported static site -> ${outFile}`);
       if (rest.includes("--markdown")) {
         const md = buildMarkdown(src, outDir, { format: markdownFormat(rest) });
@@ -941,7 +962,7 @@ dark: false
     const { src, cleanup } = resolveCliSource(args.source, args.name);
     const config = loadConfig(src.root);
     const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-preview-"));
-    const files = await buildVersions(src, out, mergeOptions(args, config));
+    const files = await buildVersions(src, out, mergeOptions(args, config, src.root));
     const port = Number(getFlag(rest, "--port") ?? "4000");
     const server = serveStatic(out, port);
     server.on("close", cleanup);
@@ -987,7 +1008,7 @@ dark: false
         src,
         path.resolve(process.cwd(), args.out),
         sub,
-        mergeOptions(args, config),
+        mergeOptions(args, config, src.root),
         storage,
         { org, visibility, token, draft: draftFlag, draftExpires },
       );
@@ -1175,7 +1196,7 @@ function printHelp(): void {
   console.log(`BrewDocs — Brew your docs, serve them hot.
 
 Usage:
-  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel]
+  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark] [--workspaces]
   brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json]
   brewdocs markdown <source> [--out <dir>] [--format md|mdx] [--multi]
@@ -1253,11 +1274,16 @@ Options:
   --dark           Force dark mode by default
   -v, --version   Build a specific version (git tag)
   -n, --name      Subdomain name for deploy
-  --multi         Emit one HTML page per exported symbol
-  -w, --watch     Rebuild on source changes (build only)
+   --multi         Emit one HTML page per exported symbol
+   -w, --watch     Rebuild on source changes (build only)
+   --plugins <a,b> v2.0: plugin modules (paths relative to <source>, or package names)
+   --cache         v2.0: incremental extraction cache (.brewdocs/extract.json)
 
 Config: a brewdocs.yml or brewdocs.json in the source dir sets theme, dark,
-name, multi, and storage (local | s3) defaults. CLI flags override it.
+name, multi, storage (local | s3), plugins, cache, and contentDir defaults.
+CLI flags override it. v2.0: '--theme' also accepts a theme manifest
+(themes/<name>.yml with 'base:', 'vars:', and 'slots:' partials); a
+'content/' directory of .md/.mdx guide pages is published under content/.
 
 Search: press ⌘K / Ctrl+K on any generated page.
 `);

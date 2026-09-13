@@ -86,6 +86,49 @@ export interface SymbolDoc {
 /** Key/value pairs pulled from README frontmatter. */
 export type Frontmatter = Record<string, string>;
 
+/**
+ * v2.0 theme manifest: a base theme plus palette overrides and layout-slot
+ * partials. `slots` values are HTML snippets (inline) or paths (relative to
+ * `manifestDir`) for files whose contents fill head/header/mainBefore/
+ * mainAfter/footer.
+ */
+export interface ThemeManifest {
+  name: string;
+  extends?: string;
+  vars?: Record<string, string>;
+  darkVars?: Record<string, string>;
+  css?: string;
+  slots?: {
+    head?: string;
+    header?: string;
+    mainBefore?: string;
+    mainAfter?: string;
+    footer?: string;
+  };
+  /** Directory partial paths resolve against (manifest location). */
+  manifestDir?: string;
+}
+
+/** A single MDX/markdown guide page from the `content/` directory (v2.0). */
+export interface ContentPage {
+  /** Root-relative path inside `content/`, e.g. `guide/getting-started`. */
+  slug: string;
+  /** Output page path relative to the site root, e.g. `content/getting-started.html`. */
+  path: string;
+  title: string;
+  description?: string;
+  order?: number;
+  html: string;
+  /** In-page heading links (slug + text) for the page TOC. */
+  headings: { id: string; title: string }[];
+}
+
+/** v2.0 navigation model: groups of links rendered in the sidebar. */
+export interface NavGroup {
+  title: string;
+  items: { text: string; link: string }[];
+}
+
 /** A README section delimited by a heading. */
 export interface SectionDoc {
   id: string;
@@ -143,4 +186,8 @@ export interface RenderModel {
   metadata: Record<string, unknown>;
   pkg?: PackageInfo;
   symbols: SymbolDoc[];
+  /** v2.0: authored guide pages from `content/` (empty when none). */
+  content?: ContentPage[];
+  /** v2.0: sidebar navigation (nav.yml when present, else undefined). */
+  nav?: NavGroup[];
 }

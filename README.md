@@ -65,13 +65,15 @@ npx @brewdocs/cli build ./examples/lib
 ### Common options
 
 - `-o, --out <dir>` — output directory (default `dist`)
-- `-t, --theme <name>` — `coffee` (default), `ink`, `matcha`, `newsprint`
+- `-t, --theme <name>` — `coffee` (default), `ink`, `matcha`, `newsprint` — or a v2.0 theme manifest name
 - `--dark` — force dark mode
 - `-v, --version <tag>` — build a specific version (git tag)
 - `-n, --name <sub>` — subdomain name for `deploy`
 - `--storage <local|s3>` — backend for `deploy` / `serve` (see below)
 - `--multi` — emit one HTML page per exported symbol (`symbols/<name>.html`)
 - `-w, --watch` — rebuild on source changes (`build` only)
+- `--plugins <a,b>` — v2.0: plugin modules (paths relative to the source, or package names)
+- `--cache` — v2.0: incremental extraction cache (`.brewdocs/extract.json`)
 
 ## Docs coverage (`brewdocs doctor`)
 
@@ -233,6 +235,75 @@ layout:
 - **Matcha** — soft green
 - **Newsprint** — minimal off-white serif
 
+### Theme manifests (v2.0)
+
+Drop a `themes/<name>.yml` (or `.json`) next to your source to extend a built-in
+base, override palette vars, add custom CSS, and fill layout slots
+(`head` / `header` / `mainBefore` / `mainAfter` / `footer`, inline HTML or
+partial files). Use it with `--theme <name>`:
+
+```yaml
+# themes/brand.yml
+base: ink
+vars:
+  --accent: "#ff0000"
+css: "h1 { text-transform: uppercase; }"
+slots:
+  footer: partials/brand-footer.html   # or inline HTML
+```
+
+## Guides & MDX (`content/`) — v2.0
+
+Put `.md` / `.mdx` pages in a `content/` directory (rename via `contentDir:`)
+and they are published under `content/<slug>.html`, linked from the index and
+the sidebar. Pages support frontmatter (`title`, `description`, `order`,
+`slug`). An optional `nav.yml` groups sidebar links:
+
+```yaml
+Guides:
+  Getting started: content/getting-started.html
+  Advanced: content/advanced.html
+```
+
+MDX-lite: `<Callout type="tip">…</Callout>`-style components compile to
+`<div class="mdx" data-component="Callout" data-type="tip">…</div>`
+placeholders (style/hydrate them via theme slots); import/export lines are
+stripped.
+
+## Plugins & languages (v2.0)
+
+BrewDocs is no longer TS-only. Built-in language adapters extract symbols from
+**Python** packages (AST + docstrings, via `python`) and **Go** modules — they
+kick in automatically when no JS/TS exports are found, so `brewdocs build
+./python-package` just works.
+
+Third-party plugins (`brewdocs build ./src --plugins ./plugin.cjs` or
+`plugins:` in `brewdocs.yml`) can register adapters and hook the pipeline via
+[`@brewdocs/plugin-sdk`](./packages/plugin-sdk):
+
+```ts
+import { definePlugin, defineAdapter } from "@brewdocs/plugin-sdk";
+
+export default definePlugin({
+  name: "my-plugin",
+  adapters: [defineAdapter({
+    id: "mylang",
+    detect: (ctx) => /* is this my language? */ false,
+    extract: (ctx) => [/* SymbolDoc[] */],
+  })],
+  onExtract(result) { /* mutate the ExtractResult */ },
+  onRender(html, page) { return html; },           // per-page HTML hook
+  theme: { vars: { "--accent": "#123456" } },      // palette contributions
+});
+```
+
+### Incremental builds (v2.0)
+
+`--cache` (or `cache: true` in `brewdocs.yml`) content-hashes the source tree
+and caches the extraction step in `.brewdocs/extract.json`; unchanged sources
+skip the TS compile entirely. Rendering stays per-build, so theme/content
+changes are always reflected.
+
 ## Configuration (`brewdocs.yml`)
 
 A `brewdocs.yml` (or `brewdocs.json`) in the source directory sets build defaults;
@@ -244,6 +315,10 @@ dark: false
 name: mydocs
 multi: true
 storage: s3          # local (default) or s3
+plugins:             # v2.0: paths (relative to the source) or package names
+  - ./plugin.cjs
+cache: true          # v2.0: incremental extraction cache
+contentDir: content  # v2.0: guide pages directory (default "content")
 s3:
   bucket: my-bucket
   region: auto

@@ -1,10 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtractResult, PackageInfo, Source } from "./types.js";
+import type { ExtractResult, Source, SymbolDoc } from "./types.js";
 import { extractReadme } from "./extractors/readme.js";
 import { extractPackage } from "./extractors/package.js";
 import { extractExports } from "./extractors/exports.js";
 import { resolveReplacements } from "./replacements.js";
+import {
+  applyOnExtract,
+  runAdapters,
+  type BrewDocsPlugin,
+} from "./plugins.js";
 
 const PKG_FILE = "package.json";
 const README_FILES = ["README.md", "readme.md", "Readme.md"];
@@ -14,13 +19,19 @@ const README_FILES = ["README.md", "readme.md", "Readme.md"];
  *
  * Phase 1 pulls: package.json (structured), README (frontmatter + sections),
  * and exported symbols (with JSDoc/TSDoc) via the TypeScript compiler.
+ * v2.0 layers plugin adapters on top: non-JS sources (Python, Go, …) get
+ * their symbols from language adapters, and `onExtract` hooks may post-
+ * process the whole result.
  */
-export function extractFromSource(source: Source): ExtractResult {
+export function extractFromSource(
+  source: Source,
+  plugins: BrewDocsPlugin[] = [],
+): ExtractResult {
   const root = source.root;
   let title = source.name ?? path.basename(path.resolve(root));
   let description: string | undefined;
   let metadata: Record<string, unknown> = {};
-  let pkg: PackageInfo | undefined;
+  let pkg: import("./types.js").PackageInfo | undefined;
 
   const pkgPath = path.join(root, PKG_FILE);
   if (fs.existsSync(pkgPath)) {
@@ -47,7 +58,7 @@ export function extractFromSource(source: Source): ExtractResult {
     }
   }
 
-  let symbols: import("./types.js").SymbolDoc[] = [];
+  let symbols: SymbolDoc[] = [];
   if (pkg) {
     try {
       symbols = extractExports(root, metadata);
@@ -62,6 +73,21 @@ export function extractFromSource(source: Source): ExtractResult {
     }
   }
 
+  // v2.0 adapters: non-JS ecosystems (no package.json entry to walk), or a
+  // JS package whose own extraction found nothing (e.g. Python/Go code
+  // vendored next to a thin npm wrapper).
+  if (symbols.length === 0) {
+    try {
+      symbols = runAdapters(plugins, { root, name: title, metadata });
+    } catch (err) {
+      console.warn(
+        `[brewdocs] adapter extraction failed for "${title}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   // Direction C: resolve deprecation -> replacement links once, at the
   // source, so every surface (HTML, Markdown, artifact, diff) gets them.
   const replacements = resolveReplacements(symbols);
@@ -69,5 +95,5 @@ export function extractFromSource(source: Source): ExtractResult {
     if (replacements[sym.name]) sym.replacements = replacements[sym.name];
   }
 
-  return { title, description, readme, pkg, metadata, symbols };
+  return applyOnExtract(plugins, { title, description, readme, pkg, metadata, symbols }, source);
 }

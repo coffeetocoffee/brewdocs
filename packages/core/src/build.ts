@@ -3,13 +3,69 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractFromSource } from "./extract.js";
-import { renderToHtml, renderToHtmlMulti, type RenderOptions } from "./render.js";
+import { renderToHtml, renderToHtmlMulti, renderContentPages, type RenderOptions, type RenderedPage } from "./render.js";
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
 import { analyzeSymbols } from "./doctor.js";
 import { renderDocModelJson } from "./docmodel.js";
 import { gitShaOf } from "./git.js";
+import { loadConfig } from "./config.js";
+import { extractCached } from "./cache.js";
+import { loadPlugins, type BrewDocsPlugin } from "./plugins.js";
+import { loadContent, loadNav } from "./content.js";
+import { loadThemeManifest, manifestSlots, type Slots } from "./theme-manifest.js";
 import type { ExtractResult, RenderModel, Source } from "./types.js";
+
+/**
+ * v2.0 per-source setup shared by build/buildModel/buildMulti: loads
+ * plugins (brewdocs.yml + CLI), resolves the theme manifest (name, base,
+ * slot partials), attaches content/nav, and threads everything into
+ * RenderOptions.
+ */
+function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
+  if (options.plugins && options.slots && options.root) return options;
+  const root = path.resolve(source.root);
+  const config = loadConfig(root);
+  const plugins: BrewDocsPlugin[] = [
+    ...(options.plugins ?? []),
+    ...loadPlugins(config.plugins, root),
+  ];
+  const themeRef = options.theme ?? config.theme;
+  const manifest = themeRef ? loadThemeManifest(themeRef, root) : null;
+  const slots: Slots = options.slots ?? (() => {
+    const merged: Slots = { ...manifestSlots(manifest ?? undefined) };
+    for (const p of plugins) if (p.theme?.slots) Object.assign(merged, p.theme.slots);
+    return merged;
+  })();
+  return {
+    ...options,
+    // Keep the *original* ref (may be a manifest name); themeFromRef resolves
+    // base + vars + css at render time. Overwriting with manifest.extends here
+    // would silently drop the manifest's own customizations.
+    theme: themeRef ?? options.theme,
+    plugins,
+    slots,
+    root,
+  };
+}
+
+/** Fresh extraction honoring v2.0 setup: adapters, hooks, incremental cache. */
+function extractForBuild(source: Source, options: RenderOptions): ExtractResult {
+  return extractCached(source, {
+    enabled: options.cache,
+    plugins: options.plugins,
+  });
+}
+
+/** Attach v2.0 content pages + nav to a render model. */
+function attachContent(model: RenderModel, source: Source, options: RenderOptions): RenderModel {
+  if (model.content || options.content === false) return model;
+  const root = options.root ?? path.resolve(source.root);
+  const content = loadContent(root);
+  const nav = loadNav(root);
+  if (content.length === 0 && !nav) return model;
+  return { ...model, content, nav };
+}
 
 /** Freshness stamp for every artifact this build writes (Direction C). */
 function freshness(source: Source): { gitSha?: string; generatedAt: string } {
@@ -36,10 +92,14 @@ function emitDocModelArtifact(
 }
 
 /** Build the render model (no file write). Useful for tests/snapshots. */
-export function buildModel(source: Source): RenderModel {
-  const extracted = extractFromSource(source);
+export function buildModel(
+  source: Source,
+  options: RenderOptions = {},
+): RenderModel {
+  const resolved = resolveSetup(source, options);
+  const extracted = extractForBuild(source, resolved);
 
-  return {
+  const model: RenderModel = {
     title: extracted.title,
     description: extracted.description,
     frontmatter: extracted.readme?.frontmatter ?? {},
@@ -49,6 +109,7 @@ export function buildModel(source: Source): RenderModel {
     pkg: extracted.pkg,
     symbols: extracted.symbols,
   };
+  return attachContent(model, source, resolved);
 }
 
 /** Coverage score (0–100) for the rendered header chip. */
@@ -71,17 +132,23 @@ export function build(
   outDir: string,
   options: RenderOptions = {},
 ): string {
-  const model = buildModel(source);
+  const resolved = resolveSetup(source, options);
+  const model = buildModel(source, resolved);
   const fresh = freshness(source);
   const html = renderToHtml(model, {
-    ...options,
+    ...resolved,
     score: coverageScore(model),
     freshness: fresh,
   });
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "index.html");
   fs.writeFileSync(outFile, html, "utf8");
-  if (options.emitDocmodel !== false) {
+  for (const page of renderContentPages(model, resolved)) {
+    const target = path.join(outDir, page.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, page.html, "utf8");
+  }
+  if (resolved.emitDocmodel !== false) {
     emitDocModelArtifact(model, outDir, fresh);
   }
   return outFile;
@@ -107,7 +174,7 @@ export function findGitRoot(start: string): string | null {
 export async function extractVersion(
   source: Source,
   version: string,
-  opts: { strict?: boolean } = {},
+  opts: { strict?: boolean; plugins?: BrewDocsPlugin[] } = {},
 ): Promise<ExtractResult> {
   const root = path.resolve(source.root);
   const gitRoot = findGitRoot(root);
@@ -134,7 +201,7 @@ export async function extractVersion(
   }
 
   try {
-    return extractFromSource({ root: srcRoot, name: source.name });
+    return extractFromSource({ root: srcRoot, name: source.name }, opts.plugins ?? []);
   } finally {
     if (cleanup) cleanup();
   }
@@ -153,13 +220,18 @@ export function buildMulti(
   outDir: string,
   options: RenderOptions = {},
 ): string[] {
-  const model = buildModel(source);
+  const resolved = resolveSetup(source, options);
+  const model = buildModel(source, resolved);
   const fresh = freshness(source);
-  const pages = renderToHtmlMulti(model, {
-    ...options,
-    score: coverageScore(model),
-    freshness: fresh,
-  });
+  const pages: RenderedPage[] = [
+    ...renderToHtmlMulti(model, {
+      ...resolved,
+      multiPage: true,
+      score: coverageScore(model),
+      freshness: fresh,
+    }),
+    ...renderContentPages(model, { ...resolved, freshness: fresh }),
+  ];
   fs.mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
   for (const page of pages) {
@@ -168,7 +240,7 @@ export function buildMulti(
     fs.writeFileSync(outFile, page.html, "utf8");
     written.push(outFile);
   }
-  if (options.emitDocmodel !== false) {
+  if (resolved.emitDocmodel !== false) {
     emitDocModelArtifact(model, outDir, fresh);
   }
   return written;
@@ -268,6 +340,9 @@ export async function buildVersions(
   options: RenderOptions = {},
 ): Promise<string[]> {
   const versions = await discoverVersions(source.root);
+  // Per-version builds run in throwaway worktrees; the extraction cache
+  // belongs to the working tree only.
+  const singleOptions = { ...options, cache: false };
 
   if (versions.length <= 1) {
     return [
@@ -295,7 +370,7 @@ export async function buildVersions(
       cleanup = () => removeWorktree(gitRoot, tmp);
     }
 
-    const model = buildModel({ root: srcRoot, name: source.name });
+    const model = buildModel({ root: srcRoot, name: source.name }, singleOptions);
     models.set(v, model);
     const links = versions.map((o) => ({
       version: o,
@@ -306,7 +381,7 @@ export async function buildVersions(
     }));
     const fresh = freshness({ root: srcRoot, name: source.name });
     const html = renderToHtml(model, {
-      ...options,
+      ...singleOptions,
       versions: links,
       currentVersion: v,
       score: coverageScore(model),
@@ -339,7 +414,7 @@ export async function buildVersions(
   }
 
   const latest = versions[0];
-  const rootModel = models.get(latest) ?? buildModel({ root, name: source.name });
+  const rootModel = models.get(latest) ?? buildModel({ root, name: source.name }, options);
   const rootLinks = versions.map((o) => ({
     version: o,
     path: o === latest ? "./index.html" : `./${dirSafe(o)}/index.html`,

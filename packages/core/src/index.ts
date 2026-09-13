@@ -99,6 +99,52 @@ export {
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
 export { loadConfig, type BrewDocsConfig } from "./config.js";
 export {
+  type BrewDocsPlugin,
+  type LanguageAdapter,
+  type AdapterContext,
+  type ThemeContribution,
+  type ThemeSlotPartials,
+  BUILTIN_PLUGINS,
+  loadPlugin,
+  loadPluginAsync,
+  loadPlugins,
+  collectAdapters,
+  runAdapters,
+  applyOnExtract,
+  applyOnRender,
+  mergePluginThemes,
+} from "./plugins.js";
+export {
+  fingerprintSource,
+  extractCached,
+  clearCache,
+  cacheFile,
+  type CachedExtractOptions,
+} from "./cache.js";
+export {
+  loadContent,
+  loadNav,
+  parseNavYaml,
+  transformMdx,
+  renderContentSource,
+} from "./content.js";
+export {
+  loadThemeManifest,
+  resolveThemeRef,
+  manifestSlots,
+  applyManifest,
+  themeFromRef,
+  type Slots,
+  type SlotName,
+} from "./theme-manifest.js";
+export { pythonAdapter, resetPythonProbe } from "./extractors/python.js";
+export { goAdapter } from "./extractors/go.js";
+export {
+  renderContentPages,
+  contentIndexToc,
+  contentIndexSection,
+} from "./render.js";
+export {
   analyzeSymbols,
   diagnose,
   badgeSvg,

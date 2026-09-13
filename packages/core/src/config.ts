@@ -15,6 +15,14 @@ export interface BrewDocsConfig {
   minCoverage?: number;
   /** Ship `docmodel.json` with every build (default true; `docmodel: false` opts out). */
   docmodel?: boolean;
+  /** v2.0: plugin module paths/names loaded relative to the source root. */
+  plugins?: string[];
+  /** v2.0: enable incremental extraction caching (`.brewdocs/extract.json`). */
+  cache?: boolean;
+  /** v2.0: content directory for authored guide pages (default `content`). */
+  contentDir?: string;
+  /** v2.0: named theme manifest (resolved in `themes/` or as a file path). */
+  themeFile?: string;
   s3?: {
     bucket?: string;
     region?: string;
@@ -33,29 +41,57 @@ function parseScalar(raw: string): string | boolean {
   return v.replace(/^["']|["']$/g, "");
 }
 
+/** `["a", "b"]`-style inline sequence; returns undefined when not one. */
+function parseInlineList(raw: string): string[] | undefined {
+  const v = raw.trim();
+  if (!v.startsWith("[") || !v.endsWith("]")) return undefined;
+  return v
+    .slice(1, -1)
+    .split(",")
+    .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+}
+
 /**
- * Minimal YAML reader: supports top-level `key: value` pairs and a single
+ * Minimal YAML reader: supports top-level `key: value` pairs (scalars,
+ * booleans, inline lists), block sequences (`plugins:\n  - x`), and a single
  * nested `s3:` block. Enough for brewdocs.yml without pulling in a YAML dep.
  */
 function parseSimpleYaml(text: string): BrewDocsConfig {
   const cfg: BrewDocsConfig = {};
   const lines = text.split(/\r?\n/);
   let section: "s3" | null = null;
+  let listKey: string | null = null;
   for (const line of lines) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
+    const item = line.match(/^\s+-\s+(.*)$/);
+    if (item && listKey) {
+      const arr = ((cfg as Record<string, unknown>)[listKey] ??= []) as string[];
+      arr.push(String(parseScalar(item[1])));
+      continue;
+    }
     const m = line.match(/^(\s*)([\w-]+):\s*(.*)$/);
     if (!m) continue;
     const indent = m[1].length;
     const key = m[2];
     const val = m[3];
     if (indent === 0) {
+      listKey = null;
       if (key === "s3") {
         section = "s3";
         cfg.s3 = {};
         continue;
       }
       section = null;
-      (cfg as Record<string, unknown>)[key] = val ? parseScalar(val) : true;
+      if (!val) {
+        // Key with no value: a block sequence (plugins, ...) starts here.
+        listKey = key;
+        (cfg as Record<string, unknown>)[key] = [];
+        continue;
+      }
+      const list = parseInlineList(val);
+      if (list) (cfg as Record<string, unknown>)[key] = list;
+      else (cfg as Record<string, unknown>)[key] = parseScalar(val);
     } else if (section === "s3" && cfg.s3) {
       (cfg.s3 as Record<string, string>)[key] = String(parseScalar(val));
     }
