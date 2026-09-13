@@ -28,7 +28,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@brewdocs/core": "*",
+    "@brewdocs/core": "^2.0.0",
     "@types/node": "^20.19.43"
   }
 }
