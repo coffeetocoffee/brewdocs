@@ -49,6 +49,12 @@ export interface RenderOptions {
   cache?: boolean;
   /** v2.0: set false to skip the `content/` layer entirely. */
   content?: boolean;
+  /**
+   * v2.5: editable in-page "Try it" editors under each symbol example.
+   * Runs entirely client-side (examples evaluated with a captured console)
+   * so the output stays one self-contained HTML file.
+   */
+  playground?: boolean;
 }
 
 function escapeHtml(input: string): string {
@@ -64,6 +70,55 @@ function slug(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+/**
+ * v2.5 playground block: an editable textarea prefilled with the example, a
+ * Run button, and a live output region. The client script (PLAYGROUND_JS)
+ * evaluates the code with a captured console; escaping via escapeHtml keeps
+ * `</textarea>`-style content safe.
+ */
+function renderPlayground(example: string): string {
+  return `<div class="playground" data-pg>
+    <textarea class="pg-code" spellcheck="false" rows="6" aria-label="Editable example">${escapeHtml(example)}</textarea>
+    <div class="pg-bar"><button class="pg-run" type="button">Run &#9654;</button><span class="pg-msg" aria-live="polite"></span></div>
+    <pre class="pg-out" aria-live="polite"></pre>
+  </div>`;
+}
+
+// Client-side runner for playground blocks. No template literals or ES2015+
+// syntax (kept ES5 so it works in the oldest self-contained pages).
+const PLAYGROUND_JS = [
+  "(function () {",
+  "  function fmt(v) {",
+  "    if (typeof v === 'string') return v;",
+  "    try { return JSON.stringify(v); } catch (e) { return String(v); }",
+  "  }",
+  "  function runPg(root) {",
+  "    var ta = root.querySelector('.pg-code');",
+  "    var out = root.querySelector('.pg-out');",
+  "    var msg = root.querySelector('.pg-msg');",
+  "    var logs = [];",
+  "    var fake = { log: function () { logs.push(Array.prototype.slice.call(arguments).map(fmt).join(' ')); } };",
+  "    try {",
+  "      var fn = new Function('console', ta.value + '\\n//# sourceURL=playground');",
+  "      fn(fake);",
+  "      msg.textContent = 'ran ok';",
+  "      msg.className = 'pg-msg ok';",
+  "    } catch (e) {",
+  "      logs.push('error: ' + (e && e.message ? e.message : e));",
+  "      msg.textContent = 'error';",
+  "      msg.className = 'pg-msg err';",
+  "    }",
+  "    out.textContent = logs.join('\\n');",
+  "  }",
+  "  document.addEventListener('click', function (e) {",
+  "    var btn = e.target && e.target.closest ? e.target.closest('.pg-run') : null;",
+  "    if (!btn) return;",
+  "    var root = btn.closest ? btn.closest('.playground') : null;",
+  "    if (root) runPg(root);",
+  "  });",
+  "})();",
+].join("\n");
 
 /**
  * Per-version search-index cache. Building the index is O(symbols) and the
@@ -186,6 +241,7 @@ function row(k: string, v: string): string {
 function renderSymbol(
   sym: SymbolDoc,
   links?: SymbolLinks,
+  opts?: { playground?: boolean },
 ): string {
   const badge = sym.deprecated
     ? `<span class="badge dep">deprecated</span>`
@@ -273,7 +329,7 @@ function renderSymbol(
             `<pre class="code" data-lang="ts"><code>${highlightCode(
               e,
               "ts",
-            )}</code></pre>`,
+            )}</code></pre>${opts?.playground ? renderPlayground(e) : ""}`,
         )
         .join("\n")}</div>`
     : "";
@@ -379,6 +435,15 @@ const STRUCTURAL_CSS = `
   .throws ul, .see ul { margin: 0.25rem 0 0; padding-left: 1.2rem; }
   .throws li, .see li { margin: 0.15rem 0; }
   .examples h4, .params h4, .returns h4 { margin: 0.9rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .playground { margin: 0.6rem 0 1rem; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .pg-code { width: 100%; border: none; border-bottom: 1px solid var(--line); background: var(--code-bg); color: var(--code-ink); font: 0.84rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.8rem 1rem; resize: vertical; outline: none; }
+  .pg-bar { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.7rem; }
+  .pg-run { cursor: pointer; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 0.3rem 0.85rem; font: inherit; font-size: 0.85rem; }
+  .pg-msg { font-size: 0.8rem; color: var(--muted); }
+  .pg-msg.ok { color: var(--accent); }
+  .pg-msg.err { color: #b3261e; }
+  .pg-out { margin: 0; padding: 0.6rem 0.9rem; min-height: 1.2rem; font-size: 0.83rem; border-top: 1px dashed var(--line); color: var(--ink); white-space: pre-wrap; }
+  .pg-out:empty { display: none; }
   .src { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
   .symbol-index { list-style: none; padding: 0; margin: 1rem 0; }
   .symbol-index li { padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
@@ -572,6 +637,7 @@ ${slots.head ?? ""}
   });
 })();
 ${SEARCH_JS}
+${opts.renderOptions.playground ? PLAYGROUND_JS : ""}
 </script>
 </body>
 </html>
@@ -612,7 +678,7 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
 
   const api = model.symbols.length
     ? `<section id="api"><h2>API</h2>${model.symbols
-        .map((s) => renderSymbol(s, links))
+        .map((s) => renderSymbol(s, links, options))
         .join("\n")}</section>`
     : "";
 
@@ -717,7 +783,7 @@ export function renderToHtmlMulti(
     const symToc = `<li><a href="../index.html#api">API</a></li>
       <li><a href="../index.html">${escapeHtml(model.title)}</a></li>`;
     const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← Back to docs</a></p>
-      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks))}</section>`;
+      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks), options)}</section>`;
     pages.push({
       path: symbolSlug(sym.name),
       html: applyOnRender(

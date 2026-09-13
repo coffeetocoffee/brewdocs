@@ -23,6 +23,8 @@ export interface BrewDocsConfig {
   contentDir?: string;
   /** v2.0: named theme manifest (resolved in `themes/` or as a file path). */
   themeFile?: string;
+  /** v2.5: editable in-page "Try it" editors under each symbol example. */
+  playground?: boolean;
   s3?: {
     bucket?: string;
     region?: string;

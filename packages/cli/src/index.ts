@@ -49,13 +49,26 @@ import {
   rollupCoverage,
   runMcpServer,
   setDraftExpiry,
+  addOrgMember,
+  aggregateOrgStats,
+  createOrg,
+  deleteOrg,
+  listOrgSites,
+  listOrgs,
+  removeOrgMember,
+  addDomain,
+  listDomains,
+  readTlsFile,
+  removeDomain,
+  verifyDomain,
+  wellKnownPath,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
   type StorageAdapter,
   type SymbolDoc,
 } from "@brewdocs/core";
-import { createServer } from "./server.js";
+import { createServer, createSecureServer } from "./server.js";
 import { addKey, listKeys, revokeKey, ALL_SCOPES, type ApiKeyRecord } from "./keys.js";
 import * as http from "node:http";
 import * as fs from "node:fs";
@@ -76,6 +89,8 @@ interface BuildArgs {
   plugins: string[];
   /** undefined = follow brewdocs.yml, true/false = explicit CLI override. */
   cache?: boolean;
+  /** Editable in-page example runners (v2.5). */
+  playground: boolean;
 }
 
 function parseBuild(argv: string[]): BuildArgs {
@@ -89,6 +104,7 @@ function parseBuild(argv: string[]): BuildArgs {
   let watch = false;
   let noDocmodel = false;
   let cache: boolean | undefined;
+  let playground = false;
   const plugins: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -123,6 +139,8 @@ function parseBuild(argv: string[]): BuildArgs {
       // inline form, nothing to skip
     } else if (arg === "--multi") {
       multi = true;
+    } else if (arg === "--playground") {
+      playground = true;
     } else if (arg === "--no-docmodel") {
       noDocmodel = true;
     } else if (arg === "--watch" || arg === "-w") {
@@ -135,10 +153,10 @@ function parseBuild(argv: string[]): BuildArgs {
   }
   if (!source) {
     throw new Error(
-      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache]",
+      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache] [--playground]",
     );
   }
-  return { source, out, theme, dark, version, name, multi, watch, noDocmodel, plugins, cache };
+  return { source, out, theme, dark, version, name, multi, watch, noDocmodel, plugins, cache, playground };
 }
 
 function printDoctorReport(report: ReturnType<typeof diagnose>): void {
@@ -184,6 +202,7 @@ function printDoctorReport(report: ReturnType<typeof diagnose>): void {
     emitDocmodel: !args.noDocmodel && config.docmodel !== false,
     plugins: loadPlugins(args.plugins, sourceRoot),
     cache: args.cache,
+    playground: args.playground || Boolean(config.playground),
   };
 }
 
@@ -762,7 +781,7 @@ export async function run(argv: string[]): Promise<void> {
       let timer: NodeJS.Timeout | undefined;
       fs.watch(src.root, { recursive: true }, (_event, file) => {
         if (!file) return;
-        if (!/\.(ts|js|md|json)$/.test(file)) return;
+        if (!/\.(ts|js|py|go|md|mdx|json|yaml|yml|graphql|gql)$/.test(file)) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => void doBuild(), 200);
       });
@@ -1046,6 +1065,28 @@ dark: false
     const storage = buildStorage(storageKind, config);
     const token = process.env.BREWDOCS_TOKEN;
 
+    // v2.5 TLS: --tls-cert/--tls-key (or BREWDOCS_TLS_CERT/KEY) serve the
+    // same pipeline over HTTPS. Both must be readable PEM files.
+    const certFile = getFlag(rest, "--tls-cert") ?? process.env.BREWDOCS_TLS_CERT;
+    const keyFile = getFlag(rest, "--tls-key") ?? process.env.BREWDOCS_TLS_KEY;
+    if (certFile || keyFile) {
+      if (!certFile || !keyFile) {
+        throw new Error("TLS needs both --tls-cert and --tls-key (cert + private key PEM files)");
+      }
+      const cert = readTlsFile(path.resolve(process.cwd(), certFile));
+      const key = readTlsFile(path.resolve(process.cwd(), keyFile));
+      if (!cert || !key) {
+        throw new Error(`TLS files unreadable: ${cert ? keyFile : certFile}`);
+      }
+      const server = createSecureServer(hostingDir, storage, token, undefined, { cert, key });
+      server.listen(port, () => {
+        console.log(`☕ BrewDocs hosting (https) on https://localhost:${port}`);
+        console.log(`   serving sites from: ${hostingDir}`);
+        if (storage) console.log(`   storage backend: s3`);
+      });
+      return;
+    }
+
     const server = createServer(hostingDir, storage, token);
     server.listen(port, () => {
       console.log(`☕ BrewDocs hosting on http://localhost:${port}`);
@@ -1144,6 +1185,121 @@ dark: false
     return;
   }
 
+  if (command === "cloud") {
+    const sub = rest[0];
+    const hosting = path.resolve(process.cwd(), getFlag(rest, "--hosting") ?? "./hosting");
+    if (sub === "org") {
+      const op = rest[1];
+      if (op === "create") {
+        const name = rest[2];
+        if (!name) throw new Error("usage: brewdocs cloud org create <name>");
+        const record = createOrg(hosting, name);
+        if (!record) throw new Error(`org "${name}" already exists`);
+        console.log(`🏢 org ${record.name} created (stored in ${hosting}/.cloud.json)`);
+      } else if (op === "list") {
+        const orgs = listOrgs(hosting);
+        if (!orgs.length) {
+          console.log(`No orgs in ${hosting}/.cloud.json`);
+        } else {
+          for (const o of orgs) {
+            console.log(`- ${o.name}  members=${o.members.length}  sites=${o.sites.length}`);
+          }
+        }
+      } else if (op === "add-member") {
+        const name = rest[2];
+        const key = getFlag(rest, "--key");
+        if (!name || !key) {
+          throw new Error("usage: brewdocs cloud org add-member <name> --key <bd_live_…|hash> [--role admin|member] [--label <n>]");
+        }
+        const role = getFlag(rest, "--role") === "admin" ? "admin" : "member";
+        const ok = addOrgMember(hosting, name, key, { role, label: getFlag(rest, "--label") });
+        if (!ok) throw new Error(`no org named ${name}`);
+        console.log(`👤 member added to ${name} (role=${role})`);
+      } else if (op === "remove-member") {
+        const name = rest[2];
+        const key = getFlag(rest, "--key");
+        if (!name || !key) {
+          throw new Error("usage: brewdocs cloud org remove-member <name> --key <bd_live_…|hash>");
+        }
+        const ok = removeOrgMember(hosting, name, key);
+        console.log(ok ? "👋 member removed" : "member not found");
+      } else if (op === "delete") {
+        const name = rest[2];
+        if (!name) throw new Error("usage: brewdocs cloud org delete <name>");
+        const ok = deleteOrg(hosting, name);
+        console.log(ok ? `🗑️  org ${name} deleted` : `no org named ${name}`);
+      } else {
+        throw new Error("usage: brewdocs cloud org create|list|add-member|remove-member|delete");
+      }
+    } else if (sub === "sites") {
+      const name = rest[1];
+      if (!name) throw new Error("usage: brewdocs cloud sites <org>");
+      const sites = listOrgSites(hosting, name);
+      if (!sites.length) {
+        console.log(`No sites claimed by org ${name}`);
+      } else {
+        for (const s of sites) console.log(`- ${s}`);
+      }
+    } else if (sub === "stats") {
+      const name = rest[1];
+      if (!name) throw new Error("usage: brewdocs cloud stats <org>");
+      let all: Record<string, { views: number; builds: number }> = {};
+      try {
+        all = JSON.parse(fs.readFileSync(path.join(hosting, ".analytics.json"), "utf8"));
+      } catch {
+        /* no traffic yet */
+      }
+      const rollup = aggregateOrgStats(all, listOrgSites(hosting, name));
+      console.log(`📊 org ${name}: ${rollup.views} views · ${rollup.builds} builds across ${rollup.sites.length} site(s)`);
+      for (const s of rollup.sites) {
+        const st = all[s] ?? { views: 0, builds: 0 };
+        console.log(`   - ${s}  views=${st.views}  builds=${st.builds}`);
+      }
+    } else {
+      throw new Error("usage: brewdocs cloud org|sites|stats");
+    }
+    return;
+  }
+
+  if (command === "domains") {
+    const sub = rest[0];
+    const hosting = path.resolve(process.cwd(), getFlag(rest, "--hosting") ?? "./hosting");
+    if (sub === "add") {
+      const domain = rest[1];
+      const site = getFlag(rest, "--site");
+      if (!domain || !site) {
+        throw new Error("usage: brewdocs domains add <domain> --site <subdomain>");
+      }
+      const record = addDomain(hosting, domain, site);
+      if (!record) throw new Error(`invalid domain/site: ${domain} / ${site}`);
+      console.log(`🌐 ${record.domain} -> ${record.subdomain} (pending verification)`);
+      console.log(`   publish this at ${record.domain}${wellKnownPath()}:`);
+      console.log(`   ${record.token}`);
+    } else if (sub === "list") {
+      const domains = listDomains(hosting);
+      if (!domains.length) {
+        console.log(`No custom domains in ${hosting}/.domains.json`);
+      } else {
+        for (const d of domains) {
+          console.log(`- ${d.domain} -> ${d.subdomain}  ${d.verified ? "verified" : "pending"}`);
+        }
+      }
+    } else if (sub === "verify") {
+      const domain = rest[1];
+      if (!domain) throw new Error("usage: brewdocs domains verify <domain>");
+      const ok = await verifyDomain(hosting, domain);
+      console.log(ok ? `✅ ${domain} verified` : `⏳ ${domain} still pending (publish the token first)`);
+    } else if (sub === "remove") {
+      const domain = rest[1];
+      if (!domain) throw new Error("usage: brewdocs domains remove <domain>");
+      const ok = removeDomain(hosting, domain);
+      console.log(ok ? `🗑️  ${domain} removed` : `no domain named ${domain}`);
+    } else {
+      throw new Error("usage: brewdocs domains add|list|verify|remove");
+    }
+    return;
+  }
+
   if (command === "mcp") {
     const file = rest[0] ?? getFlag(rest, "--docmodel") ?? "docmodel.json";
     const resolved = path.resolve(process.cwd(), file);
@@ -1196,9 +1352,9 @@ function printHelp(): void {
   console.log(`BrewDocs — Brew your docs, serve them hot.
 
 Usage:
-  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache]
+  brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache] [--playground]
   brewdocs build-all <source> [--out <dir>] [--theme <name>] [--dark] [--workspaces]
-  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json]
+  brewdocs export <source> [--out <dir>] [--theme <name>] [--dark] [--multi] [--markdown] [--json] [--playground]
   brewdocs markdown <source> [--out <dir>] [--format md|mdx] [--multi]
   brewdocs docmodel <source> [--out <dir>] [--schema]   Machine-readable DocModel artifact
   brewdocs draft <source> [--fix]   Scaffold JSDoc for undocumented symbols
@@ -1209,9 +1365,13 @@ Usage:
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
                     [--org <name>] [--private [token]] [--draft [--draft-hours N]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
-  brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3]
-                (set BREWDOCS_TOKEN, or add keys via 'brewdocs keys', to require auth)
+  brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3] [--tls-cert <pem> --tls-key <pem>]
+                (set BREWDOCS_TOKEN, or add keys via 'brewdocs keys', to require auth;
+                 add --tls-cert/--tls-key for HTTPS, e.g. behind a custom domain)
   brewdocs keys add|list|revoke [--hosting <dir>] [--scope build,export] [--label <n>]
+  brewdocs cloud org create|list|add-member|remove-member|delete [--hosting <dir>]   Orgs, members, private docs
+  brewdocs cloud sites|stats <org> [--hosting <dir>]   Org-owned sites + analytics rollup
+  brewdocs domains add|list|verify|remove [--hosting <dir>]   Custom domains + TLS verification
   brewdocs drafts list|extend|revoke [--hosting <dir>]   Manage private draft links
   brewdocs mcp [docmodel.json]   MCP stdio server over a docmodel.json artifact
                                  (tools: search_symbols, symbol_signature,
@@ -1247,8 +1407,8 @@ Commands:
                      (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
                       --org <name> namespaces as <org>--<sub>; --private [token] gates reads;
                       add --draft for a time-limited shareable ?token= preview link)
-  serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
-  versions <src>   List available versions (git tags, or package version)
+   serve            Start the local hosting server + web drop-in (/api/build, /api/export, /api/sites)
+   versions <src>   List available versions (git tags, or package version)
    doctor <src>     Docs coverage report (+ badge, --json, --min-coverage gate,
                     --record trend history, --trend-svg sparkline);
                     add --workspaces for per-package reports + rollup score
@@ -1262,11 +1422,14 @@ Commands:
                     guide is generated (--out) or acknowledged (--acknowledge);
                     add --require-proven to also fail on examples that
                     no longer typecheck
-   themes           List available themes
-   keys             Manage per-user API keys (add / list / revoke)
-   drafts           Manage private draft links (list / extend / revoke)
-   mcp              MCP stdio server over docmodel.json for agent workflows
-   help             Show this help
+    themes           List available themes
+    keys             Manage per-user API keys (add / list / revoke)
+    cloud            v2.5: orgs (create/list/add-member/remove-member/delete),
+                     org sites + analytics rollup (cloud sites|stats <org>)
+    domains          v2.5: custom domains (add --site, verify, list, remove)
+    drafts           Manage private draft links (list / extend / revoke)
+    mcp              MCP stdio server over docmodel.json for agent workflows
+    help             Show this help
 
 Options:
   -o, --out <dir>  Output/hosting directory (default: dist / ./hosting)
@@ -1274,13 +1437,14 @@ Options:
   --dark           Force dark mode by default
   -v, --version   Build a specific version (git tag)
   -n, --name      Subdomain name for deploy
-   --multi         Emit one HTML page per exported symbol
-   -w, --watch     Rebuild on source changes (build only)
-   --plugins <a,b> v2.0: plugin modules (paths relative to <source>, or package names)
-   --cache         v2.0: incremental extraction cache (.brewdocs/extract.json)
+    --multi         Emit one HTML page per exported symbol
+    -w, --watch     Rebuild on source changes (build only)
+    --plugins <a,b> v2.0: plugin modules (paths relative to <source>, or package names)
+    --cache         v2.0: incremental extraction cache (.brewdocs/extract.json)
+    --playground    v2.5: editable in-page example runners (Try it)
 
 Config: a brewdocs.yml or brewdocs.json in the source dir sets theme, dark,
-name, multi, storage (local | s3), plugins, cache, and contentDir defaults.
+name, multi, storage (local | s3), plugins, cache, playground, and contentDir defaults.
 CLI flags override it. v2.0: '--theme' also accepts a theme manifest
 (themes/<name>.yml with 'base:', 'vars:', and 'slots:' partials); a
 'content/' directory of .md/.mdx guide pages is published under content/.

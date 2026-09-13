@@ -139,6 +139,40 @@ export {
 } from "./theme-manifest.js";
 export { pythonAdapter, resetPythonProbe } from "./extractors/python.js";
 export { goAdapter } from "./extractors/go.js";
+export { openApiAdapter } from "./extractors/openapi.js";
+export { graphqlAdapter } from "./extractors/graphql.js";
+export {
+  addOrgMember,
+  aggregateOrgStats,
+  canAccessOrg,
+  createOrg,
+  deleteOrg,
+  getOrg,
+  hashKey as hashCloudKey,
+  listOrgSites,
+  listOrgs,
+  normalizeKeyHash,
+  orgOfSite,
+  recordOrgSite,
+  removeOrgMember,
+  type CloudStore,
+  type OrgMember,
+  type OrgRecord,
+  type OrgRole,
+} from "./cloud.js";
+export {
+  addDomain,
+  getDomain,
+  listDomains,
+  loadDomains,
+  readTlsFile,
+  removeDomain,
+  verifyDomain,
+  wellKnownPath,
+  wellKnownToken,
+  type DomainRecord,
+  type DomainsStore,
+} from "./domains.js";
 export {
   renderContentPages,
   contentIndexToc,

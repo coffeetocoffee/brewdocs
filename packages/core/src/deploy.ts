@@ -7,6 +7,7 @@ import { buildModel } from "./build.js";
 import type { RenderOptions } from "./render.js";
 import type { Source } from "./types.js";
 import type { StorageAdapter } from "./deploy/storage.js";
+import { recordOrgSite } from "./cloud.js";
 
 /** A hosted site's visibility — private sites require a token to read. */
 export type Visibility = "public" | "private";
@@ -145,6 +146,13 @@ export async function deploySite(
     JSON.stringify(manifest, null, 2),
     "utf8",
   );
+
+  // v2.5 cloud control plane: org-scoped deploys claim the site so org
+  // members can read private docs and the org gets analytics rollups. S3
+  // targets have no persistent local control plane, so skip the claim there.
+  if (!storage && deployOpts.org) {
+    recordOrgSite(hostingDir, deployOpts.org, subdomain);
+  }
 
   return {
     url: `https://${subdomain}.${HOST_SUFFIX}`,

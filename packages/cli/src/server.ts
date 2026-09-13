@@ -1,4 +1,5 @@
 import * as http from "node:http";
+import * as https from "node:https";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -19,6 +20,12 @@ import {
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
 import { loadKeys, validateKey } from "./keys.js";
+import {
+  aggregateOrgStats,
+  canAccessOrg,
+  listOrgSites,
+  loadDomains,
+} from "@brewdocs/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +55,8 @@ interface SiteManifest {
 interface SiteStats {
   views: number;
   builds: number;
+  /** v2.5: per-path pageview counts, so owners see which pages get read. */
+  paths?: Record<string, number>;
   lastViewed?: string;
   lastBuild?: string;
 }
@@ -83,12 +92,24 @@ class StatsStore {
     this.data.set(sub, s);
     this.save();
   }
-  recordView(sub: string): void {
+  recordView(sub: string, page?: string): void {
     const s = this.data.get(sub) ?? { views: 0, builds: 0 };
     s.views++;
     s.lastViewed = new Date().toISOString();
+    if (page) {
+      s.paths ??= {};
+      s.paths[page] = (s.paths[page] ?? 0) + 1;
+    }
     this.data.set(sub, s);
     this.save();
+  }
+  /** Top-viewed paths for a site (dashboard + org rollup). */
+  topPaths(sub: string, limit = 8): Array<{ path: string; views: number }> {
+    const paths = this.data.get(sub)?.paths ?? {};
+    return Object.entries(paths)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([p, views]) => ({ path: p, views }));
   }
   get(sub?: string): SiteStats | Record<string, SiteStats> {
     if (sub) return this.data.get(sub) ?? { views: 0, builds: 0 };
@@ -225,12 +246,18 @@ function readManifest(
   }
 }
 
-/** Does the request prove access to a private site (or hold the admin token)? */
+/**
+ * Does the request prove access to a private site (or hold the admin token)?
+ * v2.5: members of the site's org (any valid member key as the Bearer token)
+ * can read that org's private docs — the org is the sharing group.
+ */
 function requireSiteAccess(
   req: http.IncomingMessage,
-  tokenHash: string | undefined,
+  manifest: SiteManifest | undefined,
   adminToken: string | undefined,
+  hostingDir: string,
 ): boolean {
+  const tokenHash = manifest?.tokenHash;
   if (!tokenHash) return true;
   if (adminToken && req.headers["authorization"] === `Bearer ${adminToken}`) {
     return true;
@@ -241,13 +268,17 @@ function requireSiteAccess(
     "";
   if (!provided) return false;
   const hash = crypto.createHash("sha256").update(provided).digest("hex");
-  return hash === tokenHash;
+  if (hash === tokenHash) return true;
+  const org = manifest?.org;
+  return Boolean(org) && canAccessOrg(hostingDir, org!, provided);
 }
 
 /**
- * Map a request to a hosted site file, supporting both:
+ * Map a request to a hosted site file, supporting:
  *   - path routing:  /s/<subdomain>/<rest>
  *   - host routing:  <subdomain>.brewdocs.dev/<rest>
+ *   - v2.5 custom domains: a verified entry in `.domains.json` serves its
+ *     site at the domain root (the Host header names the site).
  * Returns null when no site is targeted.
  */
 export function resolveSite(
@@ -265,7 +296,21 @@ export function resolveSite(
   } else if (host) {
     const h = host.split(":")[0];
     const subMatch = /^(.+)\.brewdocs\.dev$/.exec(h);
-    if (subMatch) sub = subMatch[1];
+    if (subMatch) {
+      sub = subMatch[1];
+    } else {
+      // Custom domain fallback (live read: domains can be added while the
+      // server runs). Unverified mappings are ignored.
+      try {
+        const record = loadDomains(hostingDir).domains[h.toLowerCase()];
+        if (record?.verified) {
+          sub = record.subdomain;
+          rest = pathname && !pathname.endsWith("/") ? pathname : "/index.html";
+        }
+      } catch {
+        /* offline/errored registry: fall through to null */
+      }
+    }
   }
 
   if (!sub) return null;
@@ -274,6 +319,16 @@ export function resolveSite(
   if (!filePath.startsWith(base)) return null;
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return null;
   return { subdomain: sub, filePath };
+}
+
+/** Is this Host a verified custom domain (serves its site, not the drop-in)? */
+function isCustomDomainHost(host: string | undefined, hostingDir: string): boolean {
+  if (!host) return false;
+  try {
+    return Boolean(loadDomains(hostingDir).domains[host.split(":")[0].toLowerCase()]?.verified);
+  } catch {
+    return false;
+  }
 }
 
 function listSites(
@@ -316,12 +371,17 @@ function fallbackLanding(sites: Array<{ subdomain: string; url: string }>): stri
 
 const DROPIN = path.join(__dirname, "web", "dropin.html");
 
-export function createServer(
+/**
+ * Shared request listener for the plain and TLS servers. Extracted so
+ * `createSecureServer` reuses the whole pipeline (routing, auth, analytics)
+ * over HTTPS with the operator's certificate.
+ */
+function buildRequestHandler(
   hostingDir: string,
   storage?: StorageAdapter,
   token?: string,
   protection?: ProtectionOptions,
-): http.Server {
+): (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> {
   fs.mkdirSync(hostingDir, { recursive: true });
 
   const limiter = new RateLimiter(
@@ -352,7 +412,7 @@ export function createServer(
     return validateKey(hostingDir, presented) !== null;
   };
 
-  return http.createServer(async (req, res) => {
+  return async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = req.headers.host;
 
@@ -534,21 +594,41 @@ export function createServer(
     }
 
     if (url.pathname === "/api/stats") {
+      // v2.5 org rollup: authenticated owners see the org's view/build totals.
+      const org = url.searchParams.get("org");
+      if (org) {
+        if (!requireAuth(req)) {
+          res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        const sites = listOrgSites(hostingDir, org);
+        const all = stats.get() as Record<string, { views: number; builds: number }>;
+        res
+          .writeHead(200, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify({ org, ...aggregateOrgStats(all, sites) }));
+        return;
+      }
       const site = url.searchParams.get("site");
       if (site) {
         const manifest = readManifest(hostingDir, site);
         if (
           manifest?.visibility === "private" &&
-          !requireSiteAccess(req, manifest.tokenHash, token)
+          !requireSiteAccess(req, manifest, token, hostingDir)
         ) {
           res
             .writeHead(401, { "content-type": TYPES[".json"] })
             .end(JSON.stringify({ error: "unauthorized" }));
           return;
         }
+        const data = stats.get(site) as SiteStats;
         res
           .writeHead(200, { "content-type": TYPES[".json"] })
-          .end(JSON.stringify(stats.get(site)));
+          .end(
+            JSON.stringify({
+              ...data,
+              topPaths: stats.topPaths(site),
+            }),
+          );
         return;
       }
       if (!requireAuth(req)) {
@@ -562,15 +642,19 @@ export function createServer(
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      try {
-        const html = readFileSync(DROPIN, "utf8");
-        res.writeHead(200, { "content-type": TYPES[".html"] }).end(html);
-      } catch {
-        res
-          .writeHead(200, { "content-type": TYPES[".html"] })
-          .end(fallbackLanding(listSites(hostingDir)));
+      // v2.5 custom domains: a verified domain serves its site at the root,
+      // not the drop-in landing page — fall through to site resolution.
+      if (!isCustomDomainHost(host, hostingDir)) {
+        try {
+          const html = readFileSync(DROPIN, "utf8");
+          res.writeHead(200, { "content-type": TYPES[".html"] }).end(html);
+        } catch {
+          res
+            .writeHead(200, { "content-type": TYPES[".html"] })
+            .end(fallbackLanding(listSites(hostingDir)));
+        }
+        return;
       }
-      return;
     }
 
     if (url.pathname === "/dashboard" && req.method === "GET") {
@@ -595,7 +679,7 @@ export function createServer(
       }
       if (
         manifest.visibility === "private" &&
-        !requireSiteAccess(req, manifest.tokenHash, token)
+        !requireSiteAccess(req, manifest, token, hostingDir)
       ) {
         res
           .writeHead(401, { "content-type": TYPES[".txt"] })
@@ -605,7 +689,7 @@ export function createServer(
       const data = stats.get(site) as { views: number; builds: number };
       res
         .writeHead(200, { "content-type": TYPES[".html"] })
-        .end(dashboardHtml(site, manifest, data));
+        .end(dashboardHtml(site, manifest, data, stats.topPaths(site)));
       return;
     }
 
@@ -626,7 +710,7 @@ export function createServer(
     }
     if (
       manifest?.visibility === "private" &&
-      !requireSiteAccess(req, manifest.tokenHash, token)
+      !requireSiteAccess(req, manifest, token, hostingDir)
     ) {
       res
         .writeHead(401, { "content-type": TYPES[".txt"] })
@@ -653,13 +737,47 @@ export function createServer(
       // Only public sites get the live views chip (avoids leaking private counts).
       if (manifest?.visibility !== "private") {
         html = injectViewsChip(html, site.subdomain);
-        stats.recordView(site.subdomain);
+        stats.recordView(site.subdomain, url.pathname);
       }
       res.end(html);
     } else {
       fs.createReadStream(site.filePath).pipe(res);
     }
-  });
+  };
+}
+
+export function createServer(
+  hostingDir: string,
+  storage?: StorageAdapter,
+  token?: string,
+  protection?: ProtectionOptions,
+): http.Server {
+  return http.createServer(buildRequestHandler(hostingDir, storage, token, protection));
+}
+
+export interface TlsOptions {
+  /** PEM certificate contents. */
+  cert: string;
+  /** PEM private-key contents. */
+  key: string;
+}
+
+/**
+ * v2.5 HTTPS hosting for custom domains: serves the same pipeline over TLS
+ * with the operator's certificate (e.g. one issued for the custom domain).
+ * Plain HTTP stays the default; this is opt-in via `serve --tls-cert/--tls-key`.
+ */
+export function createSecureServer(
+  hostingDir: string,
+  storage: StorageAdapter | undefined,
+  token: string | undefined,
+  protection: ProtectionOptions | undefined,
+  tls: TlsOptions,
+): https.Server {
+  return https.createServer(
+    { cert: tls.cert, key: tls.key },
+    buildRequestHandler(hostingDir, storage, token, protection),
+  );
 }
 
 /** Append a tiny self-updating views chip to a served page (public sites only). */
@@ -677,9 +795,18 @@ function dashboardHtml(
   site: string,
   manifest: SiteManifest,
   data: { views: number; builds: number },
+  topPaths: Array<{ path: string; views: number }> = [],
 ): string {
   const visibility = manifest.visibility ?? "public";
   const title = manifest.title ? escapeText(manifest.title) : site;
+  const paths = topPaths.length
+    ? `<h2>Top pages</h2><ul>${topPaths
+        .map(
+          (p) =>
+            `<li><code>${escapeText(p.path)}</code> — ${p.views} view${p.views === 1 ? "" : "s"}</li>`,
+        )
+        .join("")}</ul>`
+    : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Stats — ${escapeText(site)} · BrewDocs</title>
@@ -694,6 +821,7 @@ a{color:#b5651d}</style></head>
   <div class="stat"><div class="n">${data.views}</div><div class="l">page views</div></div>
   <div class="stat"><div class="n">${data.builds}</div><div class="l">builds</div></div>
 </div>
+${paths}
 <p><a href="/s/${encodeURIComponent(site)}/">View site ↗</a> · <a href="/">← BrewDocs</a></p>
 </body></html>`;
 }

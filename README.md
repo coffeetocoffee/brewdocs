@@ -13,7 +13,27 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🆕 Fresh out of the oven — v2.0
+## 🆕 Fresh out of the oven — v2.5
+
+The platform release. APIs, interactivity, and hosting grow up:
+
+| New roast | Taste |
+| --- | --- |
+| 🌐 **OpenAPI + GraphQL** | `openapi.json`/`.yaml` and `*.graphql` brew into documented operations + types — new built-in adapters, zero deps |
+| ▶️ **`--playground`** | Editable "Try it" runners under every example. Evaluated client-side, output stays one self-contained HTML file |
+| 🏢 **`brewdocs cloud`** | Orgs + member keys, org-gated private docs, per-path analytics and org rollups (`cloud org\|sites\|stats`) |
+| 🔒 **Custom domains + TLS** | `domains add\|verify` with well-known token proof, Host routing, `serve --tls-cert/--tls-key` for HTTPS |
+
+```bash
+brewdocs build ./api --out dist --playground
+brewdocs cloud org create acme
+brewdocs domains add docs.acme.com --site lib
+brewdocs serve --tls-cert cert.pem --tls-key key.pem
+```
+
+---
+
+## v2.0 recap
 
 The big one. BrewDocs grew up (but still fits in one cup):
 
@@ -60,18 +80,20 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 
 | Command | Does what |
 | --- | --- |
-| `build <src>` | One `index.html` (`--multi` for per-symbol pages, `--watch` to re-brew, `--cache` to skip) |
+| `build <src>` | One `index.html` (`--multi` for per-symbol pages, `--watch` to re-brew, `--cache` to skip, `--playground` for Try-it runners) |
 | `build-all <src>` | Every version (`--workspaces` for monorepos) |
 | `export <src>` | Fully self-contained static site (+ `--markdown`, `--json`) |
 | `markdown <src>` | Markdown/MDX reference (`--format md\|mdx`, `--multi`) |
 | `docmodel <src>` | Machine-readable API knowledge (`--schema` for the JSON Schema) |
 | `deploy <src>` | Ship to `*.brewdocs.dev` (`--storage s3`, `--org`, `--private`, `--draft`) |
-| `serve` | Local hosting + web drop-in (`/api/build`, `/api/export`, `/api/sites`) |
+| `serve` | Local hosting + web drop-in (`/api/build`, `/api/export`, `/api/sites`) + `--tls-cert/--tls-key` HTTPS |
+| `cloud …` | Orgs + members (`cloud org create\|list\|add-member\|remove-member\|delete`), org sites + stats |
+| `domains …` | Custom domains (`add --site`, `verify`, `list`, `remove`) |
 | `preview <src>` | Build + serve locally |
 | `gallery` | Example-sites gallery |
 | `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
 
-Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `--storage`, `--multi`, `-w/--watch`, `--plugins <a,b>`, `--cache`, `--no-docmodel`.
+Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `--storage`, `--multi`, `-w/--watch`, `--plugins <a,b>`, `--cache`, `--playground`, `--no-docmodel`.
 
 </details>
 
@@ -106,6 +128,7 @@ dark: false
 plugins:
   - ./plugin.cjs
 cache: true
+playground: true
 contentDir: content
 ```
 
@@ -163,7 +186,7 @@ Source → ExtractResult → RenderModel → standalone HTML
 
 ```bash
 npm install
-npm test          # 215 tests, all green
+npm test          # 241 tests, all green
 npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
 

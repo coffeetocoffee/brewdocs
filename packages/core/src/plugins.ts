@@ -6,6 +6,8 @@ import type { ExtractResult, Source, SymbolDoc } from "./types.js";
 import type { ThemeVars } from "./themes.js";
 import { pythonAdapter } from "./extractors/python.js";
 import { goAdapter } from "./extractors/go.js";
+import { openApiAdapter } from "./extractors/openapi.js";
+import { graphqlAdapter } from "./extractors/graphql.js";
 
 /**
  * v2.0 plugin/adapter SDK. A plugin is a plain object (or module default
@@ -68,6 +70,8 @@ export interface BrewDocsPlugin {
 export const BUILTIN_PLUGINS: BrewDocsPlugin[] = [
   { name: "brewdocs:python", adapters: [pythonAdapter] },
   { name: "brewdocs:go", adapters: [goAdapter] },
+  { name: "brewdocs:openapi", adapters: [openApiAdapter] },
+  { name: "brewdocs:graphql", adapters: [graphqlAdapter] },
 ];
 
 function normalizePlugin(mod: unknown, id: string): BrewDocsPlugin | null {
