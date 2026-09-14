@@ -13,7 +13,29 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🆕 Fresh out of the oven — v2.5
+## 🆕 Fresh out of the oven — v3.0
+
+The ecosystem release. More languages, stable URLs, more languages of *docs*, and a QA gate:
+
+| New roast | Taste |
+| --- | --- |
+| 🦀☕ **#️⃣💎 Rust/Java/C#/Ruby** | Four new built-in static adapters — doc comments, javadoc, XML docs and YARD tags brew into real symbols, zero toolchains needed |
+| 🔗 **Aliases, EOL, redirects** | `brewdocs.yml` `aliases:` publish `/latest/`-style URLs that never drift, `eol:` banners flag unmaintained versions, `redirects:` keep moved pages alive |
+| 🌍 **i18n** | `--locale` / `locale: id` localizes the UI chrome (6 bundled locales: en, de, es, fr, ja, id — English fallback) and sets `<html lang>` |
+| 🔎 **`brewdocs audit`** | Dependency-free a11y + SEO + perf lighthouse for built sites, with `--min-score` CI gates; every brewed page passes 100% out of the box |
+| 🛒 **Plugin registry + marketplace** | `registry publish/list/search/install/remove/gallery` — a local, zero-network marketplace feeding `plugins:` resolution (`brewdocs registry --help`) |
+
+```bash
+brewdocs build ./rust-crate                       # Rust/Java/C#/Ruby just work
+brewdocs build-all ./lib --out dist               # + aliases/eol/redirects from brewdocs.yml
+brewdocs build ./my-docs --locale id
+brewdocs audit dist --min-score 90                # a11y + seo + perf gate in CI
+brewdocs registry publish ./my-plugin.cjs --name my-plugin --version 0.1.0
+```
+
+---
+
+## v2.5 recap
 
 The platform release. APIs, interactivity, and hosting grow up:
 
@@ -80,7 +102,7 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 
 | Command | Does what |
 | --- | --- |
-| `build <src>` | One `index.html` (`--multi` for per-symbol pages, `--watch` to re-brew, `--cache` to skip, `--playground` for Try-it runners) |
+| `build <src>` | One `index.html` (`--multi` for per-symbol pages, `--watch` to re-brew, `--cache` to skip, `--playground` for Try-it runners, `--locale <code>` for localized UI) |
 | `build-all <src>` | Every version (`--workspaces` for monorepos) |
 | `export <src>` | Fully self-contained static site (+ `--markdown`, `--json`) |
 | `markdown <src>` | Markdown/MDX reference (`--format md\|mdx`, `--multi`) |
@@ -89,11 +111,14 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 | `serve` | Local hosting + web drop-in (`/api/build`, `/api/export`, `/api/sites`) + `--tls-cert/--tls-key` HTTPS |
 | `cloud …` | Orgs + members (`cloud org create\|list\|add-member\|remove-member\|delete`), org sites + stats |
 | `domains …` | Custom domains (`add --site`, `verify`, `list`, `remove`) |
+| `audit <dir>` | v3.0 a11y + SEO + perf audit of a built site (`--json`, `--min-score`, `--group`) |
+| `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|gallery`) |
 | `preview <src>` | Build + serve locally |
 | `gallery` | Example-sites gallery |
 | `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
+| `locales` | List UI locales (`en`, `de`, `es`, `fr`, `ja`, `id`) |
 
-Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `--storage`, `--multi`, `-w/--watch`, `--plugins <a,b>`, `--cache`, `--playground`, `--no-docmodel`.
+Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `--storage`, `--multi`, `-w/--watch`, `--plugins <a,b>`, `--cache`, `--playground`, `--locale <code>`, `--no-docmodel`.
 
 </details>
 
@@ -105,6 +130,7 @@ Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `
 - `changelog` — "what broke / migration notes" from a diff
 - `ci --base origin/main` — PR report, `--post` to comment, `--fail-on-breaking`
 - `gate --from v1` — block breaking releases without a guide or acknowledgment
+- `audit <dir>` — v3.0 a11y + SEO + perf checks, `--min-score` to gate CI
 
 </details>
 
@@ -130,6 +156,15 @@ plugins:
 cache: true
 playground: true
 contentDir: content
+locale: id          # v3.0 UI locale (en, de, es, fr, ja, id)
+registry: ./plugins-registry   # v3.0 local plugin marketplace dir
+aliases:            # v3.0 stable URLs for build-all
+  latest: 2.5.0
+  stable: 2.4.1
+eol:                # v3.0 end-of-life versions (banner + switcher mark)
+  - 1.x
+redirects:          # v3.0 moved pages keep answering
+  old/api.html: index.html
 ```
 
 ```yaml
@@ -186,7 +221,7 @@ Source → ExtractResult → RenderModel → standalone HTML
 
 ```bash
 npm install
-npm test          # 241 tests, all green
+npm test          # 280 tests, all green
 npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
 

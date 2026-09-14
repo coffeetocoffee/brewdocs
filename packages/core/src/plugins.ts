@@ -8,6 +8,11 @@ import { pythonAdapter } from "./extractors/python.js";
 import { goAdapter } from "./extractors/go.js";
 import { openApiAdapter } from "./extractors/openapi.js";
 import { graphqlAdapter } from "./extractors/graphql.js";
+import { rustAdapter } from "./extractors/rust.js";
+import { javaAdapter } from "./extractors/java.js";
+import { csharpAdapter } from "./extractors/csharp.js";
+import { rubyAdapter } from "./extractors/ruby.js";
+import { registryEntryPath } from "./registry.js";
 
 /**
  * v2.0 plugin/adapter SDK. A plugin is a plain object (or module default
@@ -72,6 +77,10 @@ export const BUILTIN_PLUGINS: BrewDocsPlugin[] = [
   { name: "brewdocs:go", adapters: [goAdapter] },
   { name: "brewdocs:openapi", adapters: [openApiAdapter] },
   { name: "brewdocs:graphql", adapters: [graphqlAdapter] },
+  { name: "brewdocs:rust", adapters: [rustAdapter] },
+  { name: "brewdocs:java", adapters: [javaAdapter] },
+  { name: "brewdocs:csharp", adapters: [csharpAdapter] },
+  { name: "brewdocs:ruby", adapters: [rubyAdapter] },
 ];
 
 function normalizePlugin(mod: unknown, id: string): BrewDocsPlugin | null {
@@ -105,9 +114,15 @@ function normalizePlugin(mod: unknown, id: string): BrewDocsPlugin | null {
  * Load one plugin by local path (`.js`/`.cjs`/`.ts`, relative to `root`) or
  * package name resolvable from `root`. CJS/TS via require; pure-ESM packages
  * fall back to the nearest synchronous harness (import can't be sync — the
- * async variant `loadPluginAsync` covers those).
+ * async variant `loadPluginAsync` covers those). v3.0: bare names that aren't
+ * npm-resolvable also get one more chance in the plugin `registryDir`
+ * (brewdocs.yml `registry:` / BREWDOCS_REGISTRY) before being dropped.
  */
-export function loadPlugin(id: string, root: string): BrewDocsPlugin | null {
+export function loadPlugin(
+  id: string,
+  root: string,
+  registryDir?: string,
+): BrewDocsPlugin | null {
   const abs = id.startsWith(".") || path.isAbsolute(id)
     ? path.resolve(root, id)
     : undefined;
@@ -118,13 +133,28 @@ export function loadPlugin(id: string, root: string): BrewDocsPlugin | null {
   try {
     return normalizePlugin(requireFrom(root)(id), id);
   } catch {
+    const dir = registryDir ?? process.env.BREWDOCS_REGISTRY;
+    if (dir) {
+      const entry = registryEntryPath(path.resolve(dir), id);
+      if (entry) {
+        try {
+          return normalizePlugin(requireFrom(root)(entry), id);
+        } catch {
+          return null;
+        }
+      }
+    }
     return null;
   }
 }
 
 /** Async variant supporting ESM plugin modules too (under `tsx`, `.ts` plugins work). */
-export async function loadPluginAsync(id: string, root: string): Promise<BrewDocsPlugin | null> {
-  const sync = loadPlugin(id, root);
+export async function loadPluginAsync(
+  id: string,
+  root: string,
+  registryDir?: string,
+): Promise<BrewDocsPlugin | null> {
+  const sync = loadPlugin(id, root, registryDir);
   if (sync) return sync;
   const abs = id.startsWith(".") || path.isAbsolute(id) ? path.resolve(root, id) : null;
   const target = abs ?? id;
@@ -141,11 +171,15 @@ function requireFrom(root: string): NodeRequire {
 }
 
 /** Resolve plugin specifiers (paths/names) against a source root, dropping unknowns. */
-export function loadPlugins(specs: string[] | undefined, root: string): BrewDocsPlugin[] {
+export function loadPlugins(
+  specs: string[] | undefined,
+  root: string,
+  registryDir?: string,
+): BrewDocsPlugin[] {
   if (!specs || specs.length === 0) return [];
   const plugins: BrewDocsPlugin[] = [];
   for (const spec of specs) {
-    const p = loadPlugin(spec, root);
+    const p = loadPlugin(spec, root, registryDir);
     if (p) plugins.push(p);
     else console.warn(`[brewdocs] plugin "${spec}" not found or invalid — skipped`);
   }

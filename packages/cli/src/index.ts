@@ -46,6 +46,7 @@ import {
   buildWorkspaces,
   detectWorkspaces,
   loadPlugins,
+  listLocales,
   rollupCoverage,
   runMcpServer,
   setDraftExpiry,
@@ -62,6 +63,14 @@ import {
   removeDomain,
   verifyDomain,
   wellKnownPath,
+  auditSite,
+  renderAuditText,
+  publishPlugin,
+  listRegistryPlugins as listPlugins,
+  searchPlugins,
+  unpublishPlugin,
+  installPlugin,
+  buildRegistryGallery,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
@@ -89,8 +98,10 @@ interface BuildArgs {
   plugins: string[];
   /** undefined = follow brewdocs.yml, true/false = explicit CLI override. */
   cache?: boolean;
-  /** Editable in-page example runners (v2.5). */
+  /** Editable in-page "Try it" runners under every example (v2.5). */
   playground: boolean;
+  /** v3.0: UI locale (brewdocs.yml `locale:` is the default). */
+  locale?: string;
 }
 
 function parseBuild(argv: string[]): BuildArgs {
@@ -105,6 +116,7 @@ function parseBuild(argv: string[]): BuildArgs {
   let noDocmodel = false;
   let cache: boolean | undefined;
   let playground = false;
+  let locale: string | undefined;
   const plugins: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -133,6 +145,10 @@ function parseBuild(argv: string[]): BuildArgs {
       cache = true;
     } else if (arg === "--no-cache") {
       cache = false;
+    } else if (arg === "--locale") {
+      locale = argv[++i]; // value-taking flag: skip it or "id" becomes <source>
+    } else if (arg.startsWith("--locale=")) {
+      locale = arg.slice("--locale=".length);
     } else if (arg === "--badge" || arg === "--min-coverage") {
       i++; // value-taking flags the builder ignores, but their values must not become <source>
     } else if (arg.startsWith("--badge=") || arg.startsWith("--min-coverage=")) {
@@ -153,10 +169,10 @@ function parseBuild(argv: string[]): BuildArgs {
   }
   if (!source) {
     throw new Error(
-      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache] [--playground]",
+      "usage: brewdocs build <source> [--out <dir>] [--theme <name>] [--dark] [--version <v>] [--name <subdomain>] [--multi] [--watch] [--no-docmodel] [--plugins <a,b>] [--cache] [--playground] [--locale <code>]",
     );
   }
-  return { source, out, theme, dark, version, name, multi, watch, noDocmodel, plugins, cache, playground };
+  return { source, out, theme, dark, version, name, multi, watch, noDocmodel, plugins, cache, playground, locale };
 }
 
 function printDoctorReport(report: ReturnType<typeof diagnose>): void {
@@ -203,6 +219,7 @@ function printDoctorReport(report: ReturnType<typeof diagnose>): void {
     plugins: loadPlugins(args.plugins, sourceRoot),
     cache: args.cache,
     playground: args.playground || Boolean(config.playground),
+    locale: args.locale ?? config.locale,
   };
 }
 
@@ -524,6 +541,13 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "locales") {
+    for (const l of listLocales()) {
+      console.log(`  ${l.code.padEnd(6)} ${l.label}`);
+    }
+    return;
+  }
+
   if (command === "versions") {
     const src = rest[0];
     if (!src) throw new Error("usage: brewdocs versions <source>");
@@ -781,7 +805,7 @@ export async function run(argv: string[]): Promise<void> {
       let timer: NodeJS.Timeout | undefined;
       fs.watch(src.root, { recursive: true }, (_event, file) => {
         if (!file) return;
-        if (!/\.(ts|js|py|go|md|mdx|json|yaml|yml|graphql|gql)$/.test(file)) return;
+        if (!/\.(ts|js|py|go|md|mdx|json|yaml|yml|graphql|gql|rs|java|cs|rb|toml|gemspec|csproj)$/.test(file)) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => void doBuild(), 200);
       });
@@ -1300,6 +1324,109 @@ dark: false
     return;
   }
 
+  if (command === "audit") {
+    const dir = path.resolve(process.cwd(), rest[0] ?? "dist");
+    const report = auditSite(dir);
+    if (rest.includes("--json")) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(renderAuditText(report));
+    }
+    const minScore = Number(getFlag(rest, "--min-score") || 0);
+    const group = getFlag(rest, "--group");
+    const failedGroup =
+      group && (group === "a11y" || group === "seo" || group === "perf")
+        ? report.groups[group] < minScore
+        : false;
+    if (minScore && (group ? failedGroup : report.score < minScore)) {
+      console.error(
+        group
+          ? `x ${group} score ${report.groups[group as "a11y" | "seo" | "perf"]}% is below the ${minScore}% minimum`
+          : `x audit score ${report.score}% is below the ${minScore}% minimum`,
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "registry") {
+    const sub = rest[0];
+    const registryDir = path.resolve(
+      process.cwd(),
+      getFlag(rest, "--registry") ?? process.env.BREWDOCS_REGISTRY ?? "./registry-store",
+    );
+    if (sub === "publish") {
+      const modulePath = rest[1];
+      const name = getFlag(rest, "--name");
+      const version = getFlag(rest, "--version");
+      if (!modulePath || !name || !version) {
+        throw new Error(
+          "usage: brewdocs registry publish <module.cjs> --name <n> --version <x.y.z> [--kind plugin|adapter|theme] [--description <d>] [--author <a>] [--keywords a,b] [--registry <dir>]",
+        );
+      }
+      const keywords = (getFlag(rest, "--keywords") ?? "")
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      const entry = publishPlugin(registryDir, path.resolve(process.cwd(), modulePath), {
+        name,
+        version,
+        kind: (getFlag(rest, "--kind") as "plugin" | "adapter" | "theme" | undefined) ?? "plugin",
+        description: getFlag(rest, "--description"),
+        author: getFlag(rest, "--author"),
+        keywords: keywords.length ? keywords : undefined,
+      });
+      if (!entry) {
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`📦 ${entry.name}@${entry.version} published -> ${registryDir}`);
+      return;
+    }
+    if (sub === "list" || sub === "search") {
+      const query = sub === "search" ? rest[1] ?? "" : "";
+      const entries = sub === "search" ? searchPlugins(registryDir, query) : listPlugins(registryDir);
+      if (rest.includes("--json")) {
+        console.log(JSON.stringify(entries, null, 2));
+      } else if (entries.length === 0) {
+        console.log(`No plugins in ${registryDir}/.registry.json${query ? ` matching "${query}"` : ""}`);
+      } else {
+        for (const p of entries) {
+          console.log(`- ${p.name}@${p.version}  kind=${p.kind}  installs=${p.installs}  ${p.description ?? ""}`);
+        }
+      }
+      return;
+    }
+    if (sub === "install") {
+      const name = rest[1];
+      const into = path.resolve(process.cwd(), getFlag(rest, "--into") ?? ".");
+      if (!name) throw new Error("usage: brewdocs registry install <name> --into <source-dir>");
+      const result = installPlugin(registryDir, name, into);
+      if (!result) {
+        console.error(`x no plugin named "${name}" in ${registryDir}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`📥 installed ${name}@${result.entry.version} -> ${into}`);
+      console.log(`   add to brewdocs.yml plugins: [${result.spec}] or pass --plugins ${result.spec}`);
+      return;
+    }
+    if (sub === "remove") {
+      const name = rest[1];
+      if (!name) throw new Error("usage: brewdocs registry remove <name>");
+      const ok = unpublishPlugin(registryDir, name);
+      console.log(ok ? `🗑️  ${name} unpublished` : `no plugin named ${name}`);
+      return;
+    }
+    if (sub === "gallery") {
+      const out = path.resolve(process.cwd(), getFlag(rest, "--out") ?? "marketplace");
+      const file = buildRegistryGallery(registryDir, out);
+      console.log(`🛒 Marketplace gallery -> ${file}`);
+      return;
+    }
+    throw new Error("usage: brewdocs registry publish|list|search|install|remove|gallery");
+  }
+
   if (command === "mcp") {
     const file = rest[0] ?? getFlag(rest, "--docmodel") ?? "docmodel.json";
     const resolved = path.resolve(process.cwd(), file);
@@ -1381,11 +1508,13 @@ Usage:
                   [--record] [--trend-svg <file.svg>]
   brewdocs diff <source> --from <tag> --to <tag> [--out <dir>] [--json]
   brewdocs changelog <source> --from <tag> --to <tag> [--file <changelog.md>] [--out <file>] [--json]
-  brewdocs ci <source> --base <ref> [--post] [--min-coverage <pct>] [--fail-on-breaking] [--out <file>] [--json]
-  brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
+   brewdocs ci <source> --base <ref> [--post] [--min-coverage <pct>] [--fail-on-breaking] [--out <file>] [--json]
+   brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
+   brewdocs audit <dir> [--json] [--min-score <n>] [--group a11y|seo|perf]   v3.0 site audit
+   brewdocs registry publish|list|search|install|remove|gallery   v3.0 plugin registry + marketplace
 
 Commands:
-   build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
+    build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
                      every build also emits docmodel.json unless --no-docmodel
    build-all        Build every discovered version into <out>/<version>/ + root index
                      (add --workspaces for npm/yarn/pnpm monorepos: one site per
@@ -1423,10 +1552,16 @@ Commands:
                     add --require-proven to also fail on examples that
                     no longer typecheck
     themes           List available themes
+    locales          v3.0: list UI locales (en, de, es, fr, ja, id)
     keys             Manage per-user API keys (add / list / revoke)
     cloud            v2.5: orgs (create/list/add-member/remove-member/delete),
-                     org sites + analytics rollup (cloud sites|stats <org>)
+                      org sites + analytics rollup (cloud sites|stats <org>)
     domains          v2.5: custom domains (add --site, verify, list, remove)
+    audit            v3.0: a11y + SEO + perf audit of a built site (<dir>, default dist)
+                      --json, --min-score <n> gate, --group a11y|seo|perf
+    registry         v3.0: plugin registry + marketplace
+                      (publish <file> --name --version | list | search <q> |
+                       install <name> --into <src> | remove | gallery [--out])
     drafts           Manage private draft links (list / extend / revoke)
     mcp              MCP stdio server over docmodel.json for agent workflows
     help             Show this help
@@ -1439,15 +1574,18 @@ Options:
   -n, --name      Subdomain name for deploy
     --multi         Emit one HTML page per exported symbol
     -w, --watch     Rebuild on source changes (build only)
-    --plugins <a,b> v2.0: plugin modules (paths relative to <source>, or package names)
-    --cache         v2.0: incremental extraction cache (.brewdocs/extract.json)
-    --playground    v2.5: editable in-page example runners (Try it)
+     --plugins <a,b> v2.0: plugin modules (paths relative to <source>, or package names)
+     --cache         v2.0: incremental extraction cache (.brewdocs/extract.json)
+     --playground    v2.5: editable in-page example runners (Try it)
+     --locale <code> v3.0: UI locale (brewdocs.yml 'locale:' is the default)
 
 Config: a brewdocs.yml or brewdocs.json in the source dir sets theme, dark,
-name, multi, storage (local | s3), plugins, cache, playground, and contentDir defaults.
-CLI flags override it. v2.0: '--theme' also accepts a theme manifest
-(themes/<name>.yml with 'base:', 'vars:', and 'slots:' partials); a
-'content/' directory of .md/.mdx guide pages is published under content/.
+name, multi, storage (local | s3), plugins, cache, playground, locale, and
+contentDir defaults. CLI flags override it. v2.0: '--theme' also accepts a
+theme manifest (themes/<name>.yml with 'base:', 'vars:', and 'slots:'
+partials); a 'content/' directory of .md/.mdx guide pages is published under
+content/. v3.0: 'aliases:' (name → version redirect pages), 'eol:' (end-of-life
+version list) and 'redirects:' (moved pages) ride along with build-all.
 
 Search: press ⌘K / Ctrl+K on any generated page.
 `);

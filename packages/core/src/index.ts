@@ -41,6 +41,41 @@ export {
   replacementHint,
 } from "./replacements.js";
 export { discoverVersions, readPackageVersion } from "./versions.js";
+export {
+  dirSafe,
+  isEolVersion,
+  redirectHtml,
+  emitAliasPages,
+  emitRedirects,
+} from "./aliases.js";
+export {
+  uiStrings,
+  normalizeLocale,
+  listLocales,
+  LOCALE_LABELS,
+  type UiStrings,
+} from "./i18n.js";
+export {
+  auditSite,
+  renderAuditText,
+  type AuditCheck,
+  type AuditGroup,
+  type AuditReport,
+} from "./audit.js";
+export {
+  publishPlugin,
+  loadRegistry,
+  listPlugins as listRegistryPlugins,
+  getPlugin,
+  searchPlugins,
+  unpublishPlugin,
+  installPlugin,
+  registryEntryPath,
+  buildRegistryGallery,
+  type RegistryEntry,
+  type RegistryStore,
+  type PublishOptions,
+} from "./registry.js";
 export { gitShaOf } from "./git.js";
 export {
   buildDocModel,
@@ -141,6 +176,11 @@ export { pythonAdapter, resetPythonProbe } from "./extractors/python.js";
 export { goAdapter } from "./extractors/go.js";
 export { openApiAdapter } from "./extractors/openapi.js";
 export { graphqlAdapter } from "./extractors/graphql.js";
+export { rustAdapter } from "./extractors/rust.js";
+export { javaAdapter } from "./extractors/java.js";
+export { csharpAdapter } from "./extractors/csharp.js";
+export { rubyAdapter } from "./extractors/ruby.js";
+export { walkSourceFiles } from "./extractors/walk.js";
 export {
   addOrgMember,
   aggregateOrgStats,

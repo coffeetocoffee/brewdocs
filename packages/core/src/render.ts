@@ -5,12 +5,15 @@ import { getTheme, type Theme } from "./themes.js";
 import { buildSearchIndex } from "./search.js";
 import { themeFromRef, type Slots } from "./theme-manifest.js";
 import { applyOnRender, mergePluginThemes, type BrewDocsPlugin } from "./plugins.js";
+import { normalizeLocale, uiStrings, type UiStrings } from "./i18n.js";
 
 export interface VersionLink {
   version: string;
   path: string;
   /** Optional link to an API diff page covering this version vs the previous one. */
   diffPath?: string;
+  /** v3.0: version is end-of-life (switcher marker + banner). */
+  eol?: boolean;
 }
 
 export interface RenderOptions {
@@ -55,6 +58,10 @@ export interface RenderOptions {
    * so the output stays one self-contained HTML file.
    */
   playground?: boolean;
+  /** v3.0: UI locale for chrome strings + `<html lang>` (see i18n.ts). */
+  locale?: string;
+  /** v3.0: the rendered version is end-of-life (banner in the page). */
+  eol?: boolean;
 }
 
 function escapeHtml(input: string): string {
@@ -241,10 +248,11 @@ function row(k: string, v: string): string {
 function renderSymbol(
   sym: SymbolDoc,
   links?: SymbolLinks,
-  opts?: { playground?: boolean },
+  opts?: { playground?: boolean; ui?: UiStrings },
 ): string {
+  const ui = opts?.ui ?? uiStrings(undefined);
   const badge = sym.deprecated
-    ? `<span class="badge dep">deprecated</span>`
+    ? `<span class="badge dep">${escapeHtml(ui.deprecated)}</span>`
     : "";
   const typeParams = sym.typeParams?.length
     ? `<span class="kind">&lt;${sym.typeParams
@@ -266,7 +274,7 @@ function renderSymbol(
   const desc = sym.description ? `<p>${escapeHtml(sym.description)}</p>` : "";
 
   const params = sym.params.length
-    ? `<div class="params"><h4>Parameters</h4><table>
+    ? `<div class="params"><h4>${escapeHtml(ui.parameters)}</h4><table>
         ${sym.params
           .map(
             (p) =>
@@ -281,7 +289,7 @@ function renderSymbol(
     : "";
 
   const ret = sym.returns
-    ? `<div class="returns"><h4>Returns</h4><p>${
+    ? `<div class="returns"><h4>${escapeHtml(ui.returns)}</h4><p>${
         sym.returns.type
           ? `<code>${linkifyType(sym.returns.type, links)}</code> `
           : ""
@@ -289,7 +297,7 @@ function renderSymbol(
     : "";
 
   const members = sym.members?.length
-    ? `<div class="members"><h4>Members</h4><table>
+    ? `<div class="members"><h4>${escapeHtml(ui.members)}</h4><table>
         ${sym.members
           .map(
             (m) =>
@@ -311,19 +319,19 @@ function renderSymbol(
     : "";
 
   const throws = sym.throws?.length
-    ? `<div class="throws"><h4>Throws</h4><ul>${sym.throws
+    ? `<div class="throws"><h4>${escapeHtml(ui.throws)}</h4><ul>${sym.throws
         .map((t) => `<li>${linkifyType(t, links)}</li>`)
         .join("")}</ul></div>`
     : "";
 
   const see = sym.see?.length
-    ? `<div class="see"><h4>See</h4><ul>${sym.see
+    ? `<div class="see"><h4>${escapeHtml(ui.see)}</h4><ul>${sym.see
         .map((s) => `<li>${linkifyType(s, links)}</li>`)
         .join("")}</ul></div>`
     : "";
 
   const examples = sym.examples.length
-    ? `<div class="examples"><h4>Example</h4>${sym.examples
+    ? `<div class="examples"><h4>${escapeHtml(ui.example)}</h4>${sym.examples
         .map(
           (e) =>
             `<pre class="code" data-lang="ts"><code>${highlightCode(
@@ -455,7 +463,13 @@ const STRUCTURAL_CSS = `
   footer a { color: var(--accent); }
   @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } nav.toc { display: none; } header { position: relative; } }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  .eol-banner {
+    margin: 0 0 1rem; padding: 0.55rem 0.9rem; border-radius: 10px; font-size: 0.9rem;
+    background: color-mix(in srgb, #b3261e 12%, var(--card)); color: #b3261e;
+    border: 1px solid color-mix(in srgb, #b3261e 35%, transparent);
+  }
+  .eol-banner a { color: #b3261e; }
   main p, main li { text-wrap: pretty; }
   main h2, main h3, main h4 { text-wrap: balance; scroll-margin-top: 1rem; }
   .skip-link {
@@ -473,17 +487,21 @@ const STRUCTURAL_CSS = `
   nav.toc .nav-heading { color: var(--ink); font-weight: 600; padding: 0.25rem 0.9rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
 `;
 
-function searchOverlay(): string {
+function searchOverlay(ui: UiStrings): string {
   return `
 <div class="search-overlay" id="search-overlay" hidden>
-  <div class="search-box" role="dialog" aria-label="Search">
-    <input id="search-input" type="text" placeholder="Search docs…  (⌘K / Ctrl+K)" autocomplete="off" aria-label="Search documentation" />
+  <div class="search-box" role="dialog" aria-label="${escapeHtml(ui.searchDocs)}">
+    <input id="search-input" type="text" placeholder="${escapeHtml(ui.searchPlaceholder)}" autocomplete="off" aria-label="${escapeHtml(ui.searchDocs)}" />
     <ul id="search-results"></ul>
   </div>
 </div>`;
 }
 
-function versionSwitcher(versions: VersionLink[] | undefined, current: string | undefined): string {
+function versionSwitcher(
+  versions: VersionLink[] | undefined,
+  current: string | undefined,
+  ui: UiStrings,
+): string {
   if (!versions || versions.length <= 1) {
     return current
       ? `<span class="version">v${escapeHtml(current)}</span>`
@@ -494,25 +512,27 @@ function versionSwitcher(versions: VersionLink[] | undefined, current: string | 
       (v) =>
         `<option value="${escapeHtml(v.path)}"${
           v.version === current ? " selected" : ""
-        }>v${escapeHtml(v.version)}</option>`,
+        }>v${escapeHtml(v.version)}${v.eol ? ` (${escapeHtml(ui.eolBadge)})` : ""}</option>`,
     )
     .join("");
   const diffLink = versions.find((v) => v.diffPath && v.version === current)?.diffPath;
   const diffAnchor = diffLink
     ? ` <a class="version-diff" href="${escapeHtml(diffLink)}" title="API diff against the previous version">diff</a>`
     : "";
-  return `<label class="version">Version:
+  return `<label class="version">${escapeHtml(ui.version)}
     <select id="version-select">${opts}</select>${diffAnchor}
   </label>`;
 }
 
-const SEARCH_JS = `
+function searchJs(ui: UiStrings): string {
+  return `
 (function () {
   var data = JSON.parse(document.getElementById("search-index").textContent);
   var overlay = document.getElementById("search-overlay");
   var input = document.getElementById("search-input");
   var results = document.getElementById("search-results");
   var toggle = document.getElementById("search-toggle");
+  var NO_RESULTS = ${JSON.stringify(ui.noResults)};
 
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
@@ -533,7 +553,7 @@ const SEARCH_JS = `
     }).filter(function (x) { return x.score > 0; })
       .sort(function (a, b) { return b.score - a.score; })
       .slice(0, 8);
-    if (!scored.length) { results.innerHTML = '<li class="empty">No results</li>'; return; }
+    if (!scored.length) { results.innerHTML = '<li class="empty">' + esc(NO_RESULTS) + '</li>'; return; }
     results.innerHTML = scored.map(function (x) {
       return '<li><a href="' + x.d.url + '"><span class="r-title">' + esc(x.d.title) +
         '</span><span class="r-kind">' + esc(x.d.kind) + '</span></a></li>';
@@ -556,6 +576,7 @@ const SEARCH_JS = `
   if (sel) sel.addEventListener("change", function () { location.href = sel.value; });
 })();
 `;
+}
 
 /** Footer freshness stamp: rev + build date so stale pages are detectable. */
 function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): string {
@@ -564,6 +585,18 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
   if (fresh.gitSha) bits.push(`rev ${escapeHtml(fresh.gitSha.slice(0, 7))}`);
   if (fresh.generatedAt) bits.push(escapeHtml(fresh.generatedAt.slice(0, 10)));
   return bits.length ? ` <span class="freshness">· ${bits.join(" · ")}</span>` : "";
+}
+
+/**
+ * v3.0 EOL banner: warn readers the version is unmaintained and point at
+ * the newest supported entry in the switcher (versions arrive newest-first).
+ */
+function eolBannerHtml(options: RenderOptions, ui: UiStrings): string {
+  if (!options.eol) return "";
+  const current = options.currentVersion;
+  const alive = (options.versions ?? []).find((v) => !v.eol && v.version !== current);
+  const link = alive ? ` <a href="${escapeHtml(alive.path)}">v${escapeHtml(alive.version)}</a>` : "";
+  return `<div class="eol-banner" role="alert">⚠ ${escapeHtml(ui.eolBanner)}${link}</div>`;
 }
 
 /** Shared full-document wrapper used by both single- and multi-page output. */function pageShell(opts: {
@@ -577,6 +610,8 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
   const theme = themeFromRef(opts.renderOptions.theme, opts.renderOptions.root);
   const pluginTheme = mergePluginThemes(opts.renderOptions.plugins ?? []);
   const slots = opts.renderOptions.slots ?? {};
+  const ui = uiStrings(opts.renderOptions.locale);
+  const locale = normalizeLocale(opts.renderOptions.locale);
   const initial = opts.renderOptions.dark ? "dark" : "light";
   const title = escapeHtml(opts.title);
   const desc = opts.description
@@ -584,14 +619,24 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
     : "";
   const coverChip =
     opts.renderOptions.score !== undefined
-      ? `<span class="coverage-chip" title="Docs coverage from brewdocs doctor">🩺 ${opts.renderOptions.score}% documented</span>`
+      ? `<span class="coverage-chip" title="${escapeHtml(ui.coverageTitle)}">🩺 ${opts.renderOptions.score}% ${escapeHtml(ui.documented)}</span>`
       : "";
   const extraCss = theme.css ? `\n${theme.css}\n` : "";
+  // v3.0 SEO: the description rides into meta/og tags, not just the lede.
+  const seo = opts.description
+    ? `<meta name="description" content="${escapeHtml(opts.description)}" />
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${escapeHtml(opts.description)}" />
+<meta property="og:type" content="article" />`
+    : `<meta property="og:title" content="${title}" />`;
+  const accent = theme.light["--accent"];
   return `<!doctype html>
-<html lang="en" data-theme="${initial}">
+<html lang="${escapeHtml(locale)}" data-theme="${initial}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="generator" content="brewdocs" />
+${seo}${accent ? `\n<meta name="theme-color" content="${escapeHtml(accent)}" />` : ""}
 <title>${title} · BrewDocs</title>
 <style>
 ${themeVars(theme, pluginTheme)}
@@ -600,29 +645,30 @@ ${STRUCTURAL_CSS}${extraCss}
 ${slots.head ?? ""}
 </head>
   <body>
-  <a class="skip-link" href="#main-content">Skip to content</a>
-  ${searchOverlay()}
+  <a class="skip-link" href="#main-content">${escapeHtml(ui.skipToContent)}</a>
+  ${searchOverlay(ui)}
   <header>
    <div class="header-actions">
-     <button class="search-toggle" id="search-toggle" aria-label="Search docs">🔍 <kbd>⌘K</kbd></button>
-     ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion)}
-     <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌓</button>
-   </div>
-   ${slots.header ?? ""}
-   <div class="cup">☕</div>
+      <button class="search-toggle" id="search-toggle" aria-label="${escapeHtml(ui.searchDocs)}">🔍 <kbd>⌘K</kbd></button>
+      ${versionSwitcher(opts.renderOptions.versions, opts.renderOptions.currentVersion, ui)}
+      <button class="theme-toggle" id="theme-toggle" aria-label="${escapeHtml(ui.toggleTheme)}">🌓</button>
+    </div>
+    ${slots.header ?? ""}
+    ${eolBannerHtml(opts.renderOptions, ui)}
+    <div class="cup">☕</div>
     <h1>${title}</h1>
     ${desc}
     ${coverChip}
 </header>
   <div class="layout">
-    <nav class="toc" aria-label="Table of contents"><ul>${opts.toc}</ul></nav>
+    <nav class="toc" aria-label="${escapeHtml(ui.tableOfContents)}"><ul>${opts.toc}</ul></nav>
     <main id="main-content">
       ${slots.mainBefore ?? ""}
       ${opts.main}
       ${slots.mainAfter ?? ""}
     </main>
   </div>
-<footer>Brewed with <a href="#">BrewDocs</a>${freshnessHtml(opts.renderOptions.freshness)} — Brew your docs, serve them hot.${slots.footer ? `\n${slots.footer}` : ""}</footer>
+<footer>${escapeHtml(ui.brewedWith)} <a href="#">BrewDocs</a>${freshnessHtml(opts.renderOptions.freshness)} — ${escapeHtml(ui.tagline)}${slots.footer ? `\n${slots.footer}` : ""}</footer>
 <script id="search-index" type="application/json">${opts.indexJson}</script>
 <script>
 (function () {
@@ -636,7 +682,7 @@ ${slots.head ?? ""}
     localStorage.setItem("brewdocs-theme", next);
   });
 })();
-${SEARCH_JS}
+${searchJs(ui)}
 ${opts.renderOptions.playground ? PLAYGROUND_JS : ""}
 </script>
 </body>
@@ -646,6 +692,7 @@ ${opts.renderOptions.playground ? PLAYGROUND_JS : ""}
 
 /** Render the model into a complete, standalone, themeable HTML document. */
 export function renderToHtml(model: RenderModel, options: RenderOptions = {}): string {
+  const ui = uiStrings(options.locale);
   const indexJson = searchIndexJson(model, Boolean(options.multiPage));
   const desc = model.description ?? "";
   const links = symbolLinks(
@@ -659,8 +706,8 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
     ...model.sections.map(
       (s) => `<li><a href="#${escapeHtml(s.id)}">${escapeHtml(s.title)}</a></li>`,
     ),
-    model.symbols.length ? `<li><a href="#api">API</a></li>` : "",
-    contentIndexToc(model),
+    model.symbols.length ? `<li><a href="#api">${escapeHtml(ui.api)}</a></li>` : "",
+    contentIndexToc(model, ui),
   ]
     .filter(Boolean)
     .join("\n");
@@ -677,21 +724,20 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
     : (model.readmeHtml ?? "");
 
   const api = model.symbols.length
-    ? `<section id="api"><h2>API</h2>${model.symbols
-        .map((s) => renderSymbol(s, links, options))
+    ? `<section id="api"><h2>${escapeHtml(ui.api)}</h2>${model.symbols
+        .map((s) => renderSymbol(s, links, { playground: options.playground, ui }))
         .join("\n")}</section>`
     : "";
 
   const emptyState =
     !readmeBody && !api
       ? `<section class="empty-state">
-          <h2>Nothing brewed yet</h2>
-          <p>This package has no README or exported symbols BrewDocs could find.
-          Add a <code>README.md</code> or exported functions to see docs here.</p>
+          <h2>${escapeHtml(ui.emptyTitle)}</h2>
+          <p>${ui.emptyBody}</p>
         </section>`
       : "";
 
-  const main = `${metaTable(model.pkg)}${readmeBody}${api}${contentIndexSection(model)}${emptyState}`;
+  const main = `${metaTable(model.pkg)}${readmeBody}${api}${contentIndexSection(model, ui)}${emptyState}`;
 
   return applyOnRender(
     options.plugins ?? [],
@@ -721,6 +767,7 @@ export function renderToHtmlMulti(
   model: RenderModel,
   options: RenderOptions = {},
 ): RenderedPage[] {
+  const ui = uiStrings(options.locale);
   const indexJson = searchIndexJson(model, true);
   const desc = model.description ?? "";
 
@@ -739,7 +786,7 @@ export function renderToHtmlMulti(
     : (model.readmeHtml ?? "");
 
   const apiSummary = model.symbols.length
-    ? `<section id="api"><h2>API</h2><ul class="symbol-index">
+    ? `<section id="api"><h2>${escapeHtml(ui.api)}</h2><ul class="symbol-index">
         ${model.symbols
           .map(
             (s) =>
@@ -757,13 +804,13 @@ export function renderToHtmlMulti(
     ...model.sections.map(
       (s) => `<li><a href="#${escapeHtml(s.id)}">${escapeHtml(s.title)}</a></li>`,
     ),
-    model.symbols.length ? `<li><a href="#api">API</a></li>` : "",
-    contentIndexToc(model),
+    model.symbols.length ? `<li><a href="#api">${escapeHtml(ui.api)}</a></li>` : "",
+    contentIndexToc(model, ui),
   ]
     .filter(Boolean)
     .join("\n");
 
-  const indexMain = `${metaTable(model.pkg)}${readmeBody}${apiSummary}${contentIndexSection(model)}`;
+  const indexMain = `${metaTable(model.pkg)}${readmeBody}${apiSummary}${contentIndexSection(model, ui)}`;
 
   const pages: RenderedPage[] = [
     {
@@ -780,10 +827,10 @@ export function renderToHtmlMulti(
   ];
 
   for (const sym of model.symbols) {
-    const symToc = `<li><a href="../index.html#api">API</a></li>
+    const symToc = `<li><a href="../index.html#api">${escapeHtml(ui.api)}</a></li>
       <li><a href="../index.html">${escapeHtml(model.title)}</a></li>`;
-    const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← Back to docs</a></p>
-      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks), options)}</section>`;
+    const symMain = `<section class="symbol-page"><p class="back"><a href="../index.html">← ${escapeHtml(ui.backToDocs)}</a></p>
+      ${renderSymbol(sym, symbolLinks(model, (name) => `${slug(name)}.html`, sym.name, options.externalLinks), { playground: options.playground, ui })}</section>`;
     pages.push({
       path: symbolSlug(sym.name),
       html: applyOnRender(
@@ -814,14 +861,19 @@ function relToRoot(depth: number): string {
   return "../".repeat(depth);
 }
 
-function navGroupsFor(model: RenderModel, pages: ContentPage[], base: string): string {
+function navGroupsFor(
+  model: RenderModel,
+  pages: ContentPage[],
+  base: string,
+  ui: UiStrings,
+): string {
   const href = (link: string) =>
     link.startsWith("http") || link.startsWith("/") || link.startsWith("#")
       ? link
       : `${base}${link}`;
   const groups = model.nav?.length
     ? model.nav
-    : [{ title: "Guides", items: pages.map((p) => ({ text: p.title, link: `content/${p.slug}.html` })) }];
+    : [{ title: ui.guides, items: pages.map((p) => ({ text: p.title, link: `content/${p.slug}.html` })) }];
   return groups
     .map(
       (g) =>
@@ -839,6 +891,7 @@ export function renderContentPages(
 ): RenderedPage[] {
   const pages = model.content ?? [];
   if (pages.length === 0) return [];
+  const ui = uiStrings(options.locale);
   const indexJson = searchIndexJson(model, true);
   const out: RenderedPage[] = [];
   for (const page of pages) {
@@ -846,9 +899,9 @@ export function renderContentPages(
     const base = relToRoot(depth); // back to site root
     const toc = [
       `<li><a href="${base}index.html">${escapeHtml(model.title)}</a></li>`,
-      navGroupsFor(model, pages, base),
+      navGroupsFor(model, pages, base, ui),
       page.headings.length
-        ? `<li class="nav-group"><span class="nav-heading">On this page</span><ul>${page.headings
+        ? `<li class="nav-group"><span class="nav-heading">${escapeHtml(ui.onThisPage)}</span><ul>${page.headings
             .map((h) => `<li><a href="#${escapeHtml(h.id)}">${escapeHtml(h.title)}</a></li>`)
             .join("")}</ul></li>`
         : "",
@@ -880,17 +933,19 @@ export function renderContentPages(
 }
 
 /** Links (toc entries) for the guide section on the main index page. */
-export function contentIndexToc(model: RenderModel): string {
+export function contentIndexToc(model: RenderModel, ui?: UiStrings): string {
   const pages = model.content ?? [];
   if (pages.length === 0) return "";
-  return `<li><a href="#guides">Guides</a></li>`;
+  const t = ui ?? uiStrings(undefined);
+  return `<li><a href="#guides">${escapeHtml(t.guides)}</a></li>`;
 }
 
 /** HTML block listing guide pages, appended to the index page body. */
-export function contentIndexSection(model: RenderModel): string {
+export function contentIndexSection(model: RenderModel, ui?: UiStrings): string {
   const pages = model.content ?? [];
   if (pages.length === 0) return "";
-  return `<section id="guides"><h2>Guides</h2><ul class="symbol-index">
+  const t = ui ?? uiStrings(undefined);
+  return `<section id="guides"><h2>${escapeHtml(t.guides)}</h2><ul class="symbol-index">
     ${pages
       .map(
         (p) =>

@@ -25,6 +25,16 @@ export interface BrewDocsConfig {
   themeFile?: string;
   /** v2.5: editable in-page "Try it" editors under each symbol example. */
   playground?: boolean;
+  /** v3.0: UI locale for rendered chrome (see i18n.ts; default "en"). */
+  locale?: string;
+  /** v3.0: alias name -> version, e.g. `latest: 2.5.0` (redirect pages). */
+  aliases?: Record<string, string>;
+  /** v3.0: versions (or `"1.x"` major patterns) flagged end-of-life. */
+  eol?: string[];
+  /** v3.0: moved pages: old path -> new path, relative to the site root. */
+  redirects?: Record<string, string>;
+  /** v3.0: directory of the local plugin registry (marketplace store). */
+  registry?: string;
   s3?: {
     bucket?: string;
     region?: string;
@@ -56,13 +66,16 @@ function parseInlineList(raw: string): string[] | undefined {
 
 /**
  * Minimal YAML reader: supports top-level `key: value` pairs (scalars,
- * booleans, inline lists), block sequences (`plugins:\n  - x`), and a single
- * nested `s3:` block. Enough for brewdocs.yml without pulling in a YAML dep.
+ * booleans, inline lists), block sequences (`plugins:\n  - x`), and nested
+ * string-map blocks (`s3:`, `aliases:`, `redirects:`). Enough for
+ * brewdocs.yml without pulling in a YAML dep.
  */
+const MAP_SECTIONS = new Set(["s3", "aliases", "redirects"]);
+
 function parseSimpleYaml(text: string): BrewDocsConfig {
   const cfg: BrewDocsConfig = {};
   const lines = text.split(/\r?\n/);
-  let section: "s3" | null = null;
+  let section: string | null = null;
   let listKey: string | null = null;
   for (const line of lines) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
@@ -73,20 +86,30 @@ function parseSimpleYaml(text: string): BrewDocsConfig {
       continue;
     }
     const m = line.match(/^(\s*)([\w-]+):\s*(.*)$/);
-    if (!m) continue;
+    if (!m) {
+      // Nested map entry with a non-word key (redirect paths contain / and .).
+      if (section && /^\s+/.test(line)) {
+        const mm = line.match(/^\s*([^:]+):\s*(.*)$/);
+        if (mm) {
+          const map = (cfg as Record<string, unknown>)[section] as Record<string, string>;
+          map[mm[1].trim().replace(/^["']|["']$/g, "")] = String(parseScalar(mm[2]));
+        }
+      }
+      continue;
+    }
     const indent = m[1].length;
     const key = m[2];
     const val = m[3];
     if (indent === 0) {
       listKey = null;
-      if (key === "s3") {
-        section = "s3";
-        cfg.s3 = {};
+      if (MAP_SECTIONS.has(key)) {
+        section = key;
+        (cfg as Record<string, unknown>)[key] = {};
         continue;
       }
       section = null;
       if (!val) {
-        // Key with no value: a block sequence (plugins, ...) starts here.
+        // Key with no value: a block sequence (plugins, …) starts here.
         listKey = key;
         (cfg as Record<string, unknown>)[key] = [];
         continue;
@@ -94,8 +117,9 @@ function parseSimpleYaml(text: string): BrewDocsConfig {
       const list = parseInlineList(val);
       if (list) (cfg as Record<string, unknown>)[key] = list;
       else (cfg as Record<string, unknown>)[key] = parseScalar(val);
-    } else if (section === "s3" && cfg.s3) {
-      (cfg.s3 as Record<string, string>)[key] = String(parseScalar(val));
+    } else if (section) {
+      const map = (cfg as Record<string, unknown>)[section] as Record<string, string>;
+      map[key] = String(parseScalar(val));
     }
   }
   return cfg;

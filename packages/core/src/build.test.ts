@@ -43,7 +43,7 @@ describe("BrewDocs build (Phase 0)", () => {
     expect(html).toContain('class="skip-link"');
     expect(html).toContain('id="main-content"');
     expect(html).toContain('aria-label="Table of contents"');
-    expect(html).toContain('aria-label="Search documentation"');
+    expect(html).toContain('aria-label="Search docs"');
   });
 
   it("emits docmodel.json next to the HTML by default", () => {

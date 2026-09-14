@@ -14,6 +14,12 @@ import { extractCached } from "./cache.js";
 import { loadPlugins, type BrewDocsPlugin } from "./plugins.js";
 import { loadContent, loadNav } from "./content.js";
 import { loadThemeManifest, manifestSlots, type Slots } from "./theme-manifest.js";
+import {
+  dirSafe,
+  emitAliasPages,
+  emitRedirects,
+  isEolVersion,
+} from "./aliases.js";
 import type { ExtractResult, RenderModel, Source } from "./types.js";
 
 /**
@@ -26,9 +32,16 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
   if (options.plugins && options.slots && options.root) return options;
   const root = path.resolve(source.root);
   const config = loadConfig(root);
+  // v3.0: plugin names that aren't paths/npm-resolvable fall back to the
+  // registry (brewdocs.yml `registry:`, relative to the source, or env).
+  const registryDir = config.registry
+    ? path.resolve(root, config.registry)
+    : process.env.BREWDOCS_REGISTRY
+      ? path.resolve(process.env.BREWDOCS_REGISTRY)
+      : undefined;
   const plugins: BrewDocsPlugin[] = [
     ...(options.plugins ?? []),
-    ...loadPlugins(config.plugins, root),
+    ...loadPlugins(config.plugins, root, registryDir),
   ];
   const themeRef = options.theme ?? config.theme;
   const manifest = themeRef ? loadThemeManifest(themeRef, root) : null;
@@ -43,6 +56,8 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
     // base + vars + css at render time. Overwriting with manifest.extends here
     // would silently drop the manifest's own customizations.
     theme: themeRef ?? options.theme,
+    // v3.0: brewdocs.yml `locale:` is the default; an explicit option wins.
+    locale: options.locale ?? config.locale,
     plugins,
     slots,
     root,
@@ -148,6 +163,8 @@ export function build(
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, page.html, "utf8");
   }
+  // v3.0: moved pages keep answering — redirects from brewdocs.yml.
+  emitRedirects(outDir, loadConfig(source.root).redirects);
   if (resolved.emitDocmodel !== false) {
     emitDocModelArtifact(model, outDir, fresh);
   }
@@ -205,10 +222,6 @@ export async function extractVersion(
   } finally {
     if (cleanup) cleanup();
   }
-}
-
-function dirSafe(version: string): string {
-  return version.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 /**
@@ -340,6 +353,9 @@ export async function buildVersions(
   options: RenderOptions = {},
 ): Promise<string[]> {
   const versions = await discoverVersions(source.root);
+  // v3.0: EOL list + aliases/redirects live in brewdocs.yml.
+  const config = loadConfig(path.resolve(source.root));
+  const eolList = config.eol;
   // Per-version builds run in throwaway worktrees; the extraction cache
   // belongs to the working tree only.
   const singleOptions = { ...options, cache: false };
@@ -349,7 +365,12 @@ export async function buildVersions(
       build(source, outDir, {
         ...options,
         currentVersion: versions[0],
-        versions: versions.map((v) => ({ version: v, path: "./index.html" })),
+        eol: isEolVersion(versions[0], eolList),
+        versions: versions.map((v) => ({
+          version: v,
+          path: "./index.html",
+          eol: isEolVersion(v, eolList),
+        })),
       }),
     ];
   }
@@ -378,12 +399,15 @@ export async function buildVersions(
       diffPath: models.has(o) && versions.indexOf(o) < versions.length - 1
         ? `../${dirSafe(o)}/diff.html`
         : undefined,
+      eol: isEolVersion(o, eolList),
     }));
     const fresh = freshness({ root: srcRoot, name: source.name });
     const html = renderToHtml(model, {
       ...singleOptions,
       versions: links,
       currentVersion: v,
+      eol: isEolVersion(v, eolList),
+      locale: singleOptions.locale ?? config.locale,
       score: coverageScore(model),
       freshness: fresh,
     });
@@ -421,6 +445,7 @@ export async function buildVersions(
     diffPath: models.has(o) && versions.indexOf(o) < versions.length - 1
       ? `./${dirSafe(o)}/diff.html`
       : undefined,
+    eol: isEolVersion(o, eolList),
   }));
   const rootFile = path.join(outDir, "index.html");
   const rootFresh = freshness({ root, name: source.name });
@@ -430,6 +455,8 @@ export async function buildVersions(
       ...options,
       versions: rootLinks,
       currentVersion: latest,
+      eol: isEolVersion(latest, eolList),
+      locale: options.locale ?? config.locale,
       score: coverageScore(rootModel),
       freshness: rootFresh,
     }),
@@ -438,5 +465,8 @@ export async function buildVersions(
   if (options.emitDocmodel !== false) {
     emitDocModelArtifact(rootModel, outDir, rootFresh);
   }
+  // v3.0: alias pages (`/latest/` etc.) + moved-page redirects.
+  built.push(...emitAliasPages(outDir, versions, config.aliases, { eol: eolList }));
+  built.push(...emitRedirects(outDir, config.redirects));
   return [rootFile, ...built];
 }

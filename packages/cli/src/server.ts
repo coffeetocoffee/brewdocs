@@ -25,6 +25,7 @@ import {
   canAccessOrg,
   listOrgSites,
   loadDomains,
+  loadRegistry,
 } from "@brewdocs/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -548,6 +549,22 @@ function buildRequestHandler(
       res
         .writeHead(200, { "content-type": TYPES[".json"] })
         .end(JSON.stringify(listSites(hostingDir)));
+      return;
+    }
+
+    // v3.0 marketplace browse: the registry store beside the hosting dir.
+    if (url.pathname === "/api/registry") {
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const plugins = loadRegistry(hostingDir).plugins.filter((p) =>
+        !q ||
+        [p.name, p.description ?? "", p.keywords?.join(" ") ?? "", p.kind]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+      );
+      res
+        .writeHead(200, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify(plugins));
       return;
     }
 
