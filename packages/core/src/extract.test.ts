@@ -62,6 +62,26 @@ describe("Phase 1 extractors", () => {
     expect(r.sections.map((s) => s.title)).toEqual(["Heading", "Sub"]);
   });
 
+  it("ignores # lines inside fenced code blocks (bash/python comments)", () => {
+    const md = [
+      "# API",
+      "",
+      "```bash",
+      "curl http://localhost:4000/api/build",
+      '# => {"url":"https://lib.brewdocs.dev","subdomain":"lib"}',
+      "```",
+      "",
+      "## Next",
+      "done",
+    ].join("\n");
+    const r = extractReadme(md);
+    expect(r.sections.map((s) => s.title)).toEqual(["API", "Next"]);
+    // The comment stays inside the code block, not as a heading.
+    const api = r.sections[0];
+    expect(api.html).toContain("lib.brewdocs.dev");
+    expect(api.html).not.toContain("<h2>");
+  });
+
   it("exports extractor resolves entry from a class-only package", () => {
     const syms = extractExports(path.join(EXAMPLES, "widget"), {
       main: "index.ts",

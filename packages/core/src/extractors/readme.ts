@@ -31,6 +31,10 @@ export function extractReadme(markdown: string): ReadmeResult {
   const sections: SectionDoc[] = [];
   let current: SectionDoc | null = null;
   let buf: string[] = [];
+  // Fence state: `#` lines inside ``` blocks are code comments (bash `# =>`,
+  // python `# TODO`), never headings. Without this, a comment in an example
+  // became a bogus TOC section and split the parent section in two.
+  let inFence = false;
 
   const flush = () => {
     if (current) {
@@ -41,7 +45,8 @@ export function extractReadme(markdown: string): ReadmeResult {
   };
 
   for (const line of lines) {
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (/^```/.test(line)) inFence = !inFence;
+    const heading = inFence ? null : /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading && current === null) {
       // First heading becomes the leading section (title area).
       current = {
