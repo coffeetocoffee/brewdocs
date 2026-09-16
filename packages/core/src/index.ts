@@ -117,6 +117,34 @@ export {
   type McpToolName,
 } from "./mcp.js";
 export {
+  codeFingerprint,
+  docsFingerprint,
+  snapshotOf,
+  compareDrift,
+  driftFilePath,
+  loadDriftSnapshot,
+  saveDriftSnapshot,
+  renderDriftText,
+  type DriftEntry,
+  type DriftReport,
+  type DriftSnapshot,
+  type DriftStatus,
+  type SymbolDriftState,
+} from "./drift.js";
+export {
+  addFederatedRepo,
+  buildFederatedPage,
+  listFederatedRepos,
+  loadFederation,
+  removeFederatedRepo,
+  resolveDocModelPath,
+  searchFederation,
+  type FederatedHit,
+  type FederationRepo,
+  type FederationStore,
+  type FederationSymbol,
+} from "./federation.js";
+export {
   buildDrafts,
   applyDrafts,
   jsdocStub,

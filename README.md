@@ -13,7 +13,27 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🆕 Fresh out of the oven — v3.0
+## 🆕 Fresh out of the oven — v3.5
+
+The intelligence release. Docs that know when they've gone stale, and search that spans every repo:
+
+| New roast | Taste |
+| --- | --- |
+| 🌊 **Doc drift detection** | `brewdocs drift` fingerprints code vs. prose per symbol — flags "code changed, docs didn't" after every commit or against any git tag (`--from`), with `--fail-on-drift` for CI gates |
+| 🔭 **Cross-repo federated search** | `brewdocs federate add` indexes the `docmodel.json` of any number of repos; `search` ranks hits across all of them, `page` ships a standalone offline search UI, and `serve` answers `GET /api/search?q=…` |
+
+```bash
+brewdocs drift ./my-lib --record                  # baseline today's docs
+brewdocs drift ./my-lib --fail-on-drift           # CI: fail when docs fell behind
+brewdocs drift ./my-lib --from v2.0.0             # or compare against a tag
+brewdocs federate add mylib ./mylib/dist --url https://mylib.brewdocs.dev
+brewdocs federate search "auth token"             # ranked hits across every repo
+brewdocs federate page --out federation-site      # standalone search UI
+```
+
+---
+
+## v3.0 recap
 
 The ecosystem release. More languages, stable URLs, more languages of *docs*, and a QA gate:
 
@@ -113,6 +133,8 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 | `domains …` | Custom domains (`add --site`, `verify`, `list`, `remove`) |
 | `audit <dir>` | v3.0 a11y + SEO + perf audit of a built site (`--json`, `--min-score`, `--group`) |
 | `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|gallery`) |
+| `drift <src>` | v3.5 doc drift detection (`--record`, `--from <ref>`, `--fail-on-drift`, `--json`) |
+| `federate …` | v3.5 cross-repo federated search (`add\|list\|remove\|search\|page`) |
 | `preview <src>` | Build + serve locally |
 | `gallery` | Example-sites gallery |
 | `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
@@ -131,6 +153,7 @@ Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `
 - `ci --base origin/main` — PR report, `--post` to comment, `--fail-on-breaking`
 - `gate --from v1` — block breaking releases without a guide or acknowledgment
 - `audit <dir>` — v3.0 a11y + SEO + perf checks, `--min-score` to gate CI
+- `drift <src>` — v3.5 code-vs-docs drift, `--fail-on-drift` to gate CI
 
 </details>
 
@@ -221,7 +244,7 @@ Source → ExtractResult → RenderModel → standalone HTML
 
 ```bash
 npm install
-npm test          # 280 tests, all green
+npm test          # 314 tests, all green
 npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
 

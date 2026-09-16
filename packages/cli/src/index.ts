@@ -71,6 +71,17 @@ import {
   unpublishPlugin,
   installPlugin,
   buildRegistryGallery,
+  snapshotOf,
+  compareDrift,
+  loadDriftSnapshot,
+  saveDriftSnapshot,
+  renderDriftText,
+  addFederatedRepo,
+  buildFederatedPage,
+  listFederatedRepos,
+  loadFederation,
+  removeFederatedRepo,
+  searchFederation,
   type BrewDocsConfig,
   type DoctorReport,
   type RenderOptions,
@@ -1427,6 +1438,159 @@ dark: false
     throw new Error("usage: brewdocs registry publish|list|search|install|remove|gallery");
   }
 
+  if (command === "drift") {
+    const source = rest[0];
+    if (!source || source.startsWith("-")) {
+      throw new Error(
+        "usage: brewdocs drift <source> [--record] [--from <ref>] [--json] [--fail-on-drift]",
+      );
+    }
+    const { src, cleanup } = resolveCliSource(source, undefined);
+    try {
+      const current = extractFromSource(src);
+      const json = getFlag(rest, "--json");
+
+      if (rest.includes("--record")) {
+        const label = readPackageVersion(src.root);
+        const snapshot = snapshotOf(label, current.symbols);
+        const file = saveDriftSnapshot(src.root, snapshot);
+        console.log(
+          `🌊 drift baseline recorded — ${snapshot.symbols.length} symbol(s) @ ${label} -> ${file}`,
+        );
+        return;
+      }
+
+      const fromRef = getFlag(rest, "--from");
+      let baseline: ReturnType<typeof loadDriftSnapshot> = null;
+      let baselineLabel: string;
+      if (fromRef) {
+        // Historical comparison: extract the tagged revision from git. Strict
+        // so a bad ref fails loudly instead of silently comparing to itself.
+        const older = await extractVersion(src, fromRef, { strict: true });
+        baseline = snapshotOf(fromRef, older.symbols);
+        baselineLabel = fromRef;
+      } else {
+        baseline = loadDriftSnapshot(src.root);
+        baselineLabel = baseline?.label ?? "(none)";
+      }
+      if (!baseline) {
+        throw new Error(
+          `no drift baseline in ${path.join(src.root, ".brewdocs", "drift.json")} — run \`brewdocs drift <source> --record\` first, or pass --from <ref>`,
+        );
+      }
+
+      const report = compareDrift(baseline, {
+        title: current.title,
+        label: readPackageVersion(src.root),
+        symbols: current.symbols,
+      });
+      if (json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(renderDriftText(report));
+      }
+      if (rest.includes("--fail-on-drift") && report.stale.length > 0) {
+        console.error(
+          `x ${report.stale.length} symbol(s) drifted (code changed, docs didn't)`,
+        );
+        process.exitCode = 1;
+      }
+    } finally {
+      cleanup();
+    }
+    return;
+  }
+
+  if (command === "federate") {
+    const sub = rest[0];
+    const storeDir = path.resolve(
+      process.cwd(),
+      getFlag(rest, "--store") ?? process.env.BREWDOCS_FEDERATION ?? "./federation",
+    );
+    if (sub === "add") {
+      const name = rest[1];
+      const target = rest[2];
+      if (!name || !target) {
+        throw new Error(
+          "usage: brewdocs federate add <name> <docmodel.json | dir> [--url <site-url>] [--store <dir>]",
+        );
+      }
+      const repo = addFederatedRepo(storeDir, name, path.resolve(process.cwd(), target), {
+        url: getFlag(rest, "--url"),
+      });
+      if (!repo) {
+        process.exitCode = 1;
+        return;
+      }
+      console.log(
+        `🔭 indexed ${repo.name}${repo.version ? `@${repo.version}` : ""} — ${repo.symbols.length} symbol(s) -> ${storeDir}`,
+      );
+      return;
+    }
+    if (sub === "list") {
+      const repos = listFederatedRepos(storeDir);
+      if (rest.includes("--json")) {
+        console.log(JSON.stringify(repos, null, 2));
+      } else if (repos.length === 0) {
+        console.log(`Nothing indexed in ${storeDir} — try \`brewdocs federate add mylib ./mylib/dist\``);
+      } else {
+        for (const r of repos) {
+          console.log(
+            `- ${r.name}${r.version ? `@${r.version}` : ""}  ${r.symbols.length} symbol(s)  ${r.generatedAt ?? ""}`,
+          );
+        }
+      }
+      return;
+    }
+    if (sub === "remove") {
+      const name = rest[1];
+      if (!name) throw new Error("usage: brewdocs federate remove <name> [--store <dir>]");
+      const ok = removeFederatedRepo(storeDir, name);
+      console.log(ok ? `🗑️  ${name} removed from the federation` : `no repo named ${name}`);
+      return;
+    }
+    if (sub === "search") {
+      // Query = positional words only; value-taking flags (--store/--limit)
+      // and their values must not leak into the search string.
+      const VALUE_FLAGS = new Set(["--store", "--limit"]);
+      const words: string[] = [];
+      for (let i = 1; i < rest.length; i++) {
+        const a = rest[i];
+        if (VALUE_FLAGS.has(a)) {
+          i++; // skip the flag's value
+          continue;
+        }
+        if (a.startsWith("-")) continue;
+        words.push(a);
+      }
+      const query = words.join(" ");
+      if (!query) {
+        throw new Error("usage: brewdocs federate search <query...> [--limit <n>] [--json] [--store <dir>]");
+      }
+      const limit = Number(getFlag(rest, "--limit")) || 20;
+      const hits = searchFederation(loadFederation(storeDir), query, { limit });
+      if (rest.includes("--json")) {
+        console.log(JSON.stringify(hits, null, 2));
+      } else if (hits.length === 0) {
+        console.log(`no symbols match "${query}" across ${listFederatedRepos(storeDir).length} repo(s)`);
+      } else {
+        for (const h of hits) {
+          console.log(`- ${h.name} (${h.kind}) — ${h.repo}${h.url ? `  ${h.url}` : ""}`);
+        }
+      }
+      return;
+    }
+    if (sub === "page") {
+      const out = path.resolve(process.cwd(), getFlag(rest, "--out") ?? "federation-site");
+      const file = buildFederatedPage(storeDir, out);
+      console.log(`🔭 Federated search page -> ${file}`);
+      return;
+    }
+    throw new Error(
+      "usage: brewdocs federate add|list|remove|search|page [--store <dir>]",
+    );
+  }
+
   if (command === "mcp") {
     const file = rest[0] ?? getFlag(rest, "--docmodel") ?? "docmodel.json";
     const resolved = path.resolve(process.cwd(), file);
@@ -1512,6 +1676,8 @@ Usage:
    brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
    brewdocs audit <dir> [--json] [--min-score <n>] [--group a11y|seo|perf]   v3.0 site audit
    brewdocs registry publish|list|search|install|remove|gallery   v3.0 plugin registry + marketplace
+   brewdocs drift <source> [--record] [--from <ref>] [--fail-on-drift]   v3.5 doc drift detection
+   brewdocs federate add|list|remove|search|page [--store <dir>]   v3.5 cross-repo federated search
 
 Commands:
     build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
@@ -1562,6 +1728,13 @@ Commands:
     registry         v3.0: plugin registry + marketplace
                       (publish <file> --name --version | list | search <q> |
                        install <name> --into <src> | remove | gallery [--out])
+    drift            v3.5: doc drift detection — code changed, docs didn't
+                      (<src> --record records a baseline in .brewdocs/drift.json;
+                       --from <ref> compares against a git tag instead;
+                       --fail-on-drift exits 1 for CI)
+    federate         v3.5: cross-repo federated search
+                      (add <name> <docmodel.json|dir> [--url <site>] | list |
+                       remove <name> | search <query...> | page [--out])
     drafts           Manage private draft links (list / extend / revoke)
     mcp              MCP stdio server over docmodel.json for agent workflows
     help             Show this help

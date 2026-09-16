@@ -25,7 +25,9 @@ import {
   canAccessOrg,
   listOrgSites,
   loadDomains,
+  loadFederation,
   loadRegistry,
+  searchFederation,
 } from "@brewdocs/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -565,6 +567,22 @@ function buildRequestHandler(
       res
         .writeHead(200, { "content-type": TYPES[".json"] })
         .end(JSON.stringify(plugins));
+      return;
+    }
+
+    // v3.5 federated search: ranked symbol hits across every indexed repo.
+    // The store lives beside the hosting dir (same convention as .registry.json).
+    if (url.pathname === "/api/search") {
+      const q = url.searchParams.get("q") ?? "";
+      if (!q.trim()) {
+        res.writeHead(400).end(JSON.stringify({ error: "missing q" }));
+        return;
+      }
+      const limit = Number(url.searchParams.get("limit")) || 20;
+      const hits = searchFederation(loadFederation(hostingDir), q, { limit });
+      res
+        .writeHead(200, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify({ query: q, hits }));
       return;
     }
 
