@@ -18,7 +18,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Core package ships compiled JS (finding #8)
-        run: npm run build --workspace=@brewdocs/core && npm pack --dry-run --workspace=@brewdocs/core | grep -q "dist/index.js"
+        run: npm run build --workspace=@brewdocs/core && npm pack --dry-run --workspace=@brewdocs/core 2>&1 | grep -q "dist/index.js"
       - name: Smoke build
         run: npx tsx packages/cli/src/cli.ts build ./examples/tiny --out dist && test -f dist/index.html
 
