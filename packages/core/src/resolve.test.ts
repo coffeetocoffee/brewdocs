@@ -17,4 +17,12 @@ describe("Phase 5 — resolve input", () => {
   it("throws on unresolvable input without touching network", () => {
     expect(() => resolveInput("http://example.com/random-page")).toThrow();
   });
+
+  // v3.5 security: fetching a package must never run its lifecycle scripts —
+  // a postinstall is arbitrary code execution from a caller-supplied name,
+  // reachable from the build API.
+  it("passes --ignore-scripts when installing an npm package", () => {
+    const src = fs.readFileSync(path.join(__dirname, "resolve.ts"), "utf8");
+    expect(src).toMatch(/runNpm\(\[[^\]]*"--ignore-scripts"/s);
+  });
 });

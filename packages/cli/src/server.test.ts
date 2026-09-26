@@ -48,6 +48,30 @@ describe("Phase 4 — hosting router", () => {
     const r = resolveSite("/s/demo/../../etc/passwd", undefined, hosting);
     expect(r).toBeNull();
   });
+
+  // v3.5 regression: startsWith() containment accepted a sibling whose name
+  // shares the target's prefix. `/s/acme/../acme-secret` must not resolve.
+  it("blocks prefix-confusion reads of a sibling site", () => {
+    const hosting = tmp();
+    fs.mkdirSync(path.join(hosting, "acme"), { recursive: true });
+    fs.mkdirSync(path.join(hosting, "acme-secret"), { recursive: true });
+    fs.writeFileSync(path.join(hosting, "acme-secret", "index.html"), "SECRET");
+    expect(resolveSite("/s/acme/../acme-secret/index.html", undefined, hosting)).toBeNull();
+    // the sibling is still reachable under its own name — we blocked the
+    // confusion, not the site.
+    expect(resolveSite("/s/acme-secret/", undefined, hosting)).not.toBeNull();
+  });
+
+  // v3.5 regression: `...brewdocs.dev` slugifies to `..`, which peeked above
+  // the hosting directory. A dots-only label must be refused.
+  it("rejects dots-only / separator-bearing subdomains", () => {
+    const hosting = tmp();
+    for (const host of ["...brewdocs.dev", "..brewdocs.dev", ".brewdocs.dev"]) {
+      expect(resolveSite("/index.html", host, hosting)).toBeNull();
+    }
+    expect(resolveSite("/s/../index.html", undefined, hosting)).toBeNull();
+    expect(resolveSite("/s/a%2fb/index.html", undefined, hosting)).toBeNull();
+  });
 });
 
 describe("Phase 4 — hosting server auth", () => {
@@ -81,6 +105,54 @@ describe("Phase 4 — hosting server auth", () => {
 
     server.close();
   });
+});
+
+// v3.5 security: the build API used to accept ANY readable local path, turning
+// an open (or merely LAN-reachable) instance into a file-disclosure primitive.
+// `sourceRoot` now confines local sources; npm names and GitHub URLs still pass.
+describe("Phase 5 — source confinement", () => {
+  it(
+    "refuses a local source outside the allowed root",
+    { timeout: 30_000 },
+    async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-srcroot-"));
+      const inside = path.join(root, "myrepo");
+      fs.mkdirSync(inside, { recursive: true });
+      fs.writeFileSync(path.join(inside, "package.json"), JSON.stringify({ name: "inside", version: "1.0.0" }));
+      fs.writeFileSync(path.join(inside, "README.md"), "# inside\n");
+
+      // A secret tree somewhere else entirely.
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-secret-"));
+      fs.writeFileSync(path.join(outside, "README.md"), "# secret\n\nAPI_KEY=leak\n");
+
+      const hosting = path.join(root, "hosting");
+      fs.mkdirSync(hosting, { recursive: true });
+      const server = createServer(hosting, undefined, undefined, { sourceRoot: root });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const port = (server.address() as { port: number }).port;
+      const base = `http://127.0.0.1:${port}`;
+      const post = (p: string, source: string) =>
+        fetch(`${base}${p}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source }),
+        });
+
+      // Inside the root: works.
+      expect((await post("/api/build", inside)).status).toBe(200);
+
+      // Outside the root: refused for every source-reading endpoint.
+      expect((await post("/api/build", outside)).status).toBe(403);
+      expect((await post("/api/export", outside)).status).toBe(403);
+      expect((await post("/api/markdown", outside)).status).toBe(403);
+
+      // Traversal escape attempt is refused too.
+      const escaped = path.join(root, "..", "..", "Windows");
+      expect((await post("/api/build", escaped)).status).toBe(403);
+
+      server.close();
+    },
+  );
 });
 
 describe("Phase 5 — hosted-tier protection", () => {

@@ -130,6 +130,69 @@ export interface ProtectionOptions {
   rateWindowMs?: number;
   maxConcurrentBuilds?: number;
   maxQueue?: number;
+  /**
+   * v3.5 security: the only directory tree the build/export/markdown API is
+   * allowed to read from. A caller-supplied `source` that is a local path is
+   * confined here, so the hosted API can't be turned into a file-disclosure
+   * primitive for any readable directory on the machine. Package names and
+   * GitHub URLs are unaffected (they are fetched, not read locally).
+   *
+   * Default: `BREWDOCS_SOURCE_ROOT`, else the server's own working directory.
+   */
+  sourceRoot?: string;
+}
+
+/** Raised when a build source is a local path outside the allowed root. */
+export class SourceNotAllowedError extends Error {
+  constructor(public readonly reason: string) {
+    super(reason);
+    this.name = "SourceNotAllowedError";
+  }
+}
+
+/** Real (symlink-resolved) path, falling back to the lexical path. */
+function realpathOr(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
+const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
+
+/**
+ * Is this input a local filesystem path (vs an npm name / GitHub URL)?
+ * Mirrors resolveInput's branch order: an existing path wins, then an npm
+ * name/URL, then a GitHub URL. Everything else (absolute/relative paths,
+ * `..`, `~`) is treated as a local path and must pass containment.
+ */
+function looksLikeLocalPath(input: string): boolean {
+  const raw = input.trim();
+  if (!raw) return false;
+  if (fs.existsSync(raw)) return true;
+  if (NPM_NAME_RE.test(raw)) return false;
+  if (/^https?:\/\/(www\.)?npmjs\.com\/package\//i.test(raw)) return false;
+  if (/github\.com[/:]/i.test(raw)) return false;
+  return true;
+}
+
+/**
+ * Resolve a caller-supplied source for the HTTP API, refusing local paths
+ * outside `sourceRoot`. Throws SourceNotAllowedError so the handler can
+ * answer 403 rather than silently rendering an arbitrary directory.
+ */
+function resolveServerSource(input: string, sourceRoot: string): string {
+  if (!looksLikeLocalPath(input)) return input;
+  const root = realpathOr(path.resolve(sourceRoot));
+  const real = realpathOr(path.resolve(input));
+  const inRoot = real === root || real.startsWith(root + path.sep);
+  if (!inRoot) {
+    throw new SourceNotAllowedError(
+      `local source outside the allowed root: ${input}`,
+    );
+  }
+  return input;
 }
 
 export class BuildQueueFullError extends Error {
@@ -317,12 +380,28 @@ export function resolveSite(
   }
 
   if (!sub) return null;
+  // v3.5 security: reject anything that isn't a plain site slug. `..`, `.`,
+  // dots-only, and separator-bearing values must never reach path resolution
+  // (the Host header is caller-controlled and `...brewdocs.dev` slugifies to
+  // `..`, which peeks above the hosting dir).
+  if (!SAFE_SUBDOMAIN.test(sub)) return null;
   const base = path.resolve(hostingDir, sub);
-  const filePath = path.join(base, rest);
-  if (!filePath.startsWith(base)) return null;
+  // Boundary-aware containment. A bare startsWith() accepts a sibling whose
+  // name shares the prefix (`/s/acme/../acme-secret`), so resolve first and
+  // require base itself or base + separator.
+  const filePath = path.resolve(base, "." + rest);
+  const inBase = filePath === base || filePath.startsWith(base + path.sep);
+  const inHosting = filePath.startsWith(path.resolve(hostingDir) + path.sep);
+  if (!inBase || !inHosting) return null;
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return null;
   return { subdomain: sub, filePath };
 }
+
+/**
+ * A site slug must be a plain DNS-ish label: no dots-only, no separators, no
+ * percent-encoding escape hatches. Shared invariant for both route forms.
+ */
+const SAFE_SUBDOMAIN = /^(?!\.+$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:--[a-z0-9-]+)*$/i;
 
 /** Is this Host a verified custom domain (serves its site, not the drop-in)? */
 function isCustomDomainHost(host: string | undefined, hostingDir: string): boolean {
@@ -399,6 +478,32 @@ function buildRequestHandler(
   // Require credentials only once *some* auth is configured (admin token or keys).
   const needsAuth = Boolean(token) || loadKeys(hostingDir).length > 0;
 
+  // v3.5 security: where the build API may read local sources from. Defaults to
+  // the server's own working directory so a bare `brewdocs serve` can still
+  // start from the repo you launched it in, but cannot be pointed at /etc or
+  // another user's home by a remote caller.
+  const sourceRoot = path.resolve(
+    protection?.sourceRoot ?? process.env.BREWDOCS_SOURCE_ROOT ?? process.cwd(),
+  );
+
+  /** Guard a caller-supplied source; 403s and returns undefined when refused. */
+  const guardSource = (
+    source: string,
+    res: http.ServerResponse,
+  ): string | undefined => {
+    try {
+      return resolveServerSource(source, sourceRoot);
+    } catch (e) {
+      if (e instanceof SourceNotAllowedError) {
+        res
+          .writeHead(403, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify({ error: "source not allowed", detail: e.reason }));
+        return undefined;
+      }
+      throw e;
+    }
+  };
+
   const requireAuth = (req: http.IncomingMessage): boolean => {
     if (!token) return true;
     const header = req.headers["authorization"] ?? "";
@@ -458,6 +563,9 @@ function buildRequestHandler(
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;
       }
+      const guardedSource = guardSource(data.source, res);
+      if (guardedSource === undefined) return;
+      data.source = guardedSource;
 
       try {
         const result = await queue.enqueue(() =>
@@ -521,6 +629,9 @@ function buildRequestHandler(
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;
       }
+      const guardedSource = guardSource(data.source, res);
+      if (guardedSource === undefined) return;
+      data.source = guardedSource;
 
       try {
         const out = await queue.enqueue(() => runExport(data));
@@ -611,6 +722,9 @@ function buildRequestHandler(
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;
       }
+      const guardedSource = guardSource(data.source, res);
+      if (guardedSource === undefined) return;
+      data.source = guardedSource;
       try {
         const out = await queue.enqueue(() => runMarkdown(data));
         res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" }).end(out);

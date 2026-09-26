@@ -1,16 +1,40 @@
 import { highlightCode } from "./highlight.js";
 
+/**
+ * Escape text for text nodes *and* quoted attributes. The URL of a link/image
+ * is attacker-controlled (it comes from a README, a doc comment, or a
+ * third-party repo), so a bare `href="${url}"` with only `&<>` escaped lets
+ * `x"onmouseover="…` break out of the attribute. Escaping the quotes closes
+ * that; `safeUrl` additionally drops script-bearing schemes.
+ */
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Drop URLs whose scheme executes in a browser; keep everything else. */
+function safeUrl(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  const probe = trimmed.replace(/[\u0000-\u001f\u007f]/g, "").toLowerCase();
+  return /^(javascript|vbscript|data):/.test(probe) ? undefined : trimmed;
 }
 
 function inline(text: string): string {
   let s = escapeHtml(text);
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => `<img src="${url}" alt="${alt}" />`);
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, url) => `<a href="${url}">${t}</a>`);
+  // The URL captured here is post-escape, so its own `&`/`"` are already
+  // entities; validate the scheme and drop the link when it is unsafe.
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => {
+    const safe = safeUrl(url);
+    return safe === undefined ? "" : `<img src="${safe}" alt="${alt}" />`;
+  });
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, url) => {
+    const safe = safeUrl(url);
+    return safe === undefined ? t : `<a href="${safe}">${t}</a>`;
+  });
   s = s.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");

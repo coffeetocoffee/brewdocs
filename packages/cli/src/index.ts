@@ -280,6 +280,38 @@ function getFlag(argv: string[], flag: string): string | undefined {
   return undefined;
 }
 
+/**
+ * v3.5 security: is this bind address reachable only from this machine?
+ * Loopback literals plus `localhost`. Anything else (0.0.0.0, ::, a LAN IP,
+ * a hostname) counts as "on the network" and triggers the auth guard.
+ */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    h === "localhost" ||
+    h === "::1" ||
+    h === "127.0.0.1" ||
+    h.startsWith("127.")
+  );
+}
+
+/** How to show a bind address in the startup banner. */
+function displayHost(host: string): string {
+  return isLoopbackHost(host) ? "localhost" : host;
+}
+
+/** One-time credential banner when we auto-protected a network-bound server. */
+function printGeneratedToken(token: string): void {
+  console.log("");
+  console.log("🔐 No auth was configured, so BrewDocs generated one before");
+  console.log("   listening on a non-loopback address (the build API can run");
+  console.log("   code on this machine). Send it as a bearer token:");
+  console.log(`     Authorization: Bearer ${token}`);
+  console.log("");
+  console.log("   Set BREWDOCS_TOKEN, or run 'brewdocs keys add', to choose your own.");
+  console.log("   Not serving the network? Add --host 127.0.0.1 to disable this.");
+}
+
 /** Resolve `--format mdx` (anything but `md`) to a Markdown dialect. */
 function markdownFormat(argv: string[]): "md" | "mdx" {
   const f = getFlag(argv, "--format");
@@ -1098,7 +1130,24 @@ dark: false
     const storageKind = getFlag(rest, "--storage") ?? "local";
     const config = loadConfig(process.cwd());
     const storage = buildStorage(storageKind, config);
-    const token = process.env.BREWDOCS_TOKEN;
+
+    // v3.5 security: bind loopback unless the operator explicitly widens the
+    // socket with --host. A bare `server.listen(port)` binds `::` (every
+    // interface), which silently exposed the unauthenticated build API to the
+    // LAN. `--host 0.0.0.0` is the documented opt-in for containers and
+    // reverse proxies; the auth guard below still applies.
+    const host = getFlag(rest, "--host") ?? process.env.BREWDOCS_HOST ?? "127.0.0.1";
+
+    // v3.5 security: any instance that answers off-box must not be open by
+    // default. When a non-loopback host is bound with no auth configured,
+    // mint a token on first run and print it, so /api/build and /api/export
+    // are never anonymously reachable from the network.
+    const suppliedToken = process.env.BREWDOCS_TOKEN;
+    const openToNetwork =
+      !isLoopbackHost(host) && !suppliedToken && listKeys(hostingDir).length === 0;
+    const token = openToNetwork
+      ? crypto.randomBytes(16).toString("hex")
+      : suppliedToken;
 
     // v2.5 TLS: --tls-cert/--tls-key (or BREWDOCS_TLS_CERT/KEY) serve the
     // same pipeline over HTTPS. Both must be readable PEM files.
@@ -1114,18 +1163,20 @@ dark: false
         throw new Error(`TLS files unreadable: ${cert ? keyFile : certFile}`);
       }
       const server = createSecureServer(hostingDir, storage, token, undefined, { cert, key });
-      server.listen(port, () => {
-        console.log(`☕ BrewDocs hosting (https) on https://localhost:${port}`);
+      server.listen(port, host, () => {
+        console.log(`☕ BrewDocs hosting (https) on https://${displayHost(host)}:${port}`);
         console.log(`   serving sites from: ${hostingDir}`);
+        if (openToNetwork) printGeneratedToken(token!);
         if (storage) console.log(`   storage backend: s3`);
       });
       return;
     }
 
     const server = createServer(hostingDir, storage, token);
-    server.listen(port, () => {
-      console.log(`☕ BrewDocs hosting on http://localhost:${port}`);
+    server.listen(port, host, () => {
+      console.log(`☕ BrewDocs hosting on http://${displayHost(host)}:${port}`);
       console.log(`   serving sites from: ${hostingDir}`);
+      if (openToNetwork) printGeneratedToken(token!);
       if (storage) console.log(`   storage backend: s3`);
     });
     return;
@@ -1626,8 +1677,13 @@ function serveStatic(dir: string, port: number): http.Server {
     const url = new URL(req.url ?? "/", "http://localhost");
     let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith("/")) rel += "index.html";
-    const filePath = path.join(root, rel);
-    if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    // Containment must be boundary-aware: a plain startsWith() lets
+    // `/../site-secret/x` (or a sibling named `<root>-secret`) escape, since
+    // path.join collapses the `..` before the check and the prefix still
+    // matches. Resolve, then require root itself or root + separator.
+    const filePath = path.resolve(root, "." + rel);
+    const inRoot = filePath === root || filePath.startsWith(root + path.sep);
+    if (!inRoot || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
       res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
       return;
     }
@@ -1635,7 +1691,8 @@ function serveStatic(dir: string, port: number): http.Server {
     res.writeHead(200, { "content-type": STATIC_TYPES[ext] ?? "application/octet-stream" });
     fs.createReadStream(filePath).pipe(res);
   });
-  server.listen(port);
+  // Local preview: loopback only, never the whole network.
+  server.listen(port, "127.0.0.1");
   return server;
 }
 
@@ -1656,9 +1713,10 @@ Usage:
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
                     [--org <name>] [--private [token]] [--draft [--draft-hours N]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
-  brewdocs serve [--hosting <dir>] [--port 4000] [--storage s3] [--tls-cert <pem> --tls-key <pem>]
-                (set BREWDOCS_TOKEN, or add keys via 'brewdocs keys', to require auth;
-                 add --tls-cert/--tls-key for HTTPS, e.g. behind a custom domain)
+  brewdocs serve [--hosting <dir>] [--port 4000] [--host 127.0.0.1] [--storage s3] [--tls-cert <pem> --tls-key <pem>]
+                (binds loopback only by default; --host 0.0.0.0 exposes it on the
+                 network and auto-generates a token unless you set BREWDOCS_TOKEN or
+                 add keys via 'brewdocs keys'; add --tls-cert/--tls-key for HTTPS)
   brewdocs keys add|list|revoke [--hosting <dir>] [--scope build,export] [--label <n>]
   brewdocs cloud org create|list|add-member|remove-member|delete [--hosting <dir>]   Orgs, members, private docs
   brewdocs cloud sites|stats <org> [--hosting <dir>]   Org-owned sites + analytics rollup

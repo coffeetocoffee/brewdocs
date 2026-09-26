@@ -49,6 +49,10 @@ export function resolveInput(input: string): ResolvedSource {
  * Run the npm CLI cross-platform. On Windows npm is `npm.cmd`, and spawning
  * `.cmd` files requires `shell: true` (with manual quoting) on patched Node
  * versions; plain `execFileSync("npm")` throws ENOENT there.
+ *
+ * The child environment is trimmed to what npm itself needs (PATH/HOME/tmp/
+ * proxy and npm config) so no unrelated secret from the parent process is
+ * inherited into a package's install scripts.
  */
 export function runNpm(args: string[], opts: { capture?: boolean } = {}): string {
   const win = process.platform === "win32";
@@ -56,14 +60,51 @@ export function runNpm(args: string[], opts: { capture?: boolean } = {}): string
     stdio: opts.capture ? ["ignore", "pipe", "ignore"] : "ignore",
     shell: win,
     encoding: "utf8",
+    env: childEnv(),
   });
   return out ?? "";
+}
+
+/** A minimal environment for spawned npm/git: PATH + what they read, nothing else. */
+function childEnv(): NodeJS.ProcessEnv {
+  const keep = [
+    "PATH",
+    "Path",
+    "PATHEXT",
+    "HOME",
+    "USERPROFILE",
+    "SystemRoot",
+    "ComSpec",
+    "windir",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "npm_config_registry",
+    "npm_config_cache",
+    "NPM_CONFIG_REGISTRY",
+    "NPM_CONFIG_CACHE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+  ];
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of keep) if (process.env[k] !== undefined) out[k] = process.env[k];
+  return out;
 }
 
 function installNpm(name: string): ResolvedSource {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-npm-"));
   try {
-    runNpm(["install", name, "--no-save", "--prefix", tmp]);
+    // v3.5 security: --ignore-scripts. We only fetch the package to read its
+    // README/source for docs; lifecycle scripts (postinstall et al.) are never
+    // needed and would be arbitrary code execution from a name the caller
+    // supplied — reachable from the build API.
+    runNpm(["install", name, "--no-save", "--ignore-scripts", "--prefix", tmp]);
   } catch {
     fs.rmSync(tmp, { recursive: true, force: true });
     throw new Error(

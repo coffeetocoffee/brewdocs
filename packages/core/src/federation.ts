@@ -333,7 +333,8 @@ export function buildFederatedPage(storeDir: string, outDir: string): string {
   var data = JSON.parse(document.getElementById("fed-index").textContent);
   var input = document.getElementById("q");
   var results = document.getElementById("results");
-  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+  function safeUrl(u) { var p = String(u == null ? "" : u).replace(/[\\u0000-\\u001f\\u007f]/g, "").toLowerCase(); return /^(javascript|vbscript|data):/.test(p) ? "" : String(u == null ? "" : u); }
   function search(q) {
     q = q.toLowerCase().trim();
     if (!q) { results.innerHTML = ""; return; }
@@ -359,7 +360,7 @@ export function buildFederatedPage(storeDir: string, outDir: string): string {
     if (!scored.length) { results.innerHTML = '<li class="empty">No matches across ' + data.length + ' repo(s).</li>'; return; }
     results.innerHTML = scored.map(function (x) {
       var name = x.s.u
-        ? '<a class="hit-name" href="' + esc(x.s.u) + '">' + esc(x.s.n) + '</a>'
+        ? '<a class="hit-name" href="' + esc(safeUrl(x.s.u)) + '">' + esc(x.s.n) + '</a>'
         : '<span class="hit-name">' + esc(x.s.n) + '</span>';
       return '<li><div class="hit-head">' + name +
         '<span class="hit-repo">' + esc(x.repo.repo) + ' · ' + esc(x.s.k) + '</span></div>' +

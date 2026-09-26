@@ -64,11 +64,21 @@ export interface RenderOptions {
   eol?: boolean;
 }
 
+/**
+ * Escape text for any HTML context, including quoted attribute values.
+ * Quotes matter: symbol names, descriptions, section titles and git tag
+ * names are attacker-controlled when you document a repo you don't own, and
+ * every one of them is interpolated into an attribute somewhere
+ * (`value="…"`, `href="…"`, `title="…"`). Escaping `& < > " '` makes the
+ * helper safe for both text nodes and quoted attributes.
+ */
 function escapeHtml(input: string): string {
   return input
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function slug(title: string): string {
@@ -910,7 +920,8 @@ export function renderContentPages(
       .join("");
     const headingsWithIds = page.html.replace(
       /<h([23])>([^<]+)<\/h\1>/g,
-      (_m, lvl, text) => `<h${lvl} id="${slug(String(text))}">${text}</h${lvl}>`,
+      (_m, lvl, text) =>
+        `<h${lvl} id="${escapeHtml(slug(String(text)))}">${text}</h${lvl}>`,
     );
     const main = `<article class="content-page"><h2>${escapeHtml(page.title)}</h2>${headingsWithIds}</article>`;
     out.push({

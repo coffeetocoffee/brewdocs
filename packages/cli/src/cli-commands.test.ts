@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { run } from "./index.js";
+import { run, isLoopbackHost } from "./index.js";
 
 describe("Authoring DX commands", () => {
   let cwd: string;
@@ -41,5 +41,18 @@ describe("Authoring DX commands", () => {
     const keys = JSON.parse(fs.readFileSync(file, "utf8"));
     await run(["keys", "revoke", keys[0].hash, "--hosting", tmp]);
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).toHaveLength(0);
+  });
+});
+
+// v3.5 security: `serve` binds loopback by default; anything else is treated
+// as network-exposed and triggers the auth guard.
+describe("serve host safety", () => {
+  it("classifies loopback vs network bind addresses", () => {
+    for (const h of ["127.0.0.1", "127.0.0.5", "localhost", "::1", "[::1]", "LOCALHOST"]) {
+      expect(isLoopbackHost(h)).toBe(true);
+    }
+    for (const h of ["0.0.0.0", "::", "192.168.1.10", "example.com", ""]) {
+      expect(isLoopbackHost(h)).toBe(false);
+    }
   });
 });

@@ -13,7 +13,26 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🆕 Fresh out of the oven — v3.5
+## 🔒 Fresh out of the oven — v3.7
+
+The hardening release. BrewDocs renders prose from repos you don't own, and a hosted instance is now safe by default:
+
+| Fix | Why it mattered |
+| --- | --- |
+| 🔐 **`serve` binds loopback by default** | A bare `brewdocs serve` used to bind every interface with auth *off*, putting the build API on the LAN. `--host 0.0.0.0` is now the explicit opt-in, and a non-loopback bind with no token mints one and prints it |
+| 🚫 **No package lifecycle scripts** | Fetching a package ran its `postinstall`; installs now pass `--ignore-scripts` with a trimmed child environment |
+| 📁 **Build sources are confined** | `/api/build`, `/api/export`, `/api/markdown` refuse local paths outside `BREWDOCS_SOURCE_ROOT` (403) instead of rendering any readable directory |
+| 🧼 **Attribute-safe escaping** | `"` and `'` are escaped, so a hostile README link, symbol description, or **git tag name** can no longer inject attributes (XSS) into a generated site. `javascript:`/`data:` link targets are dropped. Site containment is now boundary-aware — no sibling-prefix or `..` escape |
+
+```bash
+brewdocs serve                                 # 127.0.0.1 only — no LAN exposure
+brewdocs serve --host 0.0.0.0                  # expose it; you get a token unless one is set
+BREWDOCS_SOURCE_ROOT=./repos brewdocs serve    # where the build API may read from
+```
+
+---
+
+## 🌊 Previously — v3.5
 
 The intelligence release. Docs that know when they've gone stale, and search that spans every repo:
 
@@ -184,7 +203,7 @@ Source → ExtractResult → RenderModel → standalone HTML
 
 ```bash
 npm install
-npm test          # 314 tests, all green
+npm test          # 323 tests, all green
 npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
 

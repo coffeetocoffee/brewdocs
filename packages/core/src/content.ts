@@ -136,10 +136,30 @@ export function renderContentSource(src: string, isMdx: boolean): {
   meta: Record<string, string>;
 } {
   const { meta, body } = parseFrontmatter(src);
-  const md = isMdx ? transformMdx(body) : body;
-  const html = markdownToHtml(md);
+  if (isMdx) {
+    // MDX placeholders are HTML we generate ourselves (see transformMdx), not
+    // user prose, so they must not be escaped by the markdown pass. Stash each
+    // one behind a sentinel token, render the remaining markdown, then splice
+    // the HTML back in verbatim.
+    const stash: string[] = [];
+    const stashed = transformMdx(body).replace(
+      /<div class="mdx"[\s\S]*?<\/div>/g,
+      (m) => {
+        stash.push(m);
+        return `\u0000mdx${stash.length - 1}\u0000`;
+      },
+    );
+    let html = markdownToHtml(stashed);
+    html = html.replace(/\u0000mdx(\d+)\u0000/g, (_m, i) => stash[Number(i)] ?? "");
+    const headings: { id: string; title: string }[] = [];
+    for (const m of html.matchAll(/<h([23])[^>]*>([^<]+)<\/h\1>/g)) {
+      headings.push({ id: slugify(m[2]), title: m[2] });
+    }
+    return { html, headings, meta };
+  }
+  const html = markdownToHtml(body);
   const headings: { id: string; title: string }[] = [];
-  for (const m of html.matchAll(/<h([23])>([^<]+)<\/h\1>/g)) {
+  for (const m of html.matchAll(/<h([23])[^>]*>([^<]+)<\/h\1>/g)) {
     headings.push({ id: slugify(m[2]), title: m[2] });
   }
   return { html, headings, meta };
