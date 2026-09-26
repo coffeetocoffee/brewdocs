@@ -195,13 +195,27 @@ function memberDoc(
 
 /**
  * Extract method/property/constructor members from a class or interface
- * declaration. Returns undefined for anything else (or empty shapes), so
- * SymbolDoc stays lean.
+ * declaration, or the values of an enum. Returns undefined for anything else
+ * (or empty shapes), so SymbolDoc stays lean.
  */
 export function extractMembers(
   decl: ts.Declaration,
   checker: ts.TypeChecker,
 ): MemberDoc[] | undefined {
+  if (ts.isEnumDeclaration(decl)) {
+    const members = decl.members.map((m): MemberDoc => {
+      const jsdoc = parseJsDoc(m);
+      const name = m.name.getText();
+      return {
+        name,
+        kind: "enumMember",
+        signature: m.initializer ? `${name} = ${m.initializer.getText()}` : name,
+        description: jsdoc.description || undefined,
+        deprecated: jsdoc.deprecated || undefined,
+      };
+    });
+    return members.length > 0 ? members : undefined;
+  }
   if (!ts.isClassDeclaration(decl) && !ts.isInterfaceDeclaration(decl)) {
     return undefined;
   }

@@ -10,7 +10,7 @@
   "stats": [
     {
       "name": "@brewdocs/cli",
-      "version": "3.9.5",
+      "version": "4.0.0",
       "role": "commands + hosting server",
       "srcFiles": 4,
       "srcLoc": 3080,
@@ -19,16 +19,16 @@
     },
     {
       "name": "@brewdocs/core",
-      "version": "3.9.5",
+      "version": "4.0.0",
       "role": "pipeline: extract → model → render",
       "srcFiles": 55,
-      "srcLoc": 12995,
+      "srcLoc": 13095,
       "testFiles": 39,
-      "testLoc": 4803
+      "testLoc": 4881
     },
     {
       "name": "@brewdocs/plugin-sdk",
-      "version": "3.9.5",
+      "version": "4.0.0",
       "role": "adapter/hook contracts",
       "srcFiles": 1,
       "srcLoc": 57,
@@ -38,7 +38,7 @@
   ],
   "tests": {
     "files": 48,
-    "total": 333,
+    "total": 337,
     "skipped": 0,
     "loopFiles": [
       "packages/core/src/audit.test.ts",

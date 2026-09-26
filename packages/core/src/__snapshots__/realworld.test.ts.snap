@@ -554,6 +554,13 @@ exports[`real-world packages (npm) > extracts + builds zod (popular, TS, exports
     {
       "deprecated": undefined,
       "kind": "constant",
+      "name": "default",
+      "params": [],
+      "returns": undefined,
+    },
+    {
+      "deprecated": undefined,
+      "kind": "constant",
       "name": "defaultErrorMap",
       "params": [],
       "returns": undefined,
@@ -917,7 +924,7 @@ exports[`real-world packages (npm) > extracts + builds zod (popular, TS, exports
     },
     {
       "deprecated": undefined,
-      "kind": "unknown",
+      "kind": "namespace",
       "name": "objectUtil",
       "params": [],
       "returns": undefined,
@@ -1311,7 +1318,7 @@ exports[`real-world packages (npm) > extracts + builds zod (popular, TS, exports
     },
     {
       "deprecated": undefined,
-      "kind": "unknown",
+      "kind": "namespace",
       "name": "util",
       "params": [],
       "returns": undefined,
@@ -1340,6 +1347,13 @@ exports[`real-world packages (npm) > extracts + builds zod (popular, TS, exports
     {
       "deprecated": undefined,
       "kind": "unknown",
+      "name": "z",
+      "params": [],
+      "returns": undefined,
+    },
+    {
+      "deprecated": undefined,
+      "kind": "constant",
       "name": "z",
       "params": [],
       "returns": undefined,
@@ -1549,7 +1563,7 @@ exports[`real-world packages (npm) > extracts + builds zod (popular, TS, exports
     },
     {
       "deprecated": undefined,
-      "kind": "unknown",
+      "kind": "enum",
       "name": "ZodFirstPartyTypeKind",
       "params": [],
       "returns": undefined,

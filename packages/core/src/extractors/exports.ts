@@ -10,39 +10,62 @@ import {
   typeParamsOf,
 } from "./type-resolve.js";
 
-function resolveEntry(root: string, pkg: Record<string, unknown>): string | undefined {
-  const candidates: string[] = [];
+/** Entry candidates for one `exports` condition value (string or condition map). */
+function entryCandidates(val: unknown): string[] {
+  if (typeof val === "string") return [val];
+  if (val && typeof val === "object") {
+    const o = val as Record<string, unknown>;
+    // Declaration files carry the richest doc data (explicit types, no
+    // inference blow-up on bundled JS), so prefer the `types` condition.
+    return ["types", "import", "require", "default"]
+      .map((k) => o[k])
+      .filter((v): v is string => typeof v === "string");
+  }
+  return [];
+}
+
+/**
+ * Every entry point the package exposes: `.` first (original behavior), then
+ * subpath exports (`./server`, `./client`, …), then main/module/defaults.
+ * Subpath modules are public API too — a package that documents only its
+ * root entry misses everything exported behind `exports` keys.
+ */
+function resolveEntries(root: string, pkg: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (cands: string[]): void => {
+    for (const c of cands) {
+      const abs = path.resolve(root, c);
+      if (fs.existsSync(abs)) {
+        if (!seen.has(abs)) {
+          seen.add(abs);
+          out.push(abs);
+        }
+        return;
+      }
+    }
+  };
 
   const exp = pkg.exports;
   if (exp && typeof exp === "object") {
-    const dot = (exp as Record<string, unknown>)["."];
-    if (typeof dot === "string") candidates.push(dot);
-    else if (dot && typeof dot === "object") {
-      const o = dot as Record<string, unknown>;
-      // Declaration files carry the richest doc data (explicit types, no
-      // inference blow-up on bundled JS), so prefer the `types` condition.
-      for (const key of ["types", "import", "require", "default"]) {
-        const v = o[key];
-        if (typeof v === "string") candidates.push(v);
-      }
-    }
+    const keys = Object.keys(exp as Record<string, unknown>).sort((a, b) =>
+      a === "." ? -1 : b === "." ? 1 : a.localeCompare(b),
+    );
+    for (const k of keys) add(entryCandidates((exp as Record<string, unknown>)[k]));
   }
-  if (typeof pkg.main === "string") candidates.push(pkg.main);
-  if (typeof pkg.module === "string") candidates.push(pkg.module);
-  candidates.push(
-    "index.ts",
-    "index.tsx",
-    "index.js",
-    "index.mjs",
-    "src/index.ts",
-    "src/index.js",
+  add(
+    [
+      typeof pkg.main === "string" ? pkg.main : undefined,
+      typeof pkg.module === "string" ? pkg.module : undefined,
+      "index.ts",
+      "index.tsx",
+      "index.js",
+      "index.mjs",
+      "src/index.ts",
+      "src/index.js",
+    ].filter((c): c is string => typeof c === "string"),
   );
-
-  for (const c of candidates) {
-    const abs = path.resolve(root, c);
-    if (fs.existsSync(abs)) return abs;
-  }
-  return undefined;
+  return out;
 }
 
 function kindOf(decl: ts.Declaration): SymbolDoc["kind"] {
@@ -51,8 +74,28 @@ function kindOf(decl: ts.Declaration): SymbolDoc["kind"] {
   if (ts.isClassDeclaration(decl)) return "class";
   if (ts.isInterfaceDeclaration(decl)) return "interface";
   if (ts.isTypeAliasDeclaration(decl)) return "type";
+  if (ts.isEnumDeclaration(decl)) return "enum";
+  // `namespace Foo {}` and `declare module "x"` are both ModuleDeclaration;
+  // both document as a namespace. Enum members and namespace members are
+  // handled in type-resolve/extractMembers.
+  if (ts.isModuleDeclaration(decl)) return "namespace";
   if (ts.isVariableDeclaration(decl)) return "constant";
   return "unknown";
+}
+
+/**
+ * Decorator names for class/function/property declarations. Call decorators
+ * collapse to `Name(...)` — full argument text can be arbitrarily large and
+ * does not belong on a symbol page.
+ */
+function decoratorsOf(decl: ts.Declaration): string[] | undefined {
+  if (!ts.canHaveDecorators(decl)) return undefined;
+  const decs = ts.getDecorators(decl);
+  if (!decs || decs.length === 0) return undefined;
+  return decs.map((d) => {
+    const e = d.expression;
+    return ts.isCallExpression(e) ? `${e.expression.getText()}(...)` : e.getText();
+  });
 }
 
 function declarationOf(symbol: ts.Symbol, checker: ts.TypeChecker): ts.Declaration | undefined {
@@ -153,6 +196,7 @@ function symbolFromDecl(
     sourceFile: path.relative(root, declSourceFile.fileName),
     members: extractMembers(decl, checker),
     typeParams: typeParamsOf(decl),
+    decorators: decoratorsOf(decl),
     throws: jsdoc.throws.length > 0 ? jsdoc.throws : undefined,
     see: jsdoc.see.length > 0 ? jsdoc.see : undefined,
     resolvedParams,
@@ -309,11 +353,12 @@ function extractCjsExports(
   return symbols;
 }
 
-/** Extract exported symbols (with JSDoc/TSDoc) from a package entry point. */
-export function extractExports(root: string, pkg: Record<string, unknown>): SymbolDoc[] {
-  const entry = resolveEntry(root, pkg);
-  if (!entry) return [];
-
+/** Extract exported symbols from one resolved entry file. */
+function extractEntry(
+  entry: string,
+  root: string,
+  pkg: Record<string, unknown>,
+): SymbolDoc[] {
   const program = ts.createProgram([entry], {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -354,7 +399,28 @@ export function extractExports(root: string, pkg: Record<string, unknown>): Symb
   }
 
   // ESM found nothing — the entry may be CommonJS (`module.exports = ...`).
-  const result = symbols.length > 0 ? symbols : extractCjsExports(sourceFile, checker, root, pkg);
+  return symbols.length > 0 ? symbols : extractCjsExports(sourceFile, checker, root, pkg);
+}
 
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+/**
+ * Extract exported symbols (with JSDoc/TSDoc) from every entry the package
+ * exposes. Subpath entries re-exporting the same symbol dedupe by
+ * name+kind, so `export { x }` in two subpaths yields one symbol.
+ */
+export function extractExports(root: string, pkg: Record<string, unknown>): SymbolDoc[] {
+  const entries = resolveEntries(root, pkg);
+  if (entries.length === 0) return [];
+
+  const symbols: SymbolDoc[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    for (const sym of extractEntry(entry, root, pkg)) {
+      const key = `${sym.name}::${sym.kind}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        symbols.push(sym);
+      }
+    }
+  }
+  return symbols.sort((a, b) => a.name.localeCompare(b.name));
 }

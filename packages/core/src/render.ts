@@ -306,6 +306,12 @@ function renderSymbol(
       }${sym.returns.description ? escapeHtml(sym.returns.description) : ""}</p></div>`
     : "";
 
+  const decorators = sym.decorators?.length
+    ? `<div class="decorators">${sym.decorators
+        .map((d) => `<code>@${escapeHtml(d)}</code>`)
+        .join(" ")}</div>`
+    : "";
+
   const members = sym.members?.length
     ? `<div class="members"><h4>${escapeHtml(ui.members)}</h4><table>
         ${sym.members
@@ -358,7 +364,7 @@ function renderSymbol(
 
   return `<section class="symbol" id="symbol-${slug(sym.name)}">
     <h3>${escapeHtml(sym.name)} ${typeParams}<span class="kind">${sym.kind}</span> ${badge}</h3>
-    ${sig}${desc}${params}${ret}${members}${throws}${see}${examples}${file}
+    ${sig}${decorators}${desc}${params}${ret}${members}${throws}${see}${examples}${file}
   </section>`;
 }
 

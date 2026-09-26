@@ -34,7 +34,7 @@ export interface ParamDoc {
 /** A member (method / property / constructor) of a class or interface. */
 export interface MemberDoc {
   name: string;
-  kind: "method" | "property" | "constructor";
+  kind: "method" | "property" | "constructor" | "enumMember";
   /** Normalized `name(params): type` / `name: type` signature text. */
   signature?: string;
   description?: string;
@@ -57,7 +57,15 @@ export interface TypeParamDoc {
 /** A documented exported symbol (extracted in Phase 1). */
 export interface SymbolDoc {
   name: string;
-  kind: "function" | "class" | "interface" | "type" | "constant" | "unknown";
+  kind:
+    | "function"
+    | "class"
+    | "interface"
+    | "type"
+    | "enum"
+    | "namespace"
+    | "constant"
+    | "unknown";
   /** Source text of the declaration (signature-ish). */
   signature?: string;
   description?: string;
@@ -70,6 +78,12 @@ export interface SymbolDoc {
   members?: MemberDoc[];
   /** Generic type parameters (Direction A). */
   typeParams?: TypeParamDoc[];
+  /**
+   * Decorator names on a class/function/property declaration. Call
+   * decorators keep a `Name(...)` shape — arguments are dropped so a huge
+   * decorator body never bloats the symbol page.
+   */
+  decorators?: string[];
   /** `@throws` clauses (Direction A). */
   throws?: string[];
   /** `@see` references (Direction A). */

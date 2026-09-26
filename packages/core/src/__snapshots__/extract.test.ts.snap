@@ -69,6 +69,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
   ],
   "symbols": [
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": "Brew a single cup of docs.",
       "examples": [
@@ -111,6 +112,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": "A served cup of documentation.",
       "examples": [],
@@ -156,6 +158,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": "Use brew instead. It supports strength control.",
       "description": "Legacy brew entry point.",
       "examples": [],
@@ -191,6 +194,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": "Pour an existing brew into a fresh cup.",
       "examples": [],
@@ -231,6 +235,7 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": "Current released version of the library.",
       "examples": [],
@@ -374,6 +379,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
   ],
   "symbols": [
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": undefined,
       "examples": [],
@@ -391,6 +397,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": undefined,
       "examples": [],
@@ -408,6 +415,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": undefined,
       "examples": [],
@@ -469,6 +477,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
       "typeParams": undefined,
     },
     {
+      "decorators": undefined,
       "deprecated": undefined,
       "description": undefined,
       "examples": [],

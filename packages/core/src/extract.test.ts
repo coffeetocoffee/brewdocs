@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel, extractExports, extractReadme } from "@brewdocs/core";
 
@@ -87,5 +89,81 @@ describe("Phase 1 extractors", () => {
       main: "index.ts",
     });
     expect(syms.some((s) => s.name === "Widget" && s.kind === "class")).toBe(true);
+  });
+});
+
+describe("v3.10 — TypeScript depth", () => {
+  function fixture(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-ts-"));
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(
+      path.join(root, "src/index.ts"),
+      [
+        "/** Status of a brew. */",
+        "export enum Status {",
+        "  /** Not started. */",
+        '  Idle = "idle",',
+        "  Brewing = 1,",
+        "}",
+        "",
+        "/** Brewing helpers. */",
+        "export namespace Util {",
+        '  export const version = "1";',
+        "}",
+        "",
+        "/** A service. */",
+        "@Injectable()",
+        "export class Service {",
+        "  /** Starts it. */",
+        "  start(): void {}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(root, "src/server.ts"),
+      [
+        "/** Server options. */",
+        "export interface ServerOptions {",
+        "  /** Listen port. */",
+        "  port: number;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    return root;
+  }
+
+  const pkg = {
+    exports: { ".": "./src/index.ts", "./server": "./src/server.ts" },
+  };
+
+  it("classifies enums and namespaces (not 'unknown')", () => {
+    const syms = extractExports(fixture(), pkg);
+    expect(syms.find((s) => s.name === "Status")?.kind).toBe("enum");
+    expect(syms.find((s) => s.name === "Util")?.kind).toBe("namespace");
+  });
+
+  it("extracts enum members with values and docs", () => {
+    const status = extractExports(fixture(), pkg).find((s) => s.name === "Status");
+    const idle = status?.members?.find((m) => m.name === "Idle");
+    expect(idle?.kind).toBe("enumMember");
+    expect(idle?.signature).toBe('Idle = "idle"');
+    expect(idle?.description).toBe("Not started.");
+    expect(status?.members?.find((m) => m.name === "Brewing")?.signature).toBe(
+      "Brewing = 1",
+    );
+  });
+
+  it("captures decorators as Name(...)", () => {
+    const service = extractExports(fixture(), pkg).find((s) => s.name === "Service");
+    expect(service?.decorators).toEqual(["Injectable(...)"]);
+  });
+
+  it("walks subpath exports, not just '.'", () => {
+    const syms = extractExports(fixture(), pkg);
+    const opts = syms.find((s) => s.name === "ServerOptions");
+    expect(opts?.kind).toBe("interface");
+    expect(opts?.sourceFile).toBe(path.join("src", "server.ts"));
   });
 });
