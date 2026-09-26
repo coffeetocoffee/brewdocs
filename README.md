@@ -61,7 +61,10 @@ The hardening release. BrewDocs renders prose from repos you don't own, and a ho
 brewdocs serve                                 # 127.0.0.1 only — no LAN exposure
 brewdocs serve --host 0.0.0.0                  # expose it; you get a token unless one is set
 BREWDOCS_SOURCE_ROOT=./repos brewdocs serve    # where the build API may read from
+BREWDOCS_TRUST_PROXY=1 brewdocs serve          # trust X-Forwarded-For (only behind a real proxy)
 ```
+
+Once a token or API key is configured, the read endpoints (`/api/sites`, `/api/registry`, `/api/search`, `/api/stats`) require it too. A per-user key only performs the operations its `--scope` lists, and `X-Forwarded-For` is ignored for rate limiting unless `BREWDOCS_TRUST_PROXY=1`.
 
 ---
 

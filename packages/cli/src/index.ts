@@ -1086,7 +1086,9 @@ dark: false
           : undefined;
     const baseSub =
       args.name ?? config.name ?? resolved.name ?? deriveSubdomain(src);
-    const sub = org ? combineSubdomain(org, baseSub) : baseSub;
+    // Always slugify: --name/config.name are caller/repo-controlled, and a raw
+    // "../x" used to write the site outside the hosting dir (finding #5).
+    const sub = combineSubdomain(org, baseSub);
     const storage = buildStorage(storageKind, config);
 
     try {

@@ -11,6 +11,10 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {
+      "@brewdocs/core": ["./node_modules/@brewdocs/core/src/index.ts"],
+      "@brewdocs/plugin-sdk": ["./node_modules/@brewdocs/plugin-sdk/src/index.ts"]
+    }
   }
 }

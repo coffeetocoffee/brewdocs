@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 3.9.0 | commands + hosting server | 4 files / 2,989 loc | 8 files / 1,116 loc |
-| `@brewdocs/core` | 3.9.0 | pipeline: extract → model → render | 55 files / 12,970 loc | 38 files / 4,749 loc |
-| `@brewdocs/plugin-sdk` | 3.9.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 385 loc |
+| `@brewdocs/cli` | 3.9.5 | commands + hosting server | 4 files / 3,080 loc | 8 files / 1,205 loc |
+| `@brewdocs/core` | 3.9.5 | pipeline: extract → model → render | 55 files / 12,995 loc | 39 files / 4,803 loc |
+| `@brewdocs/plugin-sdk` | 3.9.5 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**327 test declarations across 47 files** — parsed from the tree, not typed.
+**333 test declarations across 48 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -32,15 +32,15 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
-| `/api/build` | POST | `authenticate` | `packages/cli/src/server.ts:527` |
-| `/api/export` | POST | `authenticate` | `packages/cli/src/server.ts:596` |
-| `/api/sites` | GET | **none** | `packages/cli/src/server.ts:661` |
-| `/api/registry` | GET | **none** | `packages/cli/src/server.ts:669` |
-| `/api/search` | GET | **none** | `packages/cli/src/server.ts:686` |
-| `/api/markdown` | POST | `authenticate` | `packages/cli/src/server.ts:700` |
-| `/api/stats` | GET | `requireAuth` | `packages/cli/src/server.ts:745` |
-| `/` | GET | **none** | `packages/cli/src/server.ts:793` |
-| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:809` |
+| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:601` |
+| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:671` |
+| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:737` |
+| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:749` |
+| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:770` |
+| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:788` |
+| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:834` |
+| `/` | GET | **none** | `packages/cli/src/server.ts:882` |
+| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:898` |
 
 ### Invariants a change must not break
 
@@ -71,6 +71,33 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-9** — A theme slot partial path must be confined to the manifest's source root before it is read.
   - _why:_ Slot values are repo-controlled config. A `themes/brand.yml` shipped by the repo being documented could name `../../id_rsa`; the build would read it and can embed it in a page the user then publishes.
   - _enforced by:_ packages/plugin-sdk/test/v2.test.ts (confines slot partials to the source root)
+- **INV-10** — A POST (write) request must be refused with 403 when the browser signals a cross-site origin: Origin must equal the Host we were reached on, and Sec-Fetch-Site must be same-origin or none.
+  - _why:_ Any web page can POST to an open instance on the user's LAN with a simple request and no preflight. Non-browser clients send neither header and stay allowed.
+  - _enforced by:_ packages/cli/src/server.test.ts (refuses cross-site POST /api/build)
+- **INV-11** — CI workflows must install with npm ci, never npm install.
+  - _why:_ A lockfile-ignoring install on a tree containing package.json scripts is a supply-chain surface; the Pages workflow ran on a repository with pages: write and id-token: write granted.
+  - _enforced by:_ scripts/gate.mjs (inv-11:ci-uses-npm-ci)
+- **INV-12** — The published @brewdocs/core must resolve to compiled JS (dist/), not raw TypeScript, so a plain-Node consumer can import it.
+  - _why:_ Core shipped src/**/*.ts; `import '@brewdocs/core'` under plain Node threw ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. Dev/test keep using source via tsconfig paths + a vitest alias, so only the published entry changes.
+  - _enforced by:_ scripts/gate.mjs (inv-12:core-ships-compiled) + CI pack smoke
+- **INV-13** — A per-user API key must only perform the operations its scopes include; a write endpoint with the wrong scope returns 403.
+  - _why:_ keys.ts stored and printed scopes that server.ts never read, so a `--scope build` key could export and render markdown too. The surface advertised a boundary it did not have.
+  - _enforced by:_ packages/cli/src/server.test.ts (enforces the key's scopes per write endpoint)
+- **INV-14** — A release tag must run the verify gate (typecheck + map + security invariants + tests) before publishing.
+  - _why:_ publish.yml published three packages on any v* tag after only `npm ci` + `npm test`; provenance attests where it was built, not that it works.
+  - _enforced by:_ scripts/gate.mjs (inv-14:release-runs-verify)
+- **INV-15** — X-Forwarded-For may only set the rate-limit client identity behind an explicit opt-in (trustProxy / BREWDOCS_TRUST_PROXY=1); otherwise the socket address is used.
+  - _why:_ The header is caller-controlled, so honouring it unconditionally let a client defeat the only brake on the expensive /api/build path by rotating the value.
+  - _enforced by:_ scripts/gate.mjs (inv-15:trust-proxy-opt-in)
+- **INV-16** — Read endpoints that expose deployment/registry/federation metadata must 401 once auth is configured (admin token or keys); only a fully unauthenticated instance leaves them open.
+  - _why:_ needsAuth was driven by the token alone, so an instance with keys but no BREWDOCS_TOKEN leaked /api/sites, /api/registry, /api/search and the stats rollup anonymously.
+  - _enforced by:_ scripts/gate.mjs (inv-16:read-endpoints-guarded) + packages/cli/src/server.test.ts (guards read endpoints once auth is configured)
+- **INV-17** — An adapter that executes code against the source tree (python) must refuse a fetched (npm/git) source and run only for a locally chosen one.
+  - _why:_ The python adapter shells out to a bundled AST helper; running it against a package the user did not choose turns a doc build into code execution on attacker-supplied input.
+  - _enforced by:_ scripts/gate.mjs (inv-17:python-refuses-fetched)
+- **INV-18** — The renderer must have a golden-output snapshot test over a full page, including hostile inputs.
+  - _why:_ A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.
+  - _enforced by:_ scripts/gate.mjs (inv-18:renderer-golden)
 
 ### Server defaults
 
@@ -154,7 +181,7 @@ Related: MDX-generated markup (content.ts transformMdx) is HTML we emit ourselve
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**8 fixed / 10 open** — 1 of the open ones are high or med-high.
+**18 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -162,32 +189,20 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 2 | high | Unauthenticated build API rendered any absolute local path | fixed | `inv-3:source-confinement` |
 | 3 | high | Attribute injection / XSS: escapeHtml did not escape quotes | fixed | `inv-4:escape-helpers-quote-safe` |
 | 4 | high | resolveSite prefix-confusion read sibling sites | fixed | `inv-5:boundary-aware-containment` |
-| 5 | med-high | Subdomain `..` escaped the hosting dir; CLI --name was never slugified | partial | `inv-6:subdomain-slug-guard` |
+| 5 | med-high | Subdomain `..` escaped the hosting dir; CLI --name was never slugified | fixed | `inv-6:subdomain-slug-guard` |
 | 6 | med-high | emitRedirects wrote outside outDir via a `from: "../x"` key | fixed | `inv-8:output-dir-containment` |
-| 7 | medium | publish.yml publishes on any v* tag with no typecheck or smoke build | open | — |
-| 8 | medium | @brewdocs/core ships raw TypeScript; plain Node cannot import it | open | — |
-| 9 | medium | API key scopes are stored and printed but never enforced | open | — |
-| 10 | medium | Rate limiter trusts X-Forwarded-For unconditionally | open | — |
-| 11 | medium | Analytics/registry endpoints leak when keys exist but no admin token is set | open | — |
+| 7 | medium | publish.yml publishes on any v* tag with no typecheck or smoke build | fixed | `inv-14:release-runs-verify` |
+| 8 | medium | @brewdocs/core ships raw TypeScript; plain Node cannot import it | fixed | `inv-12:core-ships-compiled` |
+| 9 | medium | API key scopes are stored and printed but never enforced | fixed | `inv-13:key-scopes-enforced` |
+| 10 | medium | Rate limiter trusts X-Forwarded-For unconditionally | fixed | `inv-15:trust-proxy-opt-in` |
+| 11 | medium | Analytics/registry endpoints leak when keys exist but no admin token is set | fixed | `inv-16:read-endpoints-guarded` |
 | 12 | medium | Theme slot partials resolved relative to the manifest (arbitrary file read) | fixed | `inv-9:theme-slot-confinement` |
-| 13 | low | Pages workflow uses npm install instead of npm ci | open | — |
+| 13 | low | Pages workflow uses npm install instead of npm ci | fixed | `inv-11:ci-uses-npm-ci` |
 | 14 | low | Doc/reality drift (test counts, root package version, gitignored roadmap) | fixed | `map:up-to-date` |
-| 15 | low | python adapter executes a bundled helper against the target tree | open | — |
-| 16 | low | No CSRF/Origin check on write endpoints | open | — |
-| 17 | low | No golden-output test for the renderer | open | — |
+| 15 | low | python adapter executes a bundled helper against the target tree | fixed | `inv-17:python-refuses-fetched` |
+| 16 | low | No CSRF/Origin check on write endpoints | fixed | `npx vitest run packages/cli/src/server.test.ts` |
+| 17 | low | No golden-output test for the renderer | fixed | `inv-18:renderer-golden` |
 | 18 | low | api.test.ts was flaky under load (2 tests at a 30s timeout) | fixed | `npx vitest run packages/cli/src/api.test.ts` |
-
-### How to close the open ones
-
-- **#7** — publish.yml: call `npm run verify` (or add the typecheck + smoke steps) before the three npm publish steps.
-- **#8** — Ship dist/ (remove it from .gitignore for the package, or build in prepublishOnly), add files: [dist], and an exports map with types. Read decision D-2 first — it explains why main points at src today.
-- **#9** — Return the validated ApiKeyRecord from authenticate() instead of a boolean, then check the required scope per route. Or delete scopes and the flag so the surface stops advertising a boundary it does not have.
-- **#10** — Only honour X-Forwarded-For behind an explicit --trust-proxy flag / known proxy list; otherwise key on req.socket.remoteAddress.
-- **#11** — Require a key for the read endpoints too when keys are configured, or gate them behind a `read` scope (which pairs with finding #9).
-- **#13** — Switch to `npm ci`.
-- **#15** — Warn (or refuse) when the python adapter is the one that fires for a source that was fetched rather than a local path.
-- **#16** — Reject cross-site Origin/Sec-Fetch-Site on POST endpoints.
-- **#17** — Add a snapshot test over the example gallery's built HTML. The fuzz suite already builds every example, so the fixture is free.
 
 ## Working in this repo
 

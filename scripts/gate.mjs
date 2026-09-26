@@ -180,6 +180,123 @@ function checkSlotConfinement() {
     );
 }
 
+/**
+ * INV-11: CI workflows install with `npm ci`, never `npm install`. A
+ * lockfile-ignoring install on a tree that contains package.json scripts is a
+ * supply-chain surface (finding #13).
+ */
+function checkCiWorkflows() {
+  const dir = path.join(ROOT, ".github", "workflows");
+  if (!fs.existsSync(dir)) return pass("inv-11:ci-uses-npm-ci");
+  const offenders = fs
+    .readdirSync(dir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .filter((f) => /\bnpm\s+install\b/.test(read(path.join(".github", "workflows", f))));
+  if (offenders.length === 0) pass("inv-11:ci-uses-npm-ci");
+  else fail("inv-11:ci-uses-npm-ci", `workflow(s) use npm install: ${offenders.join(", ")}`);
+}
+
+/**
+ * INV-12: the published core must resolve to compiled JS, not raw TypeScript,
+ * so `import "@brewdocs/core"` works under plain Node (finding #8).
+ */
+function checkCorePackaging() {
+  let pkg;
+  try {
+    pkg = JSON.parse(read("packages/core/package.json"));
+  } catch {
+    return fail("inv-12:core-ships-compiled", "packages/core/package.json unreadable");
+  }
+  const root = pkg.exports?.["."];
+  const ok =
+    pkg.main === "./dist/index.js" &&
+    pkg.types === "./dist/index.d.ts" &&
+    root &&
+    root.types === "./dist/index.d.ts" &&
+    root.import === "./dist/index.js" &&
+    Array.isArray(pkg.files) &&
+    pkg.files.includes("dist");
+  if (ok) pass("inv-12:core-ships-compiled");
+  else
+    fail(
+      "inv-12:core-ships-compiled",
+      "core must export ./dist/index.js + .d.ts and list dist in files",
+    );
+}
+
+/** INV-13: a per-user key's scopes must gate each write endpoint (finding #9). */
+function checkKeyScopes() {
+  const src = read("packages/cli/src/server.ts");
+  const scopeCheck = /scopes\.includes\(scope\)/.test(src);
+  const build = /authorize\(req, "build"\)/.test(src);
+  const exp = /authorize\(req, "export"\)/.test(src);
+  const md = /authorize\(req, "markdown"\)/.test(src);
+  if (scopeCheck && build && exp && md) pass("inv-13:key-scopes-enforced");
+  else
+    fail(
+      "inv-13:key-scopes-enforced",
+      `scopeCheck=${scopeCheck}, build=${build}, export=${exp}, markdown=${md}`,
+    );
+}
+
+/** INV-14: publishing must run the verify gate first (finding #7). */
+function checkReleaseVerify() {
+  const src = read(".github/workflows/publish.yml");
+  if (/npm run verify/.test(src) || /npm run typecheck/.test(src))
+    pass("inv-14:release-runs-verify");
+  else
+    fail(
+      "inv-14:release-runs-verify",
+      "publish.yml runs neither `npm run verify` nor `npm run typecheck` before publishing",
+    );
+}
+
+/**
+ * INV-15: X-Forwarded-For is only honoured behind an explicit opt-in; the
+ * default client key is the socket address (finding #10).
+ */
+function checkTrustProxy() {
+  const src = read("packages/cli/src/server.ts");
+  const gated = /trustProxy/.test(src);
+  const offByDefault = /BREWDOCS_TRUST_PROXY === "1"/.test(src);
+  if (gated && offByDefault) pass("inv-15:trust-proxy-opt-in");
+  else
+    fail(
+      "inv-15:trust-proxy-opt-in",
+      `trustProxy=${gated}, envOptIn=${offByDefault}`,
+    );
+}
+
+/** INV-16: read endpoints must be gated once auth is configured (finding #11). */
+function checkReadGuards() {
+  const src = read("packages/cli/src/server.ts");
+  const hasHelper = /function authorizeRead|const authorizeRead/.test(src);
+  const sites = /\/api\/sites[\s\S]{0,120}?authorizeRead\(req\)/.test(src);
+  const registry = /\/api\/registry[\s\S]{0,160}?authorizeRead\(req\)/.test(src);
+  const search = /\/api\/search[\s\S]{0,120}?authorizeRead\(req\)/.test(src);
+  if (hasHelper && sites && registry && search) pass("inv-16:read-endpoints-guarded");
+  else
+    fail(
+      "inv-16:read-endpoints-guarded",
+      `helper=${hasHelper}, sites=${sites}, registry=${registry}, search=${search}`,
+    );
+}
+
+/** INV-17: the python adapter must refuse a fetched source (finding #15). */
+function checkPythonFetchedGuard() {
+  const src = read("packages/core/src/extractors/python.ts");
+  if (/if \(ctx\.fetched\)/.test(src)) pass("inv-17:python-refuses-fetched");
+  else fail("inv-17:python-refuses-fetched", "python adapter no longer checks ctx.fetched");
+}
+
+/** INV-18: the renderer has a golden-output snapshot (finding #17). */
+function checkRendererGolden() {
+  const test = path.join(ROOT, "packages", "core", "src", "render.golden.test.ts");
+  const snap = path.join(ROOT, "packages", "core", "src", "__snapshots__", "render.golden.test.ts.snap");
+  if (fs.existsSync(test) && fs.existsSync(snap)) pass("inv-18:renderer-golden");
+  else fail("inv-18:renderer-golden", "renderer golden test or its snapshot is missing");
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -244,6 +361,14 @@ checkSubdomainValidation();
 checkUrlSchemeValidation();
 checkOutputContainment();
 checkSlotConfinement();
+checkCiWorkflows();
+checkCorePackaging();
+checkKeyScopes();
+checkReleaseVerify();
+checkTrustProxy();
+checkReadGuards();
+checkPythonFetchedGuard();
+checkRendererGolden();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

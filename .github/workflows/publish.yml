@@ -18,7 +18,11 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm test
+      # Same gate CI runs: typecheck + map + security invariants + tests.
+      # Provenance attests where it was built, not that it works.
+      - run: npm run verify
+      - name: Smoke build
+        run: npx tsx packages/cli/src/cli.ts build ./examples/tiny --out dist && test -f dist/index.html
       - name: Publish @brewdocs/core
         run: npm publish --workspace=@brewdocs/core --provenance --access public
         env:

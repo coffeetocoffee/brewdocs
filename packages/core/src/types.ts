@@ -14,6 +14,12 @@ export interface Source {
   root: string;
   /** Optional explicit name; falls back to package.json name or dir basename. */
   name?: string;
+  /**
+   * True when this source was fetched (npm/git) rather than chosen locally.
+   * Adapters that execute code against the tree (python) refuse fetched sources
+   * — finding #15.
+   */
+  fetched?: boolean;
 }
 
 /** A documented parameter of an exported symbol. */

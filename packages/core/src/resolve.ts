@@ -117,7 +117,7 @@ function installNpm(name: string): ResolvedSource {
     throw new Error(`npm package "${name}" installed but entry not found.`);
   }
   return {
-    source: { root, name },
+    source: { root, name, fetched: true },
     cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }),
   };
 }
@@ -133,7 +133,7 @@ function cloneGit(url: string): ResolvedSource {
     throw new Error(`Failed to clone "${url}" (need network + git).`);
   }
   return {
-    source: { root: tmp, name: url },
+    source: { root: tmp, name: url, fetched: true },
     cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }),
   };
 }

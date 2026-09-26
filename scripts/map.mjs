@@ -157,8 +157,9 @@ function endpointSurface() {
         : "GET";
 
     const guards = [];
-    if (/!authenticate\(req\)/.test(window)) guards.push("authenticate");
-    if (/!requireAuth\(req\)/.test(window)) guards.push("requireAuth");
+    // Write guards: authorize(req, "<scope>"); read guards: authorizeRead(req).
+    if (/authorize\(req,/.test(window)) guards.push("authorize");
+    if (/!authorizeRead\(req\)/.test(window)) guards.push("authorizeRead");
     if (/requireSiteAccess\(/.test(window)) guards.push("requireSiteAccess");
     if (/guardSource\(/.test(window)) guards.push("sourceRoot");
 
@@ -329,11 +330,13 @@ function renderMarkdown(d) {
     );
     p();
     const fixedCount = gaps.filter((g) => g.status === "fixed").length;
+    const partialCount = gaps.filter((g) => g.status === "partial").length;
+    const openCount = gaps.length - fixedCount - partialCount;
     const openHigh = gaps.filter(
       (g) => g.status !== "fixed" && (g.severity === "high" || g.severity === "med-high"),
     ).length;
     p(
-      `**${fixedCount} fixed / ${gaps.length - fixedCount} open** — ${openHigh} of the open ones are high or med-high.`,
+      `**${fixedCount} fixed / ${openCount} open${partialCount ? ` / ${partialCount} partial` : ""}** — ${openHigh} of the not-yet-fixed ones are high or med-high.`,
     );
     p();
     p(`| # | Severity | Finding | Status | Proven by |`);

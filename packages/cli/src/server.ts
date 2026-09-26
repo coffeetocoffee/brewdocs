@@ -19,7 +19,7 @@ import {
   type Visibility,
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
-import { loadKeys, validateKey } from "./keys.js";
+import { ALL_SCOPES, loadKeys, validateKey } from "./keys.js";
 import {
   aggregateOrgStats,
   canAccessOrg,
@@ -130,6 +130,13 @@ export interface ProtectionOptions {
   rateWindowMs?: number;
   maxConcurrentBuilds?: number;
   maxQueue?: number;
+  /**
+   * v3.9 finding #10: trust the left-most `X-Forwarded-For` value as the client
+   * identity. Off by default — the header is caller-controlled, so honouring it
+   * unconditionally lets a client defeat the rate limiter by rotating the value.
+   * Enable only behind a known proxy (env `BREWDOCS_TRUST_PROXY`).
+   */
+  trustProxy?: boolean;
   /**
    * v3.5 security: the only directory tree the build/export/markdown API is
    * allowed to read from. A caller-supplied `source` that is a local path is
@@ -265,9 +272,11 @@ class BuildQueue {
   }
 }
 
-function clientKey(req: http.IncomingMessage): string {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+function clientKey(req: http.IncomingMessage, trustProxy = false): string {
+  if (trustProxy) {
+    const fwd = req.headers["x-forwarded-for"];
+    if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  }
   return req.socket.remoteAddress ?? "unknown";
 }
 
@@ -486,6 +495,11 @@ function buildRequestHandler(
     protection?.sourceRoot ?? process.env.BREWDOCS_SOURCE_ROOT ?? process.cwd(),
   );
 
+  // v3.9 finding #10: X-Forwarded-For is only meaningful behind a proxy that
+  // overwrites it. Trust it only when the operator opts in.
+  const trustProxy =
+    protection?.trustProxy ?? process.env.BREWDOCS_TRUST_PROXY === "1";
+
   /** Guard a caller-supplied source; 403s and returns undefined when refused. */
   const guardSource = (
     source: string,
@@ -504,32 +518,93 @@ function buildRequestHandler(
     }
   };
 
-  const requireAuth = (req: http.IncomingMessage): boolean => {
-    if (!token) return true;
+  // Write endpoints: admin token (all scopes) OR a valid per-user API key whose
+  // scopes include the operation. Unlike requireAuth, an absent admin token does
+  // NOT open the door when keys are configured. An empty scope list means all
+  // scopes (keys.ts), matching `brewdocs keys add` with no --scope.
+  const authorize = (
+    req: http.IncomingMessage,
+    scope: string,
+  ): "ok" | "unauthorized" | "forbidden" => {
+    if (!needsAuth) return "ok";
     const header = req.headers["authorization"] ?? "";
-    return header === `Bearer ${token}`;
+    if (token && header === `Bearer ${token}`) return "ok";
+    const presented = header.replace(/^Bearer\s+/i, "");
+    const record = validateKey(hostingDir, presented);
+    if (!record) return "unauthorized";
+    const scopes = record.scopes?.length ? record.scopes : ALL_SCOPES;
+    return scopes.includes(scope) ? "ok" : "forbidden";
   };
 
-  // Write endpoints: admin token OR a valid per-user API key. Unlike requireAuth,
-  // an absent admin token does NOT open the door when keys are configured.
-  const authenticate = (req: http.IncomingMessage): boolean => {
+  const deny = (
+    res: http.ServerResponse,
+    auth: "unauthorized" | "forbidden",
+  ): void => {
+    res
+      .writeHead(auth === "forbidden" ? 403 : 401, {
+        "content-type": TYPES[".json"],
+      })
+      .end(
+        JSON.stringify({
+          error: auth === "forbidden" ? "forbidden" : "unauthorized",
+        }),
+      );
+  };
+
+  /**
+   * v3.9 finding #11: read endpoints expose deployment, registry and federation
+   * metadata. needsAuth is driven by the token OR configured keys, so when any
+   * auth is configured these must not answer anonymously. With no auth at all
+   * they stay open for local use (the drop-in UI reads them).
+   */
+  const authorizeRead = (req: http.IncomingMessage): boolean => {
     if (!needsAuth) return true;
     const header = req.headers["authorization"] ?? "";
     if (token && header === `Bearer ${token}`) return true;
-    const presented = header.replace(/^Bearer\s+/i, "");
-    return validateKey(hostingDir, presented) !== null;
+    return validateKey(hostingDir, header.replace(/^Bearer\s+/i, "")) !== null;
+  };
+
+  /**
+   * v3.9 finding #16: a browser page on any origin can POST to an open instance
+   * on the user's LAN with a simple request (no preflight), so trust the
+   * browser's own same-origin signal when it sends one. Origin must match the
+   * Host we were reached on; Sec-Fetch-Site must be same-origin or none.
+   * Non-browser clients (curl, the test suite) send neither and are unaffected.
+   */
+  const isCrossSite = (req: http.IncomingMessage): boolean => {
+    const site = req.headers["sec-fetch-site"];
+    if (typeof site === "string" && site !== "same-origin" && site !== "none") {
+      return true;
+    }
+    const origin = req.headers["origin"];
+    if (typeof origin === "string") {
+      try {
+        return new URL(origin).host !== req.headers.host;
+      } catch {
+        return true; // "null" or malformed origin is not same-origin
+      }
+    }
+    return false;
   };
 
   return async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = req.headers.host;
 
+    if (req.method === "POST" && isCrossSite(req)) {
+      res
+        .writeHead(403, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify({ error: "cross-site request refused" }));
+      return;
+    }
+
     if (url.pathname === "/api/build" && req.method === "POST") {
-      if (!authenticate(req)) {
-        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+      const auth = authorize(req, "build");
+      if (auth !== "ok") {
+        deny(res, auth);
         return;
       }
-      const limited = limiter.check(clientKey(req));
+      const limited = limiter.check(clientKey(req, trustProxy));
       if (!limited.ok) {
         res
           .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
@@ -594,11 +669,12 @@ function buildRequestHandler(
     }
 
     if (url.pathname === "/api/export" && req.method === "POST") {
-      if (!authenticate(req)) {
-        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+      const auth = authorize(req, "export");
+      if (auth !== "ok") {
+        deny(res, auth);
         return;
       }
-      const limited = limiter.check(clientKey(req));
+      const limited = limiter.check(clientKey(req, trustProxy));
       if (!limited.ok) {
         res
           .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
@@ -659,6 +735,10 @@ function buildRequestHandler(
     }
 
     if (url.pathname === "/api/sites") {
+      if (!authorizeRead(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
       res
         .writeHead(200, { "content-type": TYPES[".json"] })
         .end(JSON.stringify(listSites(hostingDir)));
@@ -667,6 +747,10 @@ function buildRequestHandler(
 
     // v3.0 marketplace browse: the registry store beside the hosting dir.
     if (url.pathname === "/api/registry") {
+      if (!authorizeRead(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const plugins = loadRegistry(hostingDir).plugins.filter((p) =>
         !q ||
@@ -684,6 +768,10 @@ function buildRequestHandler(
     // v3.5 federated search: ranked symbol hits across every indexed repo.
     // The store lives beside the hosting dir (same convention as .registry.json).
     if (url.pathname === "/api/search") {
+      if (!authorizeRead(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
       const q = url.searchParams.get("q") ?? "";
       if (!q.trim()) {
         res.writeHead(400).end(JSON.stringify({ error: "missing q" }));
@@ -698,11 +786,12 @@ function buildRequestHandler(
     }
 
     if (url.pathname === "/api/markdown" && req.method === "POST") {
-      if (!authenticate(req)) {
-        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+      const auth = authorize(req, "markdown");
+      if (auth !== "ok") {
+        deny(res, auth);
         return;
       }
-      const limited = limiter.check(clientKey(req));
+      const limited = limiter.check(clientKey(req, trustProxy));
       if (!limited.ok) {
         res
           .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
@@ -746,7 +835,7 @@ function buildRequestHandler(
       // v2.5 org rollup: authenticated owners see the org's view/build totals.
       const org = url.searchParams.get("org");
       if (org) {
-        if (!requireAuth(req)) {
+        if (!authorizeRead(req)) {
           res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
           return;
         }
@@ -780,7 +869,7 @@ function buildRequestHandler(
           );
         return;
       }
-      if (!requireAuth(req)) {
+      if (!authorizeRead(req)) {
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }

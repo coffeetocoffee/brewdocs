@@ -44,6 +44,20 @@ describe("Authoring DX commands", () => {
   });
 });
 
+// v3.9 finding #5: the CLI deploy path must slugify --name. Before the fix it
+// passed the raw value through when no --org was set, so `--name ../ESCAPED`
+// wrote the site outside the hosting directory.
+describe("deploy subdomain safety", () => {
+  it("slugifies --name so it cannot escape the hosting dir", async () => {
+    const src = path.resolve(__dirname, "../../../examples/tiny");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-deploy-"));
+    const hosting = path.join(root, "hosting");
+    await run(["deploy", src, "--name", "../ESCAPED", "--out", hosting]);
+    expect(fs.existsSync(path.join(root, "ESCAPED"))).toBe(false);
+    expect(fs.existsSync(path.join(hosting, "escaped", "index.html"))).toBe(true);
+  });
+});
+
 // v3.5 security: `serve` binds loopback by default; anything else is treated
 // as network-exposed and triggers the auth guard.
 describe("serve host safety", () => {

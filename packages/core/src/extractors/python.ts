@@ -394,6 +394,15 @@ export const pythonAdapter: LanguageAdapter = {
     return looksLikePythonPackage(ctx.root);
   },
   extract(ctx) {
+    // v3.9 finding #15: this adapter executes a bundled helper against the
+    // tree. Never run it for a source that was fetched (npm/git) rather than
+    // chosen locally — a chosen local build is fine, a remote one is not.
+    if (ctx.fetched) {
+      console.warn(
+        "[brewdocs] python extractor: refusing to run against a fetched source — skipping",
+      );
+      return [];
+    }
     const py = findPython();
     if (!py) {
       console.warn("[brewdocs] python extractor: no python interpreter found — skipping");

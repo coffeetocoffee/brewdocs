@@ -35,6 +35,11 @@ export interface AdapterContext {
   name?: string;
   /** Raw package.json / pyproject.toml style metadata (empty if none). */
   metadata: Record<string, unknown>;
+  /**
+   * True when the source was fetched (npm/git), not chosen locally. Adapters
+   * that execute code against the tree must refuse a fetched source (#15).
+   */
+  fetched?: boolean;
 }
 
 /** A pluggable language backend. */

@@ -54,6 +54,60 @@
       "rule": "A theme slot partial path must be confined to the manifest's source root before it is read.",
       "why": "Slot values are repo-controlled config. A `themes/brand.yml` shipped by the repo being documented could name `../../id_rsa`; the build would read it and can embed it in a page the user then publishes.",
       "enforcedBy": "packages/plugin-sdk/test/v2.test.ts (confines slot partials to the source root)"
+    },
+    {
+      "id": "INV-10",
+      "rule": "A POST (write) request must be refused with 403 when the browser signals a cross-site origin: Origin must equal the Host we were reached on, and Sec-Fetch-Site must be same-origin or none.",
+      "why": "Any web page can POST to an open instance on the user's LAN with a simple request and no preflight. Non-browser clients send neither header and stay allowed.",
+      "enforcedBy": "packages/cli/src/server.test.ts (refuses cross-site POST /api/build)"
+    },
+    {
+      "id": "INV-11",
+      "rule": "CI workflows must install with npm ci, never npm install.",
+      "why": "A lockfile-ignoring install on a tree containing package.json scripts is a supply-chain surface; the Pages workflow ran on a repository with pages: write and id-token: write granted.",
+      "enforcedBy": "scripts/gate.mjs (inv-11:ci-uses-npm-ci)"
+    },
+    {
+      "id": "INV-12",
+      "rule": "The published @brewdocs/core must resolve to compiled JS (dist/), not raw TypeScript, so a plain-Node consumer can import it.",
+      "why": "Core shipped src/**/*.ts; `import '@brewdocs/core'` under plain Node threw ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. Dev/test keep using source via tsconfig paths + a vitest alias, so only the published entry changes.",
+      "enforcedBy": "scripts/gate.mjs (inv-12:core-ships-compiled) + CI pack smoke"
+    },
+    {
+      "id": "INV-13",
+      "rule": "A per-user API key must only perform the operations its scopes include; a write endpoint with the wrong scope returns 403.",
+      "why": "keys.ts stored and printed scopes that server.ts never read, so a `--scope build` key could export and render markdown too. The surface advertised a boundary it did not have.",
+      "enforcedBy": "packages/cli/src/server.test.ts (enforces the key's scopes per write endpoint)"
+    },
+    {
+      "id": "INV-14",
+      "rule": "A release tag must run the verify gate (typecheck + map + security invariants + tests) before publishing.",
+      "why": "publish.yml published three packages on any v* tag after only `npm ci` + `npm test`; provenance attests where it was built, not that it works.",
+      "enforcedBy": "scripts/gate.mjs (inv-14:release-runs-verify)"
+    },
+    {
+      "id": "INV-15",
+      "rule": "X-Forwarded-For may only set the rate-limit client identity behind an explicit opt-in (trustProxy / BREWDOCS_TRUST_PROXY=1); otherwise the socket address is used.",
+      "why": "The header is caller-controlled, so honouring it unconditionally let a client defeat the only brake on the expensive /api/build path by rotating the value.",
+      "enforcedBy": "scripts/gate.mjs (inv-15:trust-proxy-opt-in)"
+    },
+    {
+      "id": "INV-16",
+      "rule": "Read endpoints that expose deployment/registry/federation metadata must 401 once auth is configured (admin token or keys); only a fully unauthenticated instance leaves them open.",
+      "why": "needsAuth was driven by the token alone, so an instance with keys but no BREWDOCS_TOKEN leaked /api/sites, /api/registry, /api/search and the stats rollup anonymously.",
+      "enforcedBy": "scripts/gate.mjs (inv-16:read-endpoints-guarded) + packages/cli/src/server.test.ts (guards read endpoints once auth is configured)"
+    },
+    {
+      "id": "INV-17",
+      "rule": "An adapter that executes code against the source tree (python) must refuse a fetched (npm/git) source and run only for a locally chosen one.",
+      "why": "The python adapter shells out to a bundled AST helper; running it against a package the user did not choose turns a doc build into code execution on attacker-supplied input.",
+      "enforcedBy": "scripts/gate.mjs (inv-17:python-refuses-fetched)"
+    },
+    {
+      "id": "INV-18",
+      "rule": "The renderer must have a golden-output snapshot test over a full page, including hostile inputs.",
+      "why": "A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.",
+      "enforcedBy": "scripts/gate.mjs (inv-18:renderer-golden)"
     }
   ]
 }

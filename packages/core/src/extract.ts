@@ -78,7 +78,12 @@ export function extractFromSource(
   // vendored next to a thin npm wrapper).
   if (symbols.length === 0) {
     try {
-      symbols = runAdapters(plugins, { root, name: title, metadata });
+      symbols = runAdapters(plugins, {
+        root,
+        name: title,
+        metadata,
+        fetched: source.fetched,
+      });
     } catch (err) {
       console.warn(
         `[brewdocs] adapter extraction failed for "${title}": ${

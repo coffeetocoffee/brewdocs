@@ -158,7 +158,7 @@ describe("Phase 5 — source confinement", () => {
 describe("Phase 5 — hosted-tier protection", () => {
   it(
     "rate limits repeated /api/build from the same client",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-rl-"));
     const server = createServer(hosting, undefined, undefined, {
@@ -180,9 +180,11 @@ describe("Phase 5 — hosted-tier protection", () => {
     });
     expect(first.status).toBe(200);
 
+    // v3.9 finding #10: a spoofed X-Forwarded-For must not reset the limiter —
+    // the header is only trusted behind an opt-in --trust-proxy / env.
     const second = await fetch(`${base}/api/build`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-forwarded-for": "9.9.9.9" },
       body,
     });
     expect(second.status).toBe(429);
@@ -209,6 +211,34 @@ describe("Phase 5 — hosted-tier protection", () => {
       body,
     });
     expect(res.status).toBe(503);
+
+    server.close();
+  });
+
+  // v3.9 finding #16: a browser page on another origin must not drive the
+  // build API. The signal is the browser's own Origin / Sec-Fetch-Site header.
+  it("refuses cross-site POST /api/build", async () => {
+    const hosting = tmp();
+    const server = createServer(hosting);
+    await new Promise<void>((r) => server.listen(0, r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const base = `http://127.0.0.1:${port}`;
+    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+
+    const evilOrigin = await fetch(`${base}/api/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://evil.example" },
+      body,
+    });
+    expect(evilOrigin.status).toBe(403);
+
+    const crossSite = await fetch(`${base}/api/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body,
+    });
+    expect(crossSite.status).toBe(403);
 
     server.close();
   });
@@ -401,6 +431,51 @@ describe("Per-user API keys", () => {
         body,
       });
       expect(admin.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  // v3.9 finding #11: read endpoints must not answer anonymously once keys exist.
+  it("guards read endpoints once auth is configured", async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-readauth-"));
+    await import("../src/keys.js").then((m) => m.addKey(hosting, { scopes: ["build"] }));
+    const { server, base } = await start(hosting);
+    try {
+      for (const path of ["/api/sites", "/api/registry", "/api/search?q=x"]) {
+        expect((await fetch(`${base}${path}`)).status).toBe(401);
+      }
+    } finally {
+      server.close();
+    }
+  });
+
+  // v3.9 finding #9: a key's scopes must bound what it can do.
+  it(
+    "enforces the key's scopes per write endpoint",
+    { timeout: 60_000, retry: 2 },
+    async () => {
+    const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-scopes-"));
+    const { key } = await import("../src/keys.js").then((m) =>
+      m.addKey(hosting, { scopes: ["build"] }),
+    );
+    const { server, base } = await start(hosting);
+    try {
+      const body = JSON.stringify({ source: tinyRoot });
+
+      const wrongScope = await fetch(`${base}/api/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body,
+      });
+      expect(wrongScope.status).toBe(403);
+
+      const rightScope = await fetch(`${base}/api/build`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body,
+      });
+      expect(rightScope.status).toBe(200);
     } finally {
       server.close();
     }

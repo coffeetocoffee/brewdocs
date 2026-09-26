@@ -108,6 +108,15 @@ describe("v2.0 Python adapter", () => {
     expect(pythonAdapter.detect({ root: dir, metadata: {} })).toBe(true);
   });
 
+  // v3.9 finding #15: the adapter runs a bundled helper against the tree, so it
+  // must never fire for a fetched (npm/git) source.
+  it("refuses to run against a fetched source", () => {
+    const dir = tmp();
+    for (const [f, t] of Object.entries(PY_PKG)) write(path.join(dir, f), t);
+    const symbols = pythonAdapter.extract({ root: dir, metadata: {}, fetched: true });
+    expect(symbols).toEqual([]);
+  });
+
   it("extracts functions, params, docstrings, examples, classes, constants", () => {
     const dir = tmp();
     for (const [f, t] of Object.entries(PY_PKG)) write(path.join(dir, f), t);
