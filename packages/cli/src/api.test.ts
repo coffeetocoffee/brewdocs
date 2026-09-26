@@ -24,11 +24,12 @@ afterAll(async () => {
 });
 
 describe("Phase 5 — API endpoints", () => {
-  // Brewing runs a full TS extraction per request; under a loaded suite that
-  // can exceed vitest's 5s default, so give these endpoints headroom.
+  // Brewing runs a full TS extraction per request, so under a loaded suite
+  // these two ran 31-34s against the old 30s budget and failed intermittently.
+  // A test that fails on machine load teaches people to re-run instead of read.
   it(
     "POST /api/build brews a site from a local path and returns a URL",
-    { timeout: 30_000 },
+    { timeout: 60_000 },
     async () => {
       const res = await fetch(`${BASE}/api/build`, {
         method: "POST",
@@ -57,7 +58,7 @@ describe("Phase 5 — API endpoints", () => {
 
   it(
     "POST /api/export returns a downloadable HTML file",
-    { timeout: 30_000 },
+    { timeout: 60_000 },
     async () => {
       const res = await fetch(`${BASE}/api/export`, {
         method: "POST",

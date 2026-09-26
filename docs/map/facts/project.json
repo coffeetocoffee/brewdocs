@@ -1,0 +1,6 @@
+{
+  "name": "brewdocs",
+  "tagline": "Brew your docs, serve them hot.",
+  "what": "A zero-config documentation generator for code. Point it at a local path, an npm package name, or a GitHub URL and it produces one self-contained HTML page (plus a queryable `docmodel.json`). It also ships a hosting server, a CLI with coverage/diff/gate tooling, language adapters beyond JS/TS, and an MCP server so agents can read the same model.\n\nThe product's whole job is rendering prose from repositories **you do not own** — READMEs, doc comments, git tag names. That is the threat model everything in `facts/invariants.json` follows from.",
+  "audience": "Maintainers of the monorepo and anyone hosting `brewdocs serve` on a reachable address."
+}

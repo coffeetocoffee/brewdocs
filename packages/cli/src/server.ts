@@ -975,8 +975,20 @@ ${paths}
 </body></html>`;
 }
 
+/**
+ * Escape for HTML output. Quotes are escaped too so the helper is safe in
+ * quoted attributes as well as text nodes (see invariants INV-4 in
+ * docs/map/facts/invariants.json) — several call sites below sit next to
+ * `title="…"` markup, and manifest values are attacker-influenced because
+ * they come from the built model's title.
+ */
 function escapeText(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function runBuild(

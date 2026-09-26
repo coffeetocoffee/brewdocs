@@ -18,3 +18,12 @@ __pycache__/
 
 # Local-only planning doc (per request)
 ROADMAP.md
+
+# Vitest JSON reporter scratch (used to count cases when auditing)
+.vtcount.json
+
+# Local-only release notes. Per the release procedure (AGENTS.md), notes go
+# into the GitHub release body via `gh release create --notes-file` and the
+# file itself stays uncommitted. RELEASE_NOTES_v3.7.0.md was committed by
+# mistake before this rule was written down; it is untracked again in v3.8.
+RELEASE_NOTES_*.md

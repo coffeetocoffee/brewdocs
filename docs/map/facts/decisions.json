@@ -1,0 +1,35 @@
+{
+  "_why": "Choices that look wrong from the outside until you know the constraint. Without these written down, the next person 'fixes' a deliberate thing.",
+  "decisions": [
+    {
+      "id": "D-1",
+      "title": "Zero runtime dependencies (except typescript)",
+      "body": "The core pipeline has no runtime deps and the CLI uses only node builtins. This is why: the markdown parser, the YAML mini-readers (config.ts, theme-manifest.ts, extractors/openapi.ts), the highlighter and the search index are all hand-rolled. Cost: markdown is a CommonMark subset, YAML handles a documented subset only and degrades to skip on anchors/multi-doc, and the highlighters are heuristic. Benefit: `npx @brewdocs/cli` starts fast, there is no supply-chain surface in the build path, and every parse failure is ours to reason about.\n\nBefore adding a dependency, check whether the feature can degrade gracefully without one. If it cannot, treat it as an architecture decision and add a fact entry."
+    },
+    {
+      "id": "D-2",
+      "title": "The CLI runs TypeScript directly via tsx (no build step)",
+      "body": "`packages/cli/bin/brewdocs.js` registers the tsx loader and imports `src/cli.ts`. There is no compile step before running the CLI, which is why `main` in core/plugin-sdk points at `src/index.ts`.\n\nConsequence worth knowing: the published packages ship raw `.ts` (finding #8). That works for `npx brewdocs` because tsx is a dependency, but a plain-Node consumer importing `@brewdocs/core` gets ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. Fixing #8 means introducing a real dist/exports map — and that interacts with this decision, so read both together."
+    },
+    {
+      "id": "D-3",
+      "title": "Language adapters are line-based heuristics, not ASTs",
+      "body": "Rust/Java/C#/Ruby/Go adapters are regex + brace-counting over source lines (extractors/walk.ts folds logical declaration heads). They can be fooled by braces inside string literals. Exotic formatting degrades to 'symbol skipped', never a crash — errors warn and skip by convention.\n\nAlso: adapters only fire when JS/TS extraction finds **zero** symbols (extract.ts). A repo with one .ts file plus a whole Rust crate gets only the JS side. That is intentional but surprising."
+    },
+    {
+      "id": "D-4",
+      "title": "Cloud / domains / TLS / registry / federation are local control-plane emulations",
+      "body": "There is no backend. `.cloud.json`, `.domains.json`, `.registry.json` and `.federation.json` sit next to the hosting directory and are the entire 'platform'. ACME issuance is out of scope; TLS is serve-side (the operator brings a PEM). This is honest in the README but easy to mistake for a hosted service when reading the command list — `brewdocs deploy` writes to a local directory unless `--storage s3` is passed."
+    },
+    {
+      "id": "D-5",
+      "title": "Escaping is centralized on purpose — do not add a local escape helper",
+      "body": "`escapeHtml` in render.ts and in markdown.ts escape `& < > \" '` so the same function is correct for text nodes and quoted attributes. If you need to emit HTML, reuse it. A local helper that escapes only `&<>` reintroduces INV-4, which was a shipped XSS.\n\nRelated: MDX-generated markup (content.ts transformMdx) is HTML we emit ourselves and must not be fed back through the markdown escaper — it is stashed behind sentinel tokens and spliced in afterwards."
+    },
+    {
+      "id": "D-6",
+      "title": "The incremental cache is extraction-only and keyed on content hashes",
+      "body": "`.brewdocs/extract.json` caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Render always rebuilds. Versioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the fingerprint (huge, irrelevant to the doc model)."
+    }
+  ]
+}

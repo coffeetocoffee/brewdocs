@@ -1,0 +1,16 @@
+{
+  "_why": "State that lives on disk. Knowing which file is the source of truth for what is most of the debugging cost in a hosting tool.",
+  "state": [
+    { "what": "Per-site deploy manifest (visibility, tokenHash, draft expiry, title)", "file": "hosting/<subdomain>/.brewdocs.json", "by": "deploySite() in core/src/deploy.ts" },
+    { "what": "Per-user API keys (sha256 only; raw key shown once)", "file": "hosting/.keys.json", "by": "cli/src/keys.ts — `brewdocs keys add`" },
+    { "what": "Orgs, members, org-owned sites", "file": "hosting/.cloud.json", "by": "core/src/cloud.ts — `brewdocs cloud`" },
+    { "what": "Custom domain → subdomain mapping + verification token", "file": "hosting/.domains.json", "by": "core/src/domains.ts — `brewdocs domains`" },
+    { "what": "Plugin registry entries (local marketplace)", "file": "<registryDir>/.registry.json", "by": "core/src/registry.ts — `brewdocs registry`" },
+    { "what": "Federated search index (per-repo symbols from docmodel.json)", "file": "<storeDir>/.federation.json", "by": "core/src/federation.ts — `brewdocs federate`" },
+    { "what": "Pageview/build counters and top paths", "file": "hosting/.analytics.json", "by": "cli/src/server.ts StatsStore" },
+    { "what": "Drift baseline (code vs docs fingerprints per symbol)", "file": "<src>/.brewdocs/drift.json", "by": "core/src/drift.ts — `brewdocs drift --record`" },
+    { "what": "Coverage trend history", "file": "<src>/.brewdocs/coverage.json", "by": "core/src/doctor.ts — `brewdocs doctor --record`" },
+    { "what": "Extraction cache (content-hash keyed)", "file": "<src>/.brewdocs/extract.json", "by": "core/src/cache.ts" },
+    { "what": "Machine-readable API artifact emitted by every build", "file": "<out>/docmodel.json", "by": "core/src/docmodel.ts (schema brewdocs/docmodel@1)" }
+  ]
+}

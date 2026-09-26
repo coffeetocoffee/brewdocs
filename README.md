@@ -13,7 +13,27 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔒 Fresh out of the oven — v3.7
+## 🗺️ Fresh out of the oven — v3.8
+
+The map release. The repo's knowledge now regenerates itself from the source, so it cannot silently go stale:
+
+| New | What it gives you |
+| --- | --- |
+| 📄 **[Project Map](./docs/map/PROJECT_MAP.md)** | One screen: shape, trust boundaries (every endpoint × its guard, parsed from the server), where state lives, non-goals, decisions, and every known finding with status |
+| 🛡️ **Security gate** | `npm run gate` — the invariants a change must not break, plus one check per fixed finding, so "fixed" is a tested claim. Wired into CI |
+| 🤖 **Agent context** | The same facts as JSON, so an AI reloads context without re-reading 16k lines |
+
+```bash
+npm run map        # regenerate the map from the source tree
+npm run gate       # invariants + finding verification (17 checks)
+npm run verify     # typecheck + map + gate + tests — run before a release
+```
+
+Numbers in the map are parsed, never typed — CI fails if they drift.
+
+---
+
+## 🔒 Previously — v3.7
 
 The hardening release. BrewDocs renders prose from repos you don't own, and a hosted instance is now safe by default:
 
@@ -32,7 +52,7 @@ BREWDOCS_SOURCE_ROOT=./repos brewdocs serve    # where the build API may read fr
 
 ---
 
-## 🌊 Previously — v3.5
+## 🌊 Before that — v3.5
 
 The intelligence release. Docs that know when they've gone stale, and search that spans every repo:
 
@@ -203,8 +223,11 @@ Source → ExtractResult → RenderModel → standalone HTML
 
 ```bash
 npm install
-npm test          # 323 tests, all green
+npm run verify    # typecheck + project-map check + security gate + tests
+npm test          # tests only
 npm run brewdocs -- build ./docs --theme ink --out docs-site
 ```
+
+Working on the code? Start with [`docs/map/PROJECT_MAP.md`](./docs/map/PROJECT_MAP.md) — one screen covering the shape, the trust boundaries, where state lives, what this deliberately doesn't do, and every known weakness with its status. It is generated from the source, so its numbers can't drift.
 
 Launch blurbs live in [`PITCH.md`](./PITCH.md). License: MIT. Go brew something. ☕

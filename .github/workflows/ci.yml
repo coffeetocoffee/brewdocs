@@ -19,3 +19,21 @@ jobs:
       - run: npm test
       - name: Smoke build
         run: npx tsx packages/cli/src/cli.ts build ./examples/tiny --out dist && test -f dist/index.html
+
+  # Guards the knowledge base and the properties that shipped broken in v3.5.
+  # `map:check` fails when docs/map is stale (so no hand-typed count survives),
+  # and `gate` runs the security invariants plus each fixed finding's own check.
+  docs-and-invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Project map is up to date
+        run: npm run map:check
+      - name: Security invariants still hold
+        run: npm run gate
+
