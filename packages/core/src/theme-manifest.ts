@@ -79,7 +79,7 @@ function normalizeManifest(obj: Record<string, unknown>, fallbackName: string): 
   };
 }
 
-function readManifestFile(file: string): ThemeManifest | null {
+function readManifestFile(file: string, sourceRoot?: string): ThemeManifest | null {
   try {
     const text = fs.readFileSync(file, "utf8");
     const ext = path.extname(file);
@@ -89,6 +89,10 @@ function readManifestFile(file: string): ThemeManifest | null {
         : parseManifestYaml(text);
     const manifest = normalizeManifest(obj, path.basename(file, ext));
     manifest.manifestDir = path.dirname(file);
+    // v3.8: remember the source root so slot partial paths can be confined to
+    // it. A manifest is repo-controlled config, so a slot value naming a file
+    // outside the repo must not be readable.
+    manifest.sourceRoot = sourceRoot;
     return manifest;
   } catch {
     return null;
@@ -105,7 +109,7 @@ export function loadThemeManifest(ref: string | undefined, root: string): ThemeM
   const direct = [ref, `${ref}.yml`, `${ref}.json`].map((p) => path.resolve(root, p));
   for (const file of direct) {
     if (fs.existsSync(file) && /\.(yml|json)$/.test(file)) {
-      return readManifestFile(file);
+      return readManifestFile(file, root);
     }
   }
   const inDir = [
@@ -113,7 +117,7 @@ export function loadThemeManifest(ref: string | undefined, root: string): ThemeM
     path.join(root, "themes", `${ref}.json`),
   ];
   for (const file of inDir) {
-    if (fs.existsSync(file)) return readManifestFile(file);
+    if (fs.existsSync(file)) return readManifestFile(file, root);
   }
   return null;
 }
@@ -132,10 +136,18 @@ export function resolveThemeRef(ref: string | undefined, root: string): { name?:
   return { name: candidate };
 }
 
-/** Fill a slots map from a manifest (inline HTML or partial file paths). */
+/**
+ * Fill a slots map from a manifest (inline HTML or partial file paths).
+ *
+ * v3.8: a partial path is confined to the manifest's source root. Slot values
+ * are repo-controlled config, so without this a `themes/brand.yml` shipped by
+ * the repo being documented could name `../../id_rsa`, and the build would read
+ * it and embed it in a page the user then publishes.
+ */
 export function manifestSlots(manifest: ThemeManifest | undefined): Slots {
   const slots: Slots = {};
   if (!manifest?.slots) return slots;
+  const root = manifest.sourceRoot ? path.resolve(manifest.sourceRoot) : null;
   for (const key of SLOT_KEYS) {
     const value = manifest.slots[key];
     if (!value) continue;
@@ -144,6 +156,17 @@ export function manifestSlots(manifest: ThemeManifest | undefined): Slots {
       continue;
     }
     const file = path.resolve(manifest.manifestDir ?? ".", value);
+    if (root) {
+      // Boundary-aware: `..` is collapsed by resolve() before the comparison,
+      // and the result must be the root or sit under root + separator.
+      const inRoot = file === root || file.startsWith(root + path.sep);
+      if (!inRoot) {
+        console.warn(
+          `[brewdocs] theme slot "${key}" skipped: partial escapes the source root`,
+        );
+        continue;
+      }
+    }
     try {
       if (fs.existsSync(file)) slots[key] = fs.readFileSync(file, "utf8");
     } catch {

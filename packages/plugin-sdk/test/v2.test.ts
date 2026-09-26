@@ -12,6 +12,7 @@ import {
   loadContent,
   loadNav,
   loadThemeManifest,
+  manifestSlots,
   parseNavYaml,
   pythonAdapter,
   transformMdx,
@@ -305,6 +306,39 @@ describe("v2.0 theme manifest + slots", () => {
     const theme = applyManifest(getTheme("ink"), manifest!);
     expect(theme.light["--accent"]).toBe("#ff0000");
     expect((theme as { css?: string }).css).toContain("text-transform");
+  });
+
+  // v3.8 security: a theme manifest is repo-controlled config. A slot value
+  // naming a file outside the repo used to be read verbatim and embedded in
+  // the built page, which is an exfiltration gadget for a third-party manifest.
+  it("confines slot partials to the source root", () => {
+    const base = tmp("brewdocs-slot-esc-");
+    const repo = path.join(base, "repo");
+    // A secret sitting outside the repo.
+    write(path.join(base, "id_rsa"), "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET\n");
+    write(
+      path.join(repo, "themes/evil.yml"),
+      `base: ink\nslots:\n  footer: ../../id_rsa\n`,
+    );
+
+    const manifest = loadThemeManifest("evil", repo);
+    expect(manifest).toBeTruthy();
+    expect(manifest!.sourceRoot).toBe(repo);
+
+    const slots = manifestSlots(manifest!);
+    expect(slots.footer).toBeUndefined();
+  });
+
+  it("still reads slot partials that live inside the source root", () => {
+    const repo = tmp("brewdocs-slot-ok-");
+    write(
+      path.join(repo, "themes/brand.yml"),
+      `base: ink\nslots:\n  footer: brand-footer.html\n`,
+    );
+    write(path.join(repo, "themes/brand-footer.html"), "<p>legit footer</p>");
+
+    const slots = manifestSlots(loadThemeManifest("brand", repo)!);
+    expect(slots.footer).toContain("legit footer");
   });
 
   it("build() injects manifest vars, custom css, and slot HTML", () => {

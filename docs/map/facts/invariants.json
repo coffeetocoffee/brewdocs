@@ -42,6 +42,18 @@
       "rule": "A URL placed in href/src must have its scheme validated; javascript:, vbscript: and data: are dropped, including control-character-smuggled forms.",
       "why": "Markdown link targets come from third-party prose. `java\\nscript:` is still javascript: to a browser, so the scheme check must strip control characters before sniffing.",
       "enforcedBy": "packages/core/src/markdown.test.ts"
+    },
+    {
+      "id": "INV-8",
+      "rule": "Any writer that takes a site-root-relative path from config must resolve it against the output directory and refuse anything outside. Same boundary-aware rule as INV-5: no bare startsWith.",
+      "why": "`redirects:` and `aliases:` in brewdocs.yml are repo-controlled, so a `from: \"../x.html\"` key could create files above the build output. Reachable from any repo you build docs for.",
+      "enforcedBy": "packages/core/src/aliases.test.ts (v3.8 containment of generated output)"
+    },
+    {
+      "id": "INV-9",
+      "rule": "A theme slot partial path must be confined to the manifest's source root before it is read.",
+      "why": "Slot values are repo-controlled config. A `themes/brand.yml` shipped by the repo being documented could name `../../id_rsa`; the build would read it and can embed it in a page the user then publishes.",
+      "enforcedBy": "packages/plugin-sdk/test/v2.test.ts (confines slot partials to the source root)"
     }
   ]
 }

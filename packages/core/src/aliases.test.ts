@@ -10,6 +10,7 @@ import {
   isEolVersion,
   loadConfig,
   redirectHtml,
+  resolveInOutDir,
 } from "@brewdocs/core";
 
 function tmp(prefix: string): string {
@@ -59,6 +60,61 @@ describe("v3.0 EOL + alias helpers", () => {
     expect(written).toHaveLength(1);
     expect(fs.readFileSync(path.join(out, "taken.html"), "utf8")).toBe("<html>real</html>");
     expect(fs.readFileSync(path.join(out, "gone.html"), "utf8")).toContain("now.html");
+  });
+});
+
+// v3.8 security: `redirects:` / `aliases:` keys come from brewdocs.yml in a repo
+// you may not own, so they must not be able to create files outside the output
+// tree. Before this, a `from: "../x.html"` key wrote a .html file above outDir.
+describe("v3.8 containment of generated output", () => {
+  it("emitRedirects refuses paths that escape the output dir", () => {
+    const base = tmp("brewdocs-redir-esc-");
+    const out = path.join(base, "dist");
+    fs.mkdirSync(out, { recursive: true });
+
+    const written = emitRedirects(out, {
+      "../PWNED.html": "index.html",
+      "a/../../UP.html": "index.html",
+    });
+    expect(written).toHaveLength(0);
+    expect(fs.existsSync(path.join(base, "PWNED.html"))).toBe(false);
+    expect(fs.existsSync(path.join(base, "UP.html"))).toBe(false);
+  });
+
+  it("emitRedirects still writes legitimate nested paths", () => {
+    const out = tmp("brewdocs-redir-ok-");
+    const written = emitRedirects(out, { "guide/old.html": "index.html" });
+    expect(written).toHaveLength(1);
+    expect(fs.existsSync(path.join(out, "guide", "old.html"))).toBe(true);
+  });
+
+  it("emitAliasPages keeps alias pages inside the output dir", () => {
+    const base = tmp("brewdocs-alias-esc-");
+    const out = path.join(base, "dist");
+    fs.mkdirSync(out, { recursive: true });
+    const written = emitAliasPages(out, ["1.0.0"], { "../../ESCAPED": "1.0.0" });
+    // dirSafe neutralizes the separators, so nothing lands outside dist/
+    // either way — assert on the filesystem, not on the return value.
+    for (const f of written) {
+      expect(path.resolve(f).startsWith(path.resolve(out) + path.sep)).toBe(true);
+    }
+    expect(fs.existsSync(path.join(base, "ESCAPED"))).toBe(false);
+  });
+
+  it("resolveInOutDir is boundary-aware, not prefix-matching", () => {
+    const base = tmp("brewdocs-indir-");
+    const out = path.join(base, "dist");
+    fs.mkdirSync(out, { recursive: true });
+    // A sibling directory sharing the prefix must not be accepted.
+    fs.mkdirSync(`${out}-sibling`, { recursive: true });
+
+    expect(resolveInOutDir(out, "ok.html")).toBe(path.join(out, "ok.html"));
+    expect(resolveInOutDir(out, "sub/ok.html")).toBe(path.join(out, "sub", "ok.html"));
+    expect(resolveInOutDir(out, "../sibling.html")).toBeNull();
+    expect(resolveInOutDir(out, "..")).toBeNull();
+    expect(resolveInOutDir(out, ".")).toBeNull();
+    // the prefix-confusion case: `..` lands on the sibling dir
+    expect(resolveInOutDir(out, "../dist-sibling/x.html")).toBeNull();
   });
 });
 

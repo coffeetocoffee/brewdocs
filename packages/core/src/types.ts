@@ -107,6 +107,12 @@ export interface ThemeManifest {
   };
   /** Directory partial paths resolve against (manifest location). */
   manifestDir?: string;
+  /**
+   * Source root the manifest belongs to. Slot partial file paths are confined
+   * to this tree, so a manifest cannot name a file outside the repo it ships
+   * with. Set by loadThemeManifest.
+   */
+  sourceRoot?: string;
 }
 
 /** A single MDX/markdown guide page from the `content/` directory (v2.0). */

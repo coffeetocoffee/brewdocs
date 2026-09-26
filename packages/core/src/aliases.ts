@@ -14,6 +14,23 @@ export function dirSafe(version: string): string {
   return version.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+/**
+ * Resolve a site-root-relative config path (a `redirects:` key) to an absolute
+ * write target, or null when it would land outside `outDir`.
+ *
+ * Containment is boundary-aware: `..` sequences are collapsed by resolve()
+ * before the comparison, and the result must equal the root or sit under
+ * root + separator. A bare startsWith() would accept a sibling directory whose
+ * name shares the prefix.
+ */
+export function resolveInOutDir(outDir: string, rel: string): string | null {
+  const root = path.resolve(outDir);
+  const target = path.resolve(root, rel);
+  if (target === root) return null; // a redirect must name a file, not the dir
+  if (!target.startsWith(root + path.sep)) return null;
+  return target;
+}
+
 /** Normalize `v1.2.3` / `1.2.3` for comparisons. */
 function bare(version: string): string {
   return version.replace(/^v/, "").trim();
@@ -69,6 +86,9 @@ export function emitAliasPages(
 ): string[] {
   const written: string[] = [];
   for (const [alias, target] of Object.entries(aliases ?? {})) {
+    // dirSafe maps separators and dots-sequences to `_`, so a hostile alias
+    // can't traverse; the slug check below is belt-and-braces for the
+    // degenerate names that survive.
     const safeAlias = dirSafe(alias);
     if (!safeAlias || safeAlias === "." || safeAlias === "..") continue;
     const hit = builtVersions.find((v) => bare(v) === bare(target));
@@ -79,9 +99,15 @@ export function emitAliasPages(
       continue;
     }
     const isEol = isEolVersion(hit, opts.eol);
-    const aliasDir = path.join(outDir, safeAlias);
-    fs.mkdirSync(aliasDir, { recursive: true });
-    const file = path.join(aliasDir, "index.html");
+    // The link target is built from dirSafe(hit), so a hostile version name
+    // cannot escape `..` — but the alias page itself must still be confirmed
+    // inside outDir before anything is created.
+    const file = resolveInOutDir(outDir, path.join(safeAlias, "index.html"));
+    if (!file) {
+      console.warn(`[brewdocs] alias "${alias}" skipped: target escapes the output dir`);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(
       file,
       redirectHtml(`../${dirSafe(hit)}/index.html`, `${alias} → v${hit}${isEol ? " (EOL)" : ""}`),
@@ -103,7 +129,14 @@ export function emitRedirects(
   const written: string[] = [];
   for (const [from, to] of Object.entries(redirects ?? {})) {
     if (!from || !to) continue;
-    const target = path.join(outDir, from);
+    // v3.8: `from` is a site-root-relative path from brewdocs.yml, i.e.
+    // attacker-influenced config in any repo you build. A key like "../x.html"
+    // used to create a file outside the output tree.
+    const target = resolveInOutDir(outDir, from);
+    if (!target) {
+      console.warn(`[brewdocs] redirect "${from}" skipped: escapes the output dir`);
+      continue;
+    }
     // Never let a redirect overwrite a real built page.
     if (fs.existsSync(target) && target.endsWith(".html")) {
       console.warn(`[brewdocs] redirect "${from}" skipped: file exists`);

@@ -13,7 +13,20 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🗺️ Fresh out of the oven — v3.8
+## 🧱 Fresh out of the oven — v3.9
+
+The containment release. Two remaining findings were the same defect twice: a site-root-relative path from repo config, trusted.
+
+| Fix | Why it mattered |
+| --- | --- |
+| 📁 **Redirects can no longer write outside the output** | `redirects: {"../x.html": …}` in any repo's `brewdocs.yml` created an HTML file above the build directory. The old guard stopped overwriting, not escaping |
+| 🔐 **Theme slot partials are confined** | A `themes/brand.yml` naming `../../id_rsa` used to be read verbatim — and could be embedded in a page you then publish |
+
+Both use one boundary-aware pattern: resolve first, then require the target to equal the root or sit under `root + path.sep`. Both are now invariants (INV-8, INV-9) that `npm run gate` checks, so "fixed" is a tested claim rather than a sentence.
+
+---
+
+## 🗺️ Previously — v3.8
 
 The map release. The repo's knowledge now regenerates itself from the source, so it cannot silently go stale:
 

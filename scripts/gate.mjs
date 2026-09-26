@@ -148,6 +148,38 @@ function checkUrlSchemeValidation() {
     );
 }
 
+/**
+ * INV-8: writers that take a site-root-relative path from config must confine
+ * it to the output directory. `redirects:`/`aliases:` come from brewdocs.yml in
+ * a repo you may not own.
+ */
+function checkOutputContainment() {
+  const src = read("packages/core/src/aliases.ts");
+  const hasHelper = /export function resolveInOutDir/.test(src);
+  const boundary = /startsWith\(root \+ path\.sep\)/.test(src);
+  const usedByRedirects = /resolveInOutDir\(outDir, from\)/.test(src);
+  if (hasHelper && boundary && usedByRedirects) pass("inv-8:output-dir-containment");
+  else
+    fail(
+      "inv-8:output-dir-containment",
+      `resolveInOutDir=${hasHelper}, boundaryAware=${boundary}, usedByRedirects=${usedByRedirects}`,
+    );
+}
+
+/** INV-9: theme slot partials must be confined to the manifest's source root. */
+function checkSlotConfinement() {
+  const src = read("packages/core/src/theme-manifest.ts");
+  const hasRoot = /manifest\.sourceRoot/.test(src);
+  const boundary = /file\.startsWith\(root \+ path\.sep\)/.test(src);
+  const setOnLoad = /manifest\.sourceRoot = sourceRoot/.test(src);
+  if (hasRoot && boundary && setOnLoad) pass("inv-9:theme-slot-confinement");
+  else
+    fail(
+      "inv-9:theme-slot-confinement",
+      `usesSourceRoot=${hasRoot}, boundaryAware=${boundary}, setOnLoad=${setOnLoad}`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -210,6 +242,8 @@ checkEscapeHelpers();
 checkBoundaryContainment();
 checkSubdomainValidation();
 checkUrlSchemeValidation();
+checkOutputContainment();
+checkSlotConfinement();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

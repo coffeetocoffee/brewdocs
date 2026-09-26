@@ -47,6 +47,7 @@ export {
   redirectHtml,
   emitAliasPages,
   emitRedirects,
+  resolveInOutDir,
 } from "./aliases.js";
 export {
   uiStrings,

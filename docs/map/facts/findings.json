@@ -46,10 +46,12 @@
     {
       "id": 6,
       "severity": "med-high",
-      "title": "emitRedirects writes outside outDir via a `from: \"../x\"` key",
-      "status": "open",
-      "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevents overwriting but not creating outside the output tree. emitAliasPages also does not sanitize its target.",
-      "fixHint": "aliases.ts: treat both `from` and the alias target as site-root-relative, resolve, and reject anything not under outDir."
+      "title": "emitRedirects wrote outside outDir via a `from: \"../x\"` key",
+      "status": "fixed",
+      "fixedIn": "v3.8.0",
+      "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevented overwriting but not creating outside the output tree. emitAliasPages was checked at the same time: its alias name goes through dirSafe, which maps separators to `_`, so it could not traverse — but the write target is now confirmed inside outDir anyway.",
+      "checkedBy": "inv-8:output-dir-containment",
+      "verify": "npx vitest run packages/core/src/aliases.test.ts"
     },
     {
       "id": 7,
@@ -94,10 +96,12 @@
     {
       "id": 12,
       "severity": "medium",
-      "title": "Theme slot partials resolve relative to the manifest (arbitrary file read)",
-      "status": "open",
-      "detail": "A themes/brand.yml committed by a repo owner can name a slot value like ../../id_rsa; manifestSlots() reads it and the build can embed it in a published page.",
-      "fixHint": "theme-manifest.ts: resolve the partial against the source root and reject paths outside it — the same boundary-aware pattern as INV-3/INV-5."
+      "title": "Theme slot partials resolved relative to the manifest (arbitrary file read)",
+      "status": "fixed",
+      "fixedIn": "v3.8.0",
+      "detail": "A themes/brand.yml committed by a repo owner could name a slot value like ../../id_rsa; manifestSlots() read it and the build could embed it in a published page. Slot partials are now confined to the manifest's source root (recorded by loadThemeManifest as `sourceRoot`), boundary-aware in the same way as INV-5.",
+      "checkedBy": "inv-9:theme-slot-confinement",
+      "verify": "npx vitest run packages/plugin-sdk/test/v2.test.ts"
     },
     {
       "id": 13,

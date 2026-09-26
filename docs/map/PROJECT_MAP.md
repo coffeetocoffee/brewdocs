@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 3.8.0 | commands + hosting server | 4 files / 2,989 loc | 8 files / 1,116 loc |
-| `@brewdocs/core` | 3.8.0 | pipeline: extract → model → render | 55 files / 12,907 loc | 38 files / 4,693 loc |
-| `@brewdocs/plugin-sdk` | 3.8.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 351 loc |
+| `@brewdocs/cli` | 3.9.0 | commands + hosting server | 4 files / 2,989 loc | 8 files / 1,116 loc |
+| `@brewdocs/core` | 3.9.0 | pipeline: extract → model → render | 55 files / 12,970 loc | 38 files / 4,749 loc |
+| `@brewdocs/plugin-sdk` | 3.9.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 385 loc |
 
-**321 test declarations across 47 files** — parsed from the tree, not typed.
+**327 test declarations across 47 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -65,6 +65,12 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-7** — A URL placed in href/src must have its scheme validated; javascript:, vbscript: and data: are dropped, including control-character-smuggled forms.
   - _why:_ Markdown link targets come from third-party prose. `java\nscript:` is still javascript: to a browser, so the scheme check must strip control characters before sniffing.
   - _enforced by:_ packages/core/src/markdown.test.ts
+- **INV-8** — Any writer that takes a site-root-relative path from config must resolve it against the output directory and refuse anything outside. Same boundary-aware rule as INV-5: no bare startsWith.
+  - _why:_ `redirects:` and `aliases:` in brewdocs.yml are repo-controlled, so a `from: "../x.html"` key could create files above the build output. Reachable from any repo you build docs for.
+  - _enforced by:_ packages/core/src/aliases.test.ts (v3.8 containment of generated output)
+- **INV-9** — A theme slot partial path must be confined to the manifest's source root before it is read.
+  - _why:_ Slot values are repo-controlled config. A `themes/brand.yml` shipped by the repo being documented could name `../../id_rsa`; the build would read it and can embed it in a page the user then publishes.
+  - _enforced by:_ packages/plugin-sdk/test/v2.test.ts (confines slot partials to the source root)
 
 ### Server defaults
 
@@ -148,7 +154,7 @@ Related: MDX-generated markup (content.ts transformMdx) is HTML we emit ourselve
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**6 fixed / 12 open** — 2 of the open ones are high or med-high.
+**8 fixed / 10 open** — 1 of the open ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -157,13 +163,13 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 3 | high | Attribute injection / XSS: escapeHtml did not escape quotes | fixed | `inv-4:escape-helpers-quote-safe` |
 | 4 | high | resolveSite prefix-confusion read sibling sites | fixed | `inv-5:boundary-aware-containment` |
 | 5 | med-high | Subdomain `..` escaped the hosting dir; CLI --name was never slugified | partial | `inv-6:subdomain-slug-guard` |
-| 6 | med-high | emitRedirects writes outside outDir via a `from: "../x"` key | open | — |
+| 6 | med-high | emitRedirects wrote outside outDir via a `from: "../x"` key | fixed | `inv-8:output-dir-containment` |
 | 7 | medium | publish.yml publishes on any v* tag with no typecheck or smoke build | open | — |
 | 8 | medium | @brewdocs/core ships raw TypeScript; plain Node cannot import it | open | — |
 | 9 | medium | API key scopes are stored and printed but never enforced | open | — |
 | 10 | medium | Rate limiter trusts X-Forwarded-For unconditionally | open | — |
 | 11 | medium | Analytics/registry endpoints leak when keys exist but no admin token is set | open | — |
-| 12 | medium | Theme slot partials resolve relative to the manifest (arbitrary file read) | open | — |
+| 12 | medium | Theme slot partials resolved relative to the manifest (arbitrary file read) | fixed | `inv-9:theme-slot-confinement` |
 | 13 | low | Pages workflow uses npm install instead of npm ci | open | — |
 | 14 | low | Doc/reality drift (test counts, root package version, gitignored roadmap) | fixed | `map:up-to-date` |
 | 15 | low | python adapter executes a bundled helper against the target tree | open | — |
@@ -173,13 +179,11 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 
 ### How to close the open ones
 
-- **#6** — aliases.ts: treat both `from` and the alias target as site-root-relative, resolve, and reject anything not under outDir.
 - **#7** — publish.yml: call `npm run verify` (or add the typecheck + smoke steps) before the three npm publish steps.
 - **#8** — Ship dist/ (remove it from .gitignore for the package, or build in prepublishOnly), add files: [dist], and an exports map with types. Read decision D-2 first — it explains why main points at src today.
 - **#9** — Return the validated ApiKeyRecord from authenticate() instead of a boolean, then check the required scope per route. Or delete scopes and the flag so the surface stops advertising a boundary it does not have.
 - **#10** — Only honour X-Forwarded-For behind an explicit --trust-proxy flag / known proxy list; otherwise key on req.socket.remoteAddress.
 - **#11** — Require a key for the read endpoints too when keys are configured, or gate them behind a `read` scope (which pairs with finding #9).
-- **#12** — theme-manifest.ts: resolve the partial against the source root and reject paths outside it — the same boundary-aware pattern as INV-3/INV-5.
 - **#13** — Switch to `npm ci`.
 - **#15** — Warn (or refuse) when the python adapter is the one that fires for a source that was fetched rather than a local path.
 - **#16** — Reject cross-site Origin/Sec-Fetch-Site on POST endpoints.
