@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -56,5 +56,49 @@ describe("loadConfig", () => {
     fs.writeFileSync(path.join(dir, "brewdocs.json"), JSON.stringify({ theme: "newsprint" }));
     fs.writeFileSync(path.join(dir, "brewdocs.yml"), "theme: coffee\n");
     expect(loadConfig(dir).theme).toBe("coffee");
+  });
+});
+
+describe("loadConfig validation (warns, never throws)", () => {
+  let warns: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warns = [];
+    spy = vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => {
+      warns.push(a.join(" "));
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it("stays silent for a valid config", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), "theme: ink\ndark: true\n");
+    loadConfig(dir);
+    expect(warns).toEqual([]);
+  });
+
+  it("warns on an unknown key, suggests the nearest, and drops it", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), "them: ink\n");
+    const cfg = loadConfig(dir);
+    expect(warns.join("\n")).toMatch(/unknown key "them"/);
+    expect(warns.join("\n")).toMatch(/did you mean "theme"/);
+    expect(cfg).not.toHaveProperty("them");
+    expect(cfg.theme).toBeUndefined();
+  });
+
+  it("warns on a wrong-typed value and falls back to the default", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), 'dark: "no"\n');
+    const cfg = loadConfig(dir);
+    expect(warns.join("\n")).toMatch(/"dark" .*should be a boolean/);
+    expect(cfg.dark).toBeUndefined();
+  });
+
+  it("warns and builds with defaults when the file cannot be parsed", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.json"), "{ not valid json");
+    expect(loadConfig(dir)).toEqual({});
+    expect(warns.join("\n")).toMatch(/could not be parsed/);
   });
 });

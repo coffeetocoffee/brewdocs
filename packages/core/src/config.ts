@@ -72,6 +72,116 @@ function parseInlineList(raw: string): string[] | undefined {
  */
 const MAP_SECTIONS = new Set(["s3", "aliases", "redirects"]);
 
+/**
+ * Expected shape per top-level key: "string" | "boolean" | "number" | "list"
+ * | "map". A typo used to be stored silently and never read, so the user
+ * changed a setting and nothing happened. Validating here turns that into a
+ * warning naming the key and the likely fix.
+ */
+const KEY_KINDS: Record<string, string> = {
+  theme: "string",
+  dark: "boolean",
+  name: "string",
+  multi: "boolean",
+  storage: "string",
+  org: "string",
+  private: "boolean",
+  minCoverage: "number",
+  docmodel: "boolean",
+  plugins: "list",
+  cache: "boolean",
+  contentDir: "string",
+  themeFile: "string",
+  playground: "boolean",
+  locale: "string",
+  aliases: "map",
+  eol: "list",
+  redirects: "map",
+  registry: "string",
+  s3: "map",
+  version: "string",
+};
+
+/** Levenshtein distance, capped — only used to suggest a near-miss key. */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const prev = new Array<number>(n + 1);
+  const cur = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = cur[j];
+  }
+  return prev[n];
+}
+
+function nearestKey(key: string): string | undefined {
+  let best: string | undefined;
+  let bestDist = 3; // suggestions only when plausibly a typo
+  for (const known of Object.keys(KEY_KINDS)) {
+    const d = editDistance(key, known);
+    if (d < bestDist) {
+      bestDist = d;
+      best = known;
+    }
+  }
+  return best;
+}
+
+function matchesKind(kind: string, value: unknown): boolean {
+  switch (kind) {
+    case "string":
+      return typeof value === "string";
+    case "boolean":
+      return typeof value === "boolean";
+    case "number":
+      // The mini-YAML leaves numbers as strings (`minCoverage: 80`), so accept
+      // a numeric string as well as a real number.
+      return (
+        typeof value === "number" ||
+        (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value)))
+      );
+    case "list":
+      return Array.isArray(value);
+    case "map":
+      return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    default:
+      return true;
+  }
+}
+
+/**
+ * Warn (never throw) about config a user can write but the build will not act
+ * on: unknown keys and known keys whose value has the wrong shape. Matches the
+ * codebase convention — degrade with a warning instead of failing the build.
+ */
+function validateConfig(cfg: BrewDocsConfig, file: string): string[] {
+  const warnings: string[] = [];
+  for (const [key, value] of Object.entries(cfg)) {
+    const kind = KEY_KINDS[key];
+    if (!kind) {
+      const near = nearestKey(key);
+      warnings.push(
+        `unknown key "${key}" in ${file}${near ? ` — did you mean "${near}"?` : ""} (ignored)`,
+      );
+      delete (cfg as Record<string, unknown>)[key];
+      continue;
+    }
+    if (!matchesKind(kind, value)) {
+      warnings.push(
+        `"${key}" in ${file} should be a ${kind}, got ${Array.isArray(value) ? "list" : typeof value} (ignored)`,
+      );
+      delete (cfg as Record<string, unknown>)[key];
+    }
+  }
+  return warnings;
+}
+
 function parseSimpleYaml(text: string): BrewDocsConfig {
   const cfg: BrewDocsConfig = {};
   const lines = text.split(/\r?\n/);
@@ -132,15 +242,27 @@ function parseSimpleYaml(text: string): BrewDocsConfig {
 export function loadConfig(root: string): BrewDocsConfig {
   const yamlPath = path.join(root, "brewdocs.yml");
   const jsonPath = path.join(root, "brewdocs.json");
+  const warn = (msg: string) => console.warn(`[brewdocs] ${msg}`);
+
+  let cfg: BrewDocsConfig | undefined;
+  let file: string | undefined;
   try {
     if (fs.existsSync(yamlPath)) {
-      return parseSimpleYaml(fs.readFileSync(yamlPath, "utf8"));
+      file = yamlPath;
+      cfg = parseSimpleYaml(fs.readFileSync(yamlPath, "utf8"));
+    } else if (fs.existsSync(jsonPath)) {
+      file = jsonPath;
+      cfg = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as BrewDocsConfig;
     }
-    if (fs.existsSync(jsonPath)) {
-      return JSON.parse(fs.readFileSync(jsonPath, "utf8")) as BrewDocsConfig;
-    }
-  } catch {
-    /* fall through to empty config */
+  } catch (err) {
+    // A malformed config used to be swallowed whole, so the build silently ran
+    // with no config at all and every setting appeared to do nothing.
+    warn(
+      `${path.basename(file ?? "brewdocs.yml")} could not be parsed (${err instanceof Error ? err.message : err}) — building with defaults`,
+    );
+    return {};
   }
-  return {};
+  if (!cfg || typeof cfg !== "object") return {};
+  if (file) for (const w of validateConfig(cfg, path.basename(file))) warn(w);
+  return cfg;
 }
