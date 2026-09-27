@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveReplacements, replacementHint } from "./replacements.js";
-import { extractFromSource } from "./extract.js";
-import { buildDocModel } from "./docmodel.js";
-import type { SymbolDoc } from "./types.js";
+import { resolveReplacements, replacementHint } from "../src/replacements.js";
+import { extractFromSource } from "../src/extract.js";
+import { buildDocModel } from "../src/docmodel.js";
+import type { SymbolDoc } from "../src/types.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

@@ -2,8 +2,8 @@ import { describe, expect, it, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildDrafts, applyDrafts, jsdocStub } from "./draft.js";
-import type { SymbolDoc } from "./types.js";
+import { buildDrafts, applyDrafts, jsdocStub } from "../src/draft.js";
+import type { SymbolDoc } from "../src/types.js";
 
 function makeProject(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-draft-"));

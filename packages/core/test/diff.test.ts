@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { diffSymbols, renderDiffHtml } from "./diff.js";
-import type { SymbolDoc } from "./types.js";
+import { diffSymbols, renderDiffHtml } from "../src/diff.js";
+import type { SymbolDoc } from "../src/types.js";
 
 function sym(partial: Partial<SymbolDoc> & { name: string }): SymbolDoc {
   return {

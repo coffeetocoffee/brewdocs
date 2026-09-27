@@ -6,7 +6,7 @@ import {
   LocalStorageAdapter,
   S3StorageAdapter,
   createStorage,
-} from "./deploy/storage.js";
+} from "../src/deploy/storage.js";
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-storage-"));

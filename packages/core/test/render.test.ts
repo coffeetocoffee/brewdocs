@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getTheme, listThemes } from "./themes.js";
-import { highlightCode } from "./highlight.js";
-import { markdownToHtml } from "./markdown.js";
-import { renderToHtml } from "./render.js";
-import type { RenderModel } from "./types.js";
+import { getTheme, listThemes } from "../src/themes.js";
+import { highlightCode } from "../src/highlight.js";
+import { markdownToHtml } from "../src/markdown.js";
+import { renderToHtml } from "../src/render.js";
+import type { RenderModel } from "../src/types.js";
 
 const baseModel: RenderModel = {
   title: "demo",

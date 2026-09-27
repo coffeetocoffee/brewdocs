@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildModel } from "./build.js";
-import { buildGallery, type GalleryEntry } from "./gallery.js";
-import { renderToHtml } from "./render.js";
-import type { RenderModel } from "./types.js";
+import { buildModel } from "../src/build.js";
+import { buildGallery, type GalleryEntry } from "../src/gallery.js";
+import { renderToHtml } from "../src/render.js";
+import type { RenderModel } from "../src/types.js";
 
 function tmpPkg(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-robust-"));

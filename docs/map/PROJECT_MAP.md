@@ -49,13 +49,13 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
   - _enforced by:_ packages/cli/src/server.test.ts (source confinement), packages/cli/src/cli-commands.test.ts (isLoopbackHost)
 - **INV-2** — Fetching an npm package must pass --ignore-scripts and must not pass the parent process environment through to the child.
   - _why:_ BrewDocs only needs a package's README and source to build docs. Lifecycle scripts (postinstall et al.) are arbitrary code execution from a caller-supplied name, reachable from the build API.
-  - _enforced by:_ packages/core/src/resolve.test.ts
+  - _enforced by:_ packages/core/test/resolve.test.ts
 - **INV-3** — Every endpoint that reads a caller-supplied local path must resolve it against sourceRoot and refuse anything outside with 403. Realpath first, so neither .. nor a symlink escapes.
   - _why:_ A build endpoint that renders any readable directory is a file-disclosure primitive; /api/export returned the HTML directly, so a README containing a key was disclosed verbatim.
   - _enforced by:_ packages/cli/src/server.test.ts (Phase 5 — source confinement)
 - **INV-4** — Any HTML escape helper must escape " and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).
   - _why:_ This is the contract, not one call site: the helper is named escapeHtml and is used for both text nodes and attributes. Escaping only &<> let a README link, a symbol description, or a git tag name inject an event handler into a generated site.
-  - _enforced by:_ packages/core/src/markdown.test.ts
+  - _enforced by:_ packages/core/test/markdown.test.ts
 - **INV-5** — Path containment must be boundary-aware: resolve the candidate and require it to equal the root or start with root + path.sep. Never use a bare startsWith.
   - _why:_ startsWith accepted a sibling whose name shared the target's prefix (/s/acme/../acme-secret resolved outside hosting/acme). The existing traversal test passed for the wrong reason — Node's URL normalizer, not the code.
   - _enforced by:_ packages/cli/src/server.test.ts (prefix-confusion, dots-only subdomains)
@@ -64,10 +64,10 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
   - _enforced by:_ packages/cli/src/server.test.ts (rejects dots-only / separator-bearing subdomains)
 - **INV-7** — A URL placed in href/src must have its scheme validated; javascript:, vbscript: and data: are dropped, including control-character-smuggled forms.
   - _why:_ Markdown link targets come from third-party prose. `java\nscript:` is still javascript: to a browser, so the scheme check must strip control characters before sniffing.
-  - _enforced by:_ packages/core/src/markdown.test.ts
+  - _enforced by:_ packages/core/test/markdown.test.ts
 - **INV-8** — Any writer that takes a site-root-relative path from config must resolve it against the output directory and refuse anything outside. Same boundary-aware rule as INV-5: no bare startsWith.
   - _why:_ `redirects:` and `aliases:` in brewdocs.yml are repo-controlled, so a `from: "../x.html"` key could create files above the build output. Reachable from any repo you build docs for.
-  - _enforced by:_ packages/core/src/aliases.test.ts (v3.8 containment of generated output)
+  - _enforced by:_ packages/core/test/aliases.test.ts (v3.8 containment of generated output)
 - **INV-9** — A theme slot partial path must be confined to the manifest's source root before it is read.
   - _why:_ Slot values are repo-controlled config. A `themes/brand.yml` shipped by the repo being documented could name `../../id_rsa`; the build would read it and can embed it in a page the user then publishes.
   - _enforced by:_ packages/plugin-sdk/test/v2.test.ts (confines slot partials to the source root)
@@ -212,7 +212,7 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 
 **Errors degrade, they do not crash.** A bad symbol, plugin or adapter warns and is skipped. The build is expected to produce a page even from messy input — preserve that.
 
-**Adding a top-level core module** needs no `files` allowlist edit (the allowlist is `src` wholesale) — but always `npm pack --dry-run` before a release. A stale allowlist once shipped a 3.0.0 with 19 missing modules.
+**Adding a top-level core module** needs no `files` allowlist edit (the allowlist is `dist`, wholesale) — but always `npm pack --dry-run` before a release. A stale allowlist once shipped a 3.0.0 with 19 missing modules.
 
 **Commands.** `npm test` · `npm run typecheck` · `npx vitest run <path>` · `npx vitest run <path> -t "name"` · `npm run brewdocs -- build ./docs --theme ink --out docs-site`. Full suite takes a few minutes; the fuzz suite alone is ~30s.
 

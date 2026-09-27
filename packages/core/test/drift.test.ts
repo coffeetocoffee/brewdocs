@@ -11,9 +11,9 @@ import {
   renderDriftText,
   saveDriftSnapshot,
   snapshotOf,
-} from "./drift.js";
-import { extractFromSource } from "./extract.js";
-import type { SymbolDoc } from "./types.js";
+} from "../src/drift.js";
+import { extractFromSource } from "../src/extract.js";
+import type { SymbolDoc } from "../src/types.js";
 
 let tmpDirs: string[] = [];
 

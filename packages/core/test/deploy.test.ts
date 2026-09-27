@@ -7,7 +7,7 @@ import {
   deploySite,
   deriveSubdomain,
   exportSite,
-} from "./deploy.js";
+} from "../src/deploy.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");

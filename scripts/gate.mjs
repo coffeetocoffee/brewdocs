@@ -291,8 +291,8 @@ function checkPythonFetchedGuard() {
 
 /** INV-18: the renderer has a golden-output snapshot (finding #17). */
 function checkRendererGolden() {
-  const test = path.join(ROOT, "packages", "core", "src", "render.golden.test.ts");
-  const snap = path.join(ROOT, "packages", "core", "src", "__snapshots__", "render.golden.test.ts.snap");
+  const test = path.join(ROOT, "packages", "core", "test", "render.golden.test.ts");
+  const snap = path.join(ROOT, "packages", "core", "test", "__snapshots__", "render.golden.test.ts.snap");
   if (fs.existsSync(test) && fs.existsSync(snap)) pass("inv-18:renderer-golden");
   else fail("inv-18:renderer-golden", "renderer golden test or its snapshot is missing");
 }

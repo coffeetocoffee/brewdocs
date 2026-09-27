@@ -19,10 +19,10 @@ import {
   sparklineUnicode,
   writeAcknowledgment,
   type CoverageRecord,
-} from "./ci.js";
-import { diffSymbols, describeChange } from "./diff.js";
-import type { DoctorReport } from "./doctor.js";
-import type { SymbolDoc } from "./types.js";
+} from "../src/ci.js";
+import { diffSymbols, describeChange } from "../src/diff.js";
+import type { DoctorReport } from "../src/doctor.js";
+import type { SymbolDoc } from "../src/types.js";
 
 let tmpDirs: string[] = [];
 

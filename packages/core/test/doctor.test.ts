@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { analyzeSymbols, badgeSvg } from "./doctor.js";
-import type { SymbolDoc } from "./types.js";
+import { analyzeSymbols, badgeSvg } from "../src/doctor.js";
+import type { SymbolDoc } from "../src/types.js";
 
 function sym(partial: Partial<SymbolDoc> & { name: string }): SymbolDoc {
   return {

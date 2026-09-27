@@ -3,10 +3,10 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildSearchIndex } from "./search.js";
-import { discoverVersions } from "./versions.js";
-import { renderToHtml } from "./render.js";
-import type { RenderModel } from "./types.js";
+import { buildSearchIndex } from "../src/search.js";
+import { discoverVersions } from "../src/versions.js";
+import { renderToHtml } from "../src/render.js";
+import type { RenderModel } from "../src/types.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 

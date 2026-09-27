@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveInput } from "./resolve.js";
+import { resolveInput } from "../src/resolve.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");
@@ -22,7 +22,7 @@ describe("Phase 5 — resolve input", () => {
   // a postinstall is arbitrary code execution from a caller-supplied name,
   // reachable from the build API.
   it("passes --ignore-scripts when installing an npm package", () => {
-    const src = fs.readFileSync(path.join(__dirname, "resolve.ts"), "utf8");
+    const src = fs.readFileSync(path.join(__dirname, "../src/resolve.ts"), "utf8");
     expect(src).toMatch(/runNpm\(\[[^\]]*"--ignore-scripts"/s);
   });
 });

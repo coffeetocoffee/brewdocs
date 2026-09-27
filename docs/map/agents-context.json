@@ -41,19 +41,19 @@
     "total": 351,
     "skipped": 0,
     "loopFiles": [
-      "packages/core/src/audit.test.ts",
-      "packages/core/src/ci.test.ts",
-      "packages/core/src/draft.test.ts",
-      "packages/core/src/drift.test.ts",
-      "packages/core/src/federation.test.ts",
-      "packages/core/src/fuzz.test.ts",
-      "packages/core/src/harvest.test.ts",
-      "packages/core/src/languages.test.ts",
-      "packages/core/src/openapi.test.ts",
-      "packages/core/src/prove.test.ts",
-      "packages/core/src/realworld.test.ts",
-      "packages/core/src/robust.test.ts",
-      "packages/core/src/workspaces.test.ts"
+      "packages/core/test/audit.test.ts",
+      "packages/core/test/ci.test.ts",
+      "packages/core/test/draft.test.ts",
+      "packages/core/test/drift.test.ts",
+      "packages/core/test/federation.test.ts",
+      "packages/core/test/fuzz.test.ts",
+      "packages/core/test/harvest.test.ts",
+      "packages/core/test/languages.test.ts",
+      "packages/core/test/openapi.test.ts",
+      "packages/core/test/prove.test.ts",
+      "packages/core/test/realworld.test.ts",
+      "packages/core/test/robust.test.ts",
+      "packages/core/test/workspaces.test.ts"
     ]
   },
   "bind": {
@@ -151,7 +151,7 @@
       "id": "INV-2",
       "rule": "Fetching an npm package must pass --ignore-scripts and must not pass the parent process environment through to the child.",
       "why": "BrewDocs only needs a package's README and source to build docs. Lifecycle scripts (postinstall et al.) are arbitrary code execution from a caller-supplied name, reachable from the build API.",
-      "enforcedBy": "packages/core/src/resolve.test.ts"
+      "enforcedBy": "packages/core/test/resolve.test.ts"
     },
     {
       "id": "INV-3",
@@ -163,7 +163,7 @@
       "id": "INV-4",
       "rule": "Any HTML escape helper must escape \" and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).",
       "why": "This is the contract, not one call site: the helper is named escapeHtml and is used for both text nodes and attributes. Escaping only &<> let a README link, a symbol description, or a git tag name inject an event handler into a generated site.",
-      "enforcedBy": "packages/core/src/markdown.test.ts"
+      "enforcedBy": "packages/core/test/markdown.test.ts"
     },
     {
       "id": "INV-5",
@@ -181,13 +181,13 @@
       "id": "INV-7",
       "rule": "A URL placed in href/src must have its scheme validated; javascript:, vbscript: and data: are dropped, including control-character-smuggled forms.",
       "why": "Markdown link targets come from third-party prose. `java\\nscript:` is still javascript: to a browser, so the scheme check must strip control characters before sniffing.",
-      "enforcedBy": "packages/core/src/markdown.test.ts"
+      "enforcedBy": "packages/core/test/markdown.test.ts"
     },
     {
       "id": "INV-8",
       "rule": "Any writer that takes a site-root-relative path from config must resolve it against the output directory and refuse anything outside. Same boundary-aware rule as INV-5: no bare startsWith.",
       "why": "`redirects:` and `aliases:` in brewdocs.yml are repo-controlled, so a `from: \"../x.html\"` key could create files above the build output. Reachable from any repo you build docs for.",
-      "enforcedBy": "packages/core/src/aliases.test.ts (v3.8 containment of generated output)"
+      "enforcedBy": "packages/core/test/aliases.test.ts (v3.8 containment of generated output)"
     },
     {
       "id": "INV-9",
@@ -277,7 +277,7 @@
       "status": "fixed",
       "fixedIn": "v3.7.0",
       "checkedBy": "inv-4:escape-helpers-quote-safe",
-      "verify": "npx vitest run packages/core/src/markdown.test.ts",
+      "verify": "npx vitest run packages/core/test/markdown.test.ts",
       "proven": true
     },
     {
@@ -308,7 +308,7 @@
       "fixedIn": "v3.9.0",
       "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevented overwriting but not creating outside the output tree. emitAliasPages was checked at the same time: its alias name goes through dirSafe, which maps separators to `_`, so it could not traverse â€” but the write target is now confirmed inside outDir anyway.",
       "checkedBy": "inv-8:output-dir-containment",
-      "verify": "npx vitest run packages/core/src/aliases.test.ts",
+      "verify": "npx vitest run packages/core/test/aliases.test.ts",
       "proven": true
     },
     {
@@ -388,7 +388,7 @@
       "title": "Doc/reality drift (test counts, root package version, gitignored roadmap)",
       "status": "fixed",
       "fixedIn": "v3.7.0",
-      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. Remaining sub-items are cosmetic: root package.json still says 0.1.0 while all three workspaces publish 4.1.0, and ROADMAP.md is still gitignored.",
+      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. The root package.json version now tracks the three workspaces (4.1.0). ROADMAP.md remains gitignored by design (it is local planning, like AGENTS.md and the release notes).",
       "checkedBy": "map:up-to-date",
       "proven": true
     },

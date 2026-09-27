@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { markdownToHtml } from "./markdown.js";
-import { renderToHtml } from "./render.js";
-import type { RenderModel } from "./types.js";
+import { markdownToHtml } from "../src/markdown.js";
+import { renderToHtml } from "../src/render.js";
+import type { RenderModel } from "../src/types.js";
 
 /**
  * v3.9 finding #17: the renderer emits its own CSS/JS and had no golden-output

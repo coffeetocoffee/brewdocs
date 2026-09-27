@@ -7,8 +7,8 @@ import {
   docModelArtifact,
   renderDocModelJson,
   DOCMODEL_SCHEMA,
-} from "./docmodel.js";
-import { buildModel } from "./build.js";
+} from "../src/docmodel.js";
+import { buildModel } from "../src/build.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { markdownToHtml } from "./markdown.js";
+import { markdownToHtml } from "../src/markdown.js";
 import { buildModel, build } from "@brewdocs/core";
-import { resolveInput } from "./resolve.js";
+import { resolveInput } from "../src/resolve.js";
 
 /**
  * v3.5 security regressions. BrewDocs' whole job is rendering prose from a

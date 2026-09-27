@@ -7,8 +7,8 @@ import {
   buildMarkdownMulti,
   renderToMarkdown,
   renderToMarkdownMulti,
-} from "./markdown-export.js";
-import { buildModel } from "./build.js";
+} from "../src/markdown-export.js";
+import { buildModel } from "../src/build.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");

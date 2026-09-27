@@ -25,7 +25,7 @@
       "status": "fixed",
       "fixedIn": "v3.7.0",
       "checkedBy": "inv-4:escape-helpers-quote-safe",
-      "verify": "npx vitest run packages/core/src/markdown.test.ts"
+      "verify": "npx vitest run packages/core/test/markdown.test.ts"
     },
     {
       "id": 4,
@@ -53,7 +53,7 @@
       "fixedIn": "v3.9.0",
       "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevented overwriting but not creating outside the output tree. emitAliasPages was checked at the same time: its alias name goes through dirSafe, which maps separators to `_`, so it could not traverse â€” but the write target is now confirmed inside outDir anyway.",
       "checkedBy": "inv-8:output-dir-containment",
-      "verify": "npx vitest run packages/core/src/aliases.test.ts"
+      "verify": "npx vitest run packages/core/test/aliases.test.ts"
     },
     {
       "id": 7,
@@ -125,7 +125,7 @@
       "title": "Doc/reality drift (test counts, root package version, gitignored roadmap)",
       "status": "fixed",
       "fixedIn": "v3.7.0",
-      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. Remaining sub-items are cosmetic: root package.json still says 0.1.0 while all three workspaces publish 4.1.0, and ROADMAP.md is still gitignored.",
+      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. The root package.json version now tracks the three workspaces (4.1.0). ROADMAP.md remains gitignored by design (it is local planning, like AGENTS.md and the release notes).",
       "checkedBy": "map:up-to-date"
     },
     {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { proveSource, proveSummary } from "./prove.js";
+import { proveSource, proveSummary } from "../src/prove.js";
 
 function makeProject(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-prove-"));

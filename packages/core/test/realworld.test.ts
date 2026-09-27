@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { build, buildModel, type RenderModel } from "@brewdocs/core";
-import { runNpm } from "./resolve.js";
+import { runNpm } from "../src/resolve.js";
 
 /**
  * Phase 1 roadmap item: snapshot tests against real npm packages.

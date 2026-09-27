@@ -5,9 +5,9 @@ import {
   docModelSchemaJson,
   DOCMODEL_SCHEMA_ID,
   DOCMODEL_SCHEMA_OBJECT,
-} from "./schema.js";
-import { docModelArtifact } from "./docmodel.js";
-import { buildModel } from "./build.js";
+} from "../src/schema.js";
+import { docModelArtifact } from "../src/docmodel.js";
+import { buildModel } from "../src/build.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");
