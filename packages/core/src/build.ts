@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractFromSource } from "./extract.js";
-import { renderToHtml, renderToHtmlMulti, renderContentPages, type RenderOptions, type RenderedPage } from "./render.js";
+import { renderToHtml, renderToHtmlMulti, renderContentPages, type RenderOptions } from "./render.js";
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
 import { analyzeSymbols } from "./doctor.js";
@@ -11,6 +11,8 @@ import { renderDocModelJson } from "./docmodel.js";
 import { gitShaOf } from "./git.js";
 import { loadConfig } from "./config.js";
 import { extractCached } from "./cache.js";
+import { renderCached, renderFingerprint } from "./render-cache.js";
+import { emitDeployArtifacts } from "./deploy-artifacts.js";
 import { loadPlugins, type BrewDocsPlugin } from "./plugins.js";
 import { loadContent, loadNav } from "./content.js";
 import { loadThemeManifest, manifestSlots, type Slots } from "./theme-manifest.js";
@@ -58,6 +60,9 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
     theme: themeRef ?? options.theme,
     // v3.0: brewdocs.yml `locale:` is the default; an explicit option wins.
     locale: options.locale ?? config.locale,
+    // Cache is shared by extraction and rendering; read it here so both layers
+    // agree on the same switch (and `--no-cache` disables both).
+    cache: options.cache ?? config.cache,
     plugins,
     slots,
     root,
@@ -150,21 +155,31 @@ export function build(
   const resolved = resolveSetup(source, options);
   const model = buildModel(source, resolved);
   const fresh = freshness(source);
-  const html = renderToHtml(model, {
+  const renderOpts: RenderOptions = {
     ...resolved,
     score: coverageScore(model),
     freshness: fresh,
-  });
+  };
+  const pages = renderCached(
+    path.resolve(source.root),
+    renderFingerprint(model, renderOpts),
+    Boolean(resolved.cache),
+    () => [
+      { path: "index.html", html: renderToHtml(model, renderOpts) },
+      ...renderContentPages(model, resolved),
+    ],
+  );
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "index.html");
-  fs.writeFileSync(outFile, html, "utf8");
-  for (const page of renderContentPages(model, resolved)) {
+  for (const page of pages) {
     const target = path.join(outDir, page.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, page.html, "utf8");
   }
   // v3.0: moved pages keep answering — redirects from brewdocs.yml.
-  emitRedirects(outDir, loadConfig(source.root).redirects);
+  const redirects = loadConfig(source.root).redirects;
+  emitRedirects(outDir, redirects);
+  emitDeployArtifacts(outDir, model, redirects);
   if (resolved.emitDocmodel !== false) {
     emitDocModelArtifact(model, outDir, fresh);
   }
@@ -236,15 +251,21 @@ export function buildMulti(
   const resolved = resolveSetup(source, options);
   const model = buildModel(source, resolved);
   const fresh = freshness(source);
-  const pages: RenderedPage[] = [
-    ...renderToHtmlMulti(model, {
-      ...resolved,
-      multiPage: true,
-      score: coverageScore(model),
-      freshness: fresh,
-    }),
-    ...renderContentPages(model, { ...resolved, freshness: fresh }),
-  ];
+  const multiOpts: RenderOptions = {
+    ...resolved,
+    multiPage: true,
+    score: coverageScore(model),
+    freshness: fresh,
+  };
+  const pages = renderCached(
+    path.resolve(source.root),
+    renderFingerprint(model, multiOpts),
+    Boolean(resolved.cache),
+    () => [
+      ...renderToHtmlMulti(model, multiOpts),
+      ...renderContentPages(model, { ...resolved, freshness: fresh }),
+    ],
+  );
   fs.mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
   for (const page of pages) {
@@ -256,6 +277,7 @@ export function buildMulti(
   if (resolved.emitDocmodel !== false) {
     emitDocModelArtifact(model, outDir, fresh);
   }
+  emitDeployArtifacts(outDir, model, loadConfig(source.root).redirects);
   return written;
 }
 

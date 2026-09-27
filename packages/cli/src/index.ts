@@ -1047,13 +1047,35 @@ dark: false
     const args = parseBuild(rest);
     const { src, cleanup } = resolveCliSource(args.source, args.name);
     const config = loadConfig(src.root);
+    const opts = mergeOptions(args, config, src.root);
     const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-preview-"));
-    const files = await buildVersions(src, out, mergeOptions(args, config, src.root));
+    const files = await buildVersions(src, out, opts);
     const port = Number(getFlag(rest, "--port") ?? "4000");
-    const server = serveStatic(out, port);
+    const { server, reload } = serveStatic(out, port, args.watch);
     server.on("close", cleanup);
     console.log(`👀 Previewing ${files.length} page(s) at http://localhost:${port}`);
     console.log(`   (Ctrl+C to stop)`);
+    if (args.watch) {
+      let timer: NodeJS.Timeout | undefined;
+      fs.watch(src.root, { recursive: true }, (_event, file) => {
+        if (!file) return;
+        if (!/\.(ts|js|py|go|md|mdx|json|yaml|yml|graphql|gql|rs|java|cs|rb|toml|gemspec|csproj)$/.test(file)) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          void (async () => {
+            try {
+              await buildVersions(src, out, opts);
+              reload();
+            } catch (err) {
+              // Keep serving the last good build when a rebuild fails.
+              console.error(
+                `[brewdocs] rebuild failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          })();
+        }, 200);
+      });
+    }
     return;
   }
 
@@ -1672,11 +1694,31 @@ const STATIC_TYPES: Record<string, string> = {
   ".map": "application/json",
 };
 
-/** Minimal static file server used by `brewdocs preview`. */
-function serveStatic(dir: string, port: number): http.Server {
+/**
+ * Minimal static file server used by `brewdocs preview`. With `live` it also
+ * serves an SSE endpoint and injects a reload script into HTML, so a watched
+ * rebuild refreshes the browser without a manual reload.
+ */
+export function serveStatic(
+  dir: string,
+  port: number,
+  live = false,
+): { server: http.Server; reload: () => void } {
   const root = path.resolve(dir);
+  const clients = new Set<http.ServerResponse>();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (live && url.pathname === "/__brewdocs/live") {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      res.write("retry: 500\n\n");
+      clients.add(res);
+      req.on("close", () => clients.delete(res));
+      return;
+    }
     let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith("/")) rel += "index.html";
     // Containment must be boundary-aware: a plain startsWith() lets
@@ -1690,12 +1732,28 @@ function serveStatic(dir: string, port: number): http.Server {
       return;
     }
     const ext = path.extname(filePath);
+    if (live && ext === ".html") {
+      res.writeHead(200, { "content-type": STATIC_TYPES[ext] ?? "text/html; charset=utf-8" });
+      res.end(injectLiveReload(fs.readFileSync(filePath, "utf8")));
+      return;
+    }
     res.writeHead(200, { "content-type": STATIC_TYPES[ext] ?? "application/octet-stream" });
     fs.createReadStream(filePath).pipe(res);
   });
   // Local preview: loopback only, never the whole network.
   server.listen(port, "127.0.0.1");
-  return server;
+  const reload = (): void => {
+    for (const c of clients) c.write("data: reload\n\n");
+  };
+  return { server, reload };
+}
+
+const LIVE_RELOAD_JS =
+  '<script>(function(){var e=new EventSource("/__brewdocs/live");e.onmessage=function(){location.reload()};})();</script>';
+
+function injectLiveReload(html: string): string {
+  if (html.includes("</body>")) return html.replace("</body>", `${LIVE_RELOAD_JS}</body>`);
+  return html + LIVE_RELOAD_JS;
 }
 
 function printHelp(): void {
@@ -1711,7 +1769,7 @@ Usage:
   brewdocs prove <source> [--strict]   Typecheck every @example against the package
   brewdocs harvest <source> [--json]   Propose examples from README + tests
   brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
-  brewdocs preview <source> [--port 4000]  Build and serve locally
+  brewdocs preview <source> [--port 4000] [--watch]  Build and serve locally (--watch live-reloads)
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
                     [--org <name>] [--private [token]] [--draft [--draft-hours N]] [--markdown]
   brewdocs gallery [--src <dir>] [--out <dir>] [--theme <name>]
@@ -1757,7 +1815,8 @@ Commands:
                      (add --strict to exit 1 on a failing example)
    harvest <src>    Propose @example snippets found in the README + test files
    init             Scaffold a brewdocs.yml in the current directory
-  preview <src>    Build and serve the docs locally for a quick look
+   preview <src>    Build and serve the docs locally for a quick look
+                     (add --watch to rebuild and live-reload on source changes)
    deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
                      (add --storage s3 with env vars, or brewdocs.yml, to deploy to S3/R2;
                       --org <name> namespaces as <org>--<sub>; --private [token] gates reads;

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import type { ExtractResult, Source, SymbolDoc } from "./types.js";
 import type { ThemeVars } from "./themes.js";
 import { pythonAdapter } from "./extractors/python.js";
+import { pythonStaticAdapter } from "./extractors/python-static.js";
 import { goAdapter } from "./extractors/go.js";
 import { openApiAdapter } from "./extractors/openapi.js";
 import { graphqlAdapter } from "./extractors/graphql.js";
@@ -76,9 +77,19 @@ export interface BrewDocsPlugin {
   theme?: ThemeContribution;
 }
 
-/** Built-in language adapters, always available, zero new dependencies. */
+/**
+ * Built-in language adapters, always available, zero new dependencies. Python
+ * defaults to the static (no-subprocess) parser; the accurate `ast` parser is
+ * reachable only through `--plugins python-ast`. Both declare the same adapter
+ * id, so enabling the opt-in replaces the default rather than running both.
+ */
+const PYTHON_AST_PLUGIN: BrewDocsPlugin = {
+  name: "brewdocs:python-ast",
+  adapters: [pythonAdapter],
+};
+
 export const BUILTIN_PLUGINS: BrewDocsPlugin[] = [
-  { name: "brewdocs:python", adapters: [pythonAdapter] },
+  { name: "brewdocs:python", adapters: [pythonStaticAdapter] },
   { name: "brewdocs:go", adapters: [goAdapter] },
   { name: "brewdocs:openapi", adapters: [openApiAdapter] },
   { name: "brewdocs:graphql", adapters: [graphqlAdapter] },
@@ -87,6 +98,12 @@ export const BUILTIN_PLUGINS: BrewDocsPlugin[] = [
   { name: "brewdocs:csharp", adapters: [csharpAdapter] },
   { name: "brewdocs:ruby", adapters: [rubyAdapter] },
 ];
+
+/** Short `--plugins` names for built-ins (e.g. `--plugins python-ast`). */
+const BUILTIN_ALIASES: Record<string, BrewDocsPlugin> = {
+  ...Object.fromEntries(BUILTIN_PLUGINS.map((p) => [p.name.replace(/^brewdocs:/, ""), p])),
+  "python-ast": PYTHON_AST_PLUGIN,
+};
 
 function normalizePlugin(mod: unknown, id: string): BrewDocsPlugin | null {
   const m = mod as {
@@ -184,6 +201,11 @@ export function loadPlugins(
   if (!specs || specs.length === 0) return [];
   const plugins: BrewDocsPlugin[] = [];
   for (const spec of specs) {
+    const builtin = BUILTIN_ALIASES[spec];
+    if (builtin) {
+      plugins.push(builtin);
+      continue;
+    }
     const p = loadPlugin(spec, root, registryDir);
     if (p) plugins.push(p);
     else console.warn(`[brewdocs] plugin "${spec}" not found or invalid — skipped`);
@@ -191,12 +213,22 @@ export function loadPlugins(
   return plugins;
 }
 
-/** All adapters from built-in + user plugins, user plugins first (they win detection order). */
+/**
+ * All adapters from built-in + user plugins, user plugins first (they win
+ * detection order) and deduped by adapter id — so an opt-in that swaps an
+ * adapter (e.g. `python-ast`) replaces the built-in of the same id.
+ */
 export function collectAdapters(plugins: BrewDocsPlugin[]): LanguageAdapter[] {
-  const adapters: LanguageAdapter[] = [];
-  for (const p of plugins) adapters.push(...(p.adapters ?? []));
-  for (const p of BUILTIN_PLUGINS) adapters.push(...(p.adapters ?? []));
-  return adapters;
+  const out: LanguageAdapter[] = [];
+  const seen = new Set<string>();
+  for (const p of [...plugins, ...BUILTIN_PLUGINS]) {
+    for (const a of p.adapters ?? []) {
+      if (seen.has(a.id)) continue;
+      seen.add(a.id);
+      out.push(a);
+    }
+  }
+  return out;
 }
 
 /** Run every adapter whose `detect` matched, deduping symbol names (first wins). */

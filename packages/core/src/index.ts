@@ -186,6 +186,13 @@ export {
   type CachedExtractOptions,
 } from "./cache.js";
 export {
+  renderFingerprint,
+  renderCached,
+  clearRenderCache,
+  renderCacheFile,
+} from "./render-cache.js";
+export { emitDeployArtifacts } from "./deploy-artifacts.js";
+export {
   loadContent,
   loadNav,
   parseNavYaml,
@@ -202,6 +209,7 @@ export {
   type SlotName,
 } from "./theme-manifest.js";
 export { pythonAdapter, resetPythonProbe } from "./extractors/python.js";
+export { pythonStaticAdapter } from "./extractors/python-static.js";
 export { goAdapter } from "./extractors/go.js";
 export { openApiAdapter } from "./extractors/openapi.js";
 export { graphqlAdapter } from "./extractors/graphql.js";

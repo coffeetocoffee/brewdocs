@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-09-26_
+_Generated: 2026-09-27_
 
 ## What this is
 
@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.0.0 | commands + hosting server | 4 files / 3,080 loc | 8 files / 1,205 loc |
-| `@brewdocs/core` | 4.0.0 | pipeline: extract → model → render | 55 files / 13,095 loc | 39 files / 4,881 loc |
-| `@brewdocs/plugin-sdk` | 4.0.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
+| `@brewdocs/cli` | 4.1.0 | commands + hosting server | 4 files / 3,139 loc | 8 files / 1,239 loc |
+| `@brewdocs/core` | 4.1.0 | pipeline: extract → model → render | 58 files / 13,684 loc | 42 files / 5,108 loc |
+| `@brewdocs/plugin-sdk` | 4.1.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**337 test declarations across 48 files** — parsed from the tree, not typed.
+**349 test declarations across 51 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 

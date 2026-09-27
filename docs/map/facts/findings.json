@@ -125,7 +125,7 @@
       "title": "Doc/reality drift (test counts, root package version, gitignored roadmap)",
       "status": "fixed",
       "fixedIn": "v3.7.0",
-      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. Remaining sub-items are cosmetic: root package.json still says 0.1.0 while all three workspaces publish 3.9.5, and ROADMAP.md is still gitignored.",
+      "detail": "Test counts, file/LOC totals and the HTTP surface table are now parsed by scripts/map.mjs instead of typed, and CI fails when the map is stale. Remaining sub-items are cosmetic: root package.json still says 0.1.0 while all three workspaces publish 4.1.0, and ROADMAP.md is still gitignored.",
       "checkedBy": "map:up-to-date"
     },
     {

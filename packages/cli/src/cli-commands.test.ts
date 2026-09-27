@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { run, isLoopbackHost } from "./index.js";
+import { run, isLoopbackHost, serveStatic } from "./index.js";
 
 describe("Authoring DX commands", () => {
   let cwd: string;
@@ -67,6 +67,40 @@ describe("serve host safety", () => {
     }
     for (const h of ["0.0.0.0", "::", "192.168.1.10", "example.com", ""]) {
       expect(isLoopbackHost(h)).toBe(false);
+    }
+  });
+});
+
+// v4.0 live reload: `preview --watch` serves an SSE endpoint and injects a
+// reload script, so a rebuild refreshes the browser.
+describe("preview live reload", () => {
+  it("injects the reload script and pushes on reload()", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-live-"));
+    fs.writeFileSync(path.join(dir, "index.html"), "<html><body>hi</body></html>");
+    const { server, reload } = serveStatic(dir, 0, true);
+    try {
+      await new Promise<void>((resolve) =>
+        server.listening ? resolve() : server.once("listening", () => resolve()),
+      );
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      const base = `http://127.0.0.1:${port}`;
+
+      const html = await (await fetch(`${base}/`)).text();
+      expect(html).toContain("/__brewdocs/live");
+      expect(html).toContain("EventSource");
+
+      const sse = await fetch(`${base}/__brewdocs/live`);
+      expect(sse.headers.get("content-type")).toContain("text/event-stream");
+      const reader = sse.body!.getReader();
+      const decoder = new TextDecoder();
+      expect(decoder.decode((await reader.read()).value)).toContain("retry");
+      reload();
+      expect(decoder.decode((await reader.read()).value)).toContain("reload");
+      await reader.cancel();
+    } finally {
+      server.closeAllConnections?.();
+      server.close();
     }
   });
 });

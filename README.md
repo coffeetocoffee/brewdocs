@@ -13,7 +13,20 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🧱 Fresh out of the oven — v3.9
+## 🔥 Fresh out of the oven — v4.0
+
+Three things earlier roadmaps kept deferring — none of which added a runtime dependency.
+
+| New | What it gives you |
+| --- | --- |
+| ⚡ **Render cache** | Extraction was already cached; rendering wasn't. `--cache` now also skips unchanged rendering (`.brewdocs/render.json`), so `--multi` rebuilds stop re-rendering one page per symbol |
+| 👀 **Live reload** | `brewdocs preview --watch` rebuilds on change and refreshes the browser over SSE — no dependency, just the server that was already there |
+| 🐍 **Static Python by default** | The Python extractor no longer spawns an interpreter: parsing is line-based and safe on any source. The accurate `ast` parser is opt-in with `--plugins python-ast` (it still refuses fetched sources) |
+| 📦 **Deploy artifacts** | Every build emits `404.html`, `_headers`, `_redirects` — drop `dist/` on Netlify/Cloudflare Pages and the CDN does the hosting |
+
+---
+
+## 🧱 Previously — v3.9
 
 The containment release. Two remaining findings were the same defect twice: a site-root-relative path from repo config, trusted.
 
@@ -130,7 +143,7 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 | `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|gallery`) |
 | `drift <src>` | v3.5 doc drift detection (`--record`, `--from <ref>`, `--fail-on-drift`, `--json`) |
 | `federate …` | v3.5 cross-repo federated search (`add\|list\|remove\|search\|page`) |
-| `preview <src>` | Build + serve locally |
+| `preview <src>` | Build + serve locally (`--watch` for rebuild + live reload) |
 | `gallery` | Example-sites gallery |
 | `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
 | `locales` | List UI locales (`en`, `de`, `es`, `fr`, `ja`, `id`) |
