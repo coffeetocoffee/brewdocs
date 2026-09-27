@@ -604,6 +604,19 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
 }
 
 /**
+ * Re-stamp the footer freshness of already-rendered HTML. The render cache
+ * keys without the timestamp (otherwise it would never hit), so a cached page
+ * carries the date it was first rendered — replace that one span with the
+ * current stamp. Idempotent for a freshly rendered page.
+ */
+export function restampFreshness(
+  html: string,
+  fresh?: { gitSha?: string; generatedAt?: string },
+): string {
+  return html.replace(/ <span class="freshness">[^<]*<\/span>/, freshnessHtml(fresh));
+}
+
+/**
  * v3.0 EOL banner: warn readers the version is unmaintained and point at
  * the newest supported entry in the switcher (versions arrive newest-first).
  */

@@ -6,15 +6,24 @@ import type { RenderOptions, RenderedPage } from "./render.js";
 
 /**
  * Whole-render cache. Extraction is already cached (cache.ts); rendering is
- * not, and `--multi` renders one page per symbol — the expensive half. Render
- * output is a pure function of the render model plus the serializable
- * options, so key on exactly those and reuse the page set.
+ * not, and `--multi`/versioned builds render one page per symbol per version —
+ * the expensive half. Render output is a pure function of the render model
+ * plus the serializable options, so key on exactly those and reuse the page
+ * set.
  *
- * Freshness stamps are deliberately NOT in the key: a reused page keeps the
- * timestamp of when it was first rendered. Bump RENDER_VERSION whenever the
- * rendered output changes shape.
+ * Freshness stamps are deliberately NOT in the key: a hit keeps the stamp it
+ * was first rendered with, and callers re-stamp the returned HTML (see
+ * `restampFreshness`) so the displayed date stays current. Bump RENDER_VERSION
+ * whenever the cache shape or the rendered output changes shape.
  */
-const RENDER_VERSION = 1;
+const RENDER_VERSION = 2;
+
+/**
+ * Bound on cached page sets. Versioned builds cache one entry per version;
+ * four keeps `build-all` warm without letting `.brewdocs/render.json` grow
+ * without limit.
+ */
+const MAX_ENTRIES = 4;
 
 /** Order-independent JSON so key insertion order never changes the digest. */
 function stable(value: unknown): string {
@@ -56,27 +65,35 @@ export function renderCacheFile(root: string): string {
   return path.join(path.resolve(root), ".brewdocs", "render.json");
 }
 
-interface RenderCacheShape {
-  version: number;
-  fingerprint: string;
+interface CacheEntry {
   pages: RenderedPage[];
+  at: number;
 }
 
-function readRenderCache(root: string, fingerprint: string): RenderedPage[] | null {
+interface RenderCacheShape {
+  version: number;
+  entries: Record<string, CacheEntry>;
+}
+
+function readRenderCache(root: string): Record<string, CacheEntry> {
   try {
     const raw = JSON.parse(fs.readFileSync(renderCacheFile(root), "utf8")) as RenderCacheShape;
-    if (raw.version !== RENDER_VERSION || raw.fingerprint !== fingerprint) return null;
-    if (!Array.isArray(raw.pages)) return null;
-    return raw.pages;
+    if (raw.version !== RENDER_VERSION || !raw.entries || typeof raw.entries !== "object") {
+      return {};
+    }
+    return raw.entries;
   } catch {
-    return null;
+    return {};
   }
 }
 
-function writeRenderCache(root: string, fingerprint: string, pages: RenderedPage[]): void {
+function writeRenderCache(root: string, entries: Record<string, CacheEntry>): void {
   try {
+    const kept = Object.entries(entries)
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, MAX_ENTRIES);
     fs.mkdirSync(path.dirname(renderCacheFile(root)), { recursive: true });
-    const shape: RenderCacheShape = { version: RENDER_VERSION, fingerprint, pages };
+    const shape: RenderCacheShape = { version: RENDER_VERSION, entries: Object.fromEntries(kept) };
     fs.writeFileSync(renderCacheFile(root), JSON.stringify(shape), "utf8");
   } catch {
     /* cache write failure must never break a build */
@@ -91,10 +108,12 @@ export function renderCached(
   produce: () => RenderedPage[],
 ): RenderedPage[] {
   if (!enabled) return produce();
-  const cached = readRenderCache(root, fingerprint);
-  if (cached) return cached;
+  const entries = readRenderCache(root);
+  const hit = entries[fingerprint];
+  if (hit && Array.isArray(hit.pages)) return hit.pages;
   const pages = produce();
-  writeRenderCache(root, fingerprint, pages);
+  entries[fingerprint] = { pages, at: Date.now() };
+  writeRenderCache(root, entries);
   return pages;
 }
 

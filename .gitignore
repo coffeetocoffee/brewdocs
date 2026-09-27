@@ -12,6 +12,9 @@ gallery/
 # v2.0 incremental extraction cache (keep .brewdocs/coverage.json trend history)
 .brewdocs/extract.json
 
+# v4.1 render cache (per-page HTML keyed on model + options)
+.brewdocs/render.json
+
 # Python (adapter test artifacts)
 __pycache__/
 *.pyc

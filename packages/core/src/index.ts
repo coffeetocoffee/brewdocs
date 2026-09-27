@@ -4,7 +4,7 @@ export { extractReadme } from "./extractors/readme.js";
 export { extractPackage } from "./extractors/package.js";
 export { extractExports } from "./extractors/exports.js";
 export { markdownToHtml } from "./markdown.js";
-export { renderToHtml, renderToHtmlMulti, type RenderOptions, type VersionLink, type RenderedPage } from "./render.js";
+export { renderToHtml, renderToHtmlMulti, restampFreshness, type RenderOptions, type VersionLink, type RenderedPage } from "./render.js";
 export { build, buildModel, buildVersion, buildVersions, buildMulti, extractVersion } from "./build.js";
 export { buildGallery, type GalleryEntry } from "./gallery.js";
 export {

@@ -22,9 +22,9 @@
       "version": "4.1.0",
       "role": "pipeline: extract → model → render",
       "srcFiles": 58,
-      "srcLoc": 13684,
+      "srcLoc": 13722,
       "testFiles": 42,
-      "testLoc": 5108
+      "testLoc": 5138
     },
     {
       "name": "@brewdocs/plugin-sdk",
@@ -38,7 +38,7 @@
   ],
   "tests": {
     "files": 51,
-    "total": 349,
+    "total": 351,
     "skipped": 0,
     "loopFiles": [
       "packages/core/src/audit.test.ts",

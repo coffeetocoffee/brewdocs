@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractFromSource } from "./extract.js";
-import { renderToHtml, renderToHtmlMulti, renderContentPages, type RenderOptions } from "./render.js";
+import { renderToHtml, renderToHtmlMulti, renderContentPages, restampFreshness, type RenderOptions } from "./render.js";
 import { diffSymbols, renderDiffHtml } from "./diff.js";
 import { discoverVersions } from "./versions.js";
 import { analyzeSymbols } from "./doctor.js";
@@ -174,7 +174,7 @@ export function build(
   for (const page of pages) {
     const target = path.join(outDir, page.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, page.html, "utf8");
+    fs.writeFileSync(target, restampFreshness(page.html, fresh), "utf8");
   }
   // v3.0: moved pages keep answering — redirects from brewdocs.yml.
   const redirects = loadConfig(source.root).redirects;
@@ -271,7 +271,7 @@ export function buildMulti(
   for (const page of pages) {
     const outFile = path.join(outDir, page.path);
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
-    fs.writeFileSync(outFile, page.html, "utf8");
+    fs.writeFileSync(outFile, restampFreshness(page.html, fresh), "utf8");
     written.push(outFile);
   }
   if (resolved.emitDocmodel !== false) {
@@ -401,6 +401,9 @@ export async function buildVersions(
   const gitRoot = findGitRoot(root);
   const built: string[] = [];
   const models = new Map<string, RenderModel>();
+  // Extraction is disabled per version (throwaway worktrees); rendering still
+  // benefits from the cache, keyed on the stable working-tree root.
+  const renderCacheEnabled = Boolean(options.cache ?? config.cache);
 
   for (const v of versions) {
     let srcRoot = root;
@@ -424,7 +427,7 @@ export async function buildVersions(
       eol: isEolVersion(o, eolList),
     }));
     const fresh = freshness({ root: srcRoot, name: source.name });
-    const html = renderToHtml(model, {
+    const vOpts: RenderOptions = {
       ...singleOptions,
       versions: links,
       currentVersion: v,
@@ -432,12 +435,15 @@ export async function buildVersions(
       locale: singleOptions.locale ?? config.locale,
       score: coverageScore(model),
       freshness: fresh,
-    });
+    };
+    const [page] = renderCached(root, renderFingerprint(model, vOpts), renderCacheEnabled, () => [
+      { path: "index.html", html: renderToHtml(model, vOpts) },
+    ]);
 
     const vdir = path.join(outDir, dirSafe(v));
     fs.mkdirSync(vdir, { recursive: true });
     const outFile = path.join(vdir, "index.html");
-    fs.writeFileSync(outFile, html, "utf8");
+    fs.writeFileSync(outFile, restampFreshness(page.html, fresh), "utf8");
     built.push(outFile);
     if (options.emitDocmodel !== false) {
       emitDocModelArtifact(model, vdir, fresh);
@@ -471,19 +477,19 @@ export async function buildVersions(
   }));
   const rootFile = path.join(outDir, "index.html");
   const rootFresh = freshness({ root, name: source.name });
-  fs.writeFileSync(
-    rootFile,
-    renderToHtml(rootModel, {
-      ...options,
-      versions: rootLinks,
-      currentVersion: latest,
-      eol: isEolVersion(latest, eolList),
-      locale: options.locale ?? config.locale,
-      score: coverageScore(rootModel),
-      freshness: rootFresh,
-    }),
-    "utf8",
-  );
+  const rootOpts: RenderOptions = {
+    ...options,
+    versions: rootLinks,
+    currentVersion: latest,
+    eol: isEolVersion(latest, eolList),
+    locale: options.locale ?? config.locale,
+    score: coverageScore(rootModel),
+    freshness: rootFresh,
+  };
+  const [rootPage] = renderCached(root, renderFingerprint(rootModel, rootOpts), renderCacheEnabled, () => [
+    { path: "index.html", html: renderToHtml(rootModel, rootOpts) },
+  ]);
+  fs.writeFileSync(rootFile, restampFreshness(rootPage.html, rootFresh), "utf8");
   if (options.emitDocmodel !== false) {
     emitDocModelArtifact(rootModel, outDir, rootFresh);
   }

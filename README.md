@@ -19,7 +19,7 @@ Three things earlier roadmaps kept deferring — none of which added a runtime d
 
 | New | What it gives you |
 | --- | --- |
-| ⚡ **Render cache** | Extraction was already cached; rendering wasn't. `--cache` now also skips unchanged rendering (`.brewdocs/render.json`), so `--multi` rebuilds stop re-rendering one page per symbol |
+| ⚡ **Render cache** | Extraction was already cached; rendering wasn't. `--cache` now also skips unchanged rendering (`.brewdocs/render.json`) for `build`, `buildMulti` and versioned/`preview` builds, and re-stamps the footer date on reuse |
 | 👀 **Live reload** | `brewdocs preview --watch` rebuilds on change and refreshes the browser over SSE — no dependency, just the server that was already there |
 | 🐍 **Static Python by default** | The Python extractor no longer spawns an interpreter: parsing is line-based and safe on any source. The accurate `ast` parser is opt-in with `--plugins python-ast` (it still refuses fetched sources) |
 | 📦 **Deploy artifacts** | Every build emits `404.html`, `_headers`, `_redirects` — drop `dist/` on Netlify/Cloudflare Pages and the CDN does the hosting |
