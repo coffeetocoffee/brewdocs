@@ -1,3 +1,5 @@
+import { escapeHtml } from "./escape.js";
+
 const KEYWORDS = new Set([
   "const", "let", "var", "function", "return", "if", "else", "for", "while",
   "do", "switch", "case", "break", "continue", "class", "extends", "new",
@@ -7,13 +9,6 @@ const KEYWORDS = new Set([
   "null", "undefined", "true", "false", "this", "super", "delete", "try",
   "catch", "finally", "throw", "yield", "namespace", "declare", "module",
 ]);
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
 /**
  * Minimal, dependency-free syntax highlighter for JS/TS family code.

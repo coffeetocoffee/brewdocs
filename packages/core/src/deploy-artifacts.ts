@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RenderModel } from "./types.js";
+import { escapeHtml } from "./escape.js";
 
 /**
  * Static-host deploy artifacts. BrewDocs output is a plain directory of HTML;
@@ -13,14 +14,6 @@ function toPath(p: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) return p; // external URL: leave as-is
   const stripped = p.replace(/^\.?\//, "");
   return `/${stripped}`;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function notFoundHtml(title: string): string {

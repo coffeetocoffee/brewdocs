@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { escapeHtml } from "./escape.js";
 
 /**
  * v3.0 plugin registry + marketplace (local control-plane, same spirit as
@@ -222,15 +223,13 @@ export function registryEntryPath(registryDir: string, name: string): string | n
  */
 export function buildRegistryGallery(registryDir: string, outDir: string): string {
   const entries = listPlugins(registryDir);
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const cards = entries
     .map(
       (p) => `<li class="card">
-  <div class="row"><a class="p-name">${esc(p.name)}</a><span class="p-kind k-${esc(p.kind)}">${esc(p.kind)}</span></div>
-  <p class="p-desc">${esc(p.description ?? "no description")}</p>
-  <div class="p-meta">v${esc(p.version)} · ${p.installs} install(s)${p.author ? ` · by ${esc(p.author)}` : ""}</div>
-  <code class="p-use">brewdocs registry install ${esc(p.name)}</code>
+  <div class="row"><a class="p-name">${escapeHtml(p.name)}</a><span class="p-kind k-${escapeHtml(p.kind)}">${escapeHtml(p.kind)}</span></div>
+  <p class="p-desc">${escapeHtml(p.description ?? "no description")}</p>
+  <div class="p-meta">v${escapeHtml(p.version)} · ${p.installs} install(s)${p.author ? ` · by ${escapeHtml(p.author)}` : ""}</div>
+  <code class="p-use">brewdocs registry install ${escapeHtml(p.name)}</code>
 </li>`,
     )
     .join("\n");

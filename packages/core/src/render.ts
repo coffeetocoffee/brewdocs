@@ -1,6 +1,7 @@
 import type { ContentPage, PackageInfo, RenderModel, SymbolDoc } from "./types.js";
 import { markdownToHtml } from "./markdown.js";
 import { highlightCode } from "./highlight.js";
+import { escapeHtml } from "./escape.js";
 import { getTheme, type Theme } from "./themes.js";
 import { buildSearchIndex } from "./search.js";
 import { themeFromRef, type Slots } from "./theme-manifest.js";
@@ -62,23 +63,6 @@ export interface RenderOptions {
   locale?: string;
   /** v3.0: the rendered version is end-of-life (banner in the page). */
   eol?: boolean;
-}
-
-/**
- * Escape text for any HTML context, including quoted attribute values.
- * Quotes matter: symbol names, descriptions, section titles and git tag
- * names are attacker-controlled when you document a repo you don't own, and
- * every one of them is interpolated into an attribute somewhere
- * (`value="…"`, `href="…"`, `title="…"`). Escaping `& < > " '` makes the
- * helper safe for both text nodes and quoted attributes.
- */
-function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function slug(title: string): string {
@@ -550,7 +534,7 @@ function searchJs(ui: UiStrings): string {
   var toggle = document.getElementById("search-toggle");
   var NO_RESULTS = ${JSON.stringify(ui.noResults)};
 
-  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 
   function search(q) {
     q = q.toLowerCase().trim();

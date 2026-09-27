@@ -5,6 +5,7 @@ import { analyzeSymbols, type DoctorReport } from "./doctor.js";
 import { renderToHtml, type RenderOptions } from "./render.js";
 import { gitShaOf } from "./git.js";
 import type { RenderModel, Source } from "./types.js";
+import { escapeHtml } from "./escape.js";
 
 /** One package discovered inside a workspace. */
 export interface WorkspacePackage {
@@ -90,13 +91,6 @@ function expandGlob(root: string, glob: string): string[] {
       }
     })
     .map((entry) => path.join(baseDir, entry));
-}
-
-function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 /**

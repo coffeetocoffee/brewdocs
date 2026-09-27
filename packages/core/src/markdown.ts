@@ -1,27 +1,5 @@
 import { highlightCode } from "./highlight.js";
-
-/**
- * Escape text for text nodes *and* quoted attributes. The URL of a link/image
- * is attacker-controlled (it comes from a README, a doc comment, or a
- * third-party repo), so a bare `href="${url}"` with only `&<>` escaped lets
- * `x"onmouseover="…` break out of the attribute. Escaping the quotes closes
- * that; `safeUrl` additionally drops script-bearing schemes.
- */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-/** Drop URLs whose scheme executes in a browser; keep everything else. */
-function safeUrl(raw: string): string | undefined {
-  const trimmed = raw.trim();
-  const probe = trimmed.replace(/[\u0000-\u001f\u007f]/g, "").toLowerCase();
-  return /^(javascript|vbscript|data):/.test(probe) ? undefined : trimmed;
-}
+import { escapeHtml, safeUrl } from "./escape.js";
 
 function inline(text: string): string {
   let s = escapeHtml(text);

@@ -10,25 +10,25 @@
   "stats": [
     {
       "name": "@brewdocs/cli",
-      "version": "4.2.0",
+      "version": "4.3.0",
       "role": "commands + hosting server",
       "srcFiles": 4,
-      "srcLoc": 3139,
+      "srcLoc": 3124,
       "testFiles": 8,
       "testLoc": 1239
     },
     {
       "name": "@brewdocs/core",
-      "version": "4.2.0",
+      "version": "4.3.0",
       "role": "pipeline: extract → model → render",
-      "srcFiles": 58,
-      "srcLoc": 13844,
-      "testFiles": 42,
-      "testLoc": 5182
+      "srcFiles": 59,
+      "srcLoc": 13813,
+      "testFiles": 43,
+      "testLoc": 5214
     },
     {
       "name": "@brewdocs/plugin-sdk",
-      "version": "4.2.0",
+      "version": "4.3.0",
       "role": "adapter/hook contracts",
       "srcFiles": 1,
       "srcLoc": 57,
@@ -37,8 +37,8 @@
     }
   ],
   "tests": {
-    "files": 51,
-    "total": 355,
+    "files": 52,
+    "total": 359,
     "skipped": 0,
     "loopFiles": [
       "packages/core/test/audit.test.ts",
@@ -69,7 +69,7 @@
         "authorize"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 601
+      "line": 602
     },
     {
       "path": "/api/export",
@@ -78,7 +78,7 @@
         "authorize"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 671
+      "line": 672
     },
     {
       "path": "/api/sites",
@@ -87,7 +87,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 737
+      "line": 738
     },
     {
       "path": "/api/registry",
@@ -96,7 +96,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 749
+      "line": 750
     },
     {
       "path": "/api/search",
@@ -105,7 +105,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 770
+      "line": 771
     },
     {
       "path": "/api/markdown",
@@ -114,7 +114,7 @@
         "authorize"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 788
+      "line": 789
     },
     {
       "path": "/api/stats",
@@ -123,21 +123,21 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 834
+      "line": 835
     },
     {
       "path": "/",
       "method": "GET",
       "guards": [],
       "file": "packages/cli/src/server.ts",
-      "line": 882
+      "line": 883
     },
     {
       "path": "/dashboard",
       "method": "GET",
       "guards": [],
       "file": "packages/cli/src/server.ts",
-      "line": 898
+      "line": 899
     }
   ],
   "invariants": [
@@ -161,9 +161,9 @@
     },
     {
       "id": "INV-4",
-      "rule": "Any HTML escape helper must escape \" and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).",
-      "why": "This is the contract, not one call site: the helper is named escapeHtml and is used for both text nodes and attributes. Escaping only &<> let a README link, a symbol description, or a git tag name inject an event handler into a generated site.",
-      "enforcedBy": "packages/core/test/markdown.test.ts"
+      "rule": "HTML escaping has one implementation (packages/core/src/escape.ts) that escapes \" and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).",
+      "why": "This is the contract, not one call site. The XSS shipped because escapeHtml escaped only &<>; local copies then multiplied (highlight, workspaces, registry, federation) and the gate only checked three fixed files. One source plus an all-files scan keeps a new quote-blind helper from slipping in.",
+      "enforcedBy": "packages/core/src/escape.ts (the single escaper) + scripts/gate.mjs (inv-4:escape-helpers-quote-safe scans every source file) + packages/core/test/escape.test.ts"
     },
     {
       "id": "INV-5",
@@ -248,6 +248,12 @@
       "rule": "The renderer must have a golden-output snapshot test over a full page, including hostile inputs.",
       "why": "A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.",
       "enforcedBy": "scripts/gate.mjs (inv-18:renderer-golden)"
+    },
+    {
+      "id": "INV-19",
+      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
+      "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
+      "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
     }
   ],
   "findings": [

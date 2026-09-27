@@ -219,7 +219,7 @@ exports[`Golden output > renders the full page deterministically 1`] = `
     <h3>brew <span class="kind">function</span> </h3>
     <pre class="code sig" data-lang="ts"><code><span class="tok-keyword">export</span> <span class="tok-keyword">function</span> <span class="tok-fn"><a class="type-ref" href="#symbol-brew">brew</a></span>(x: string): <span class="tok-keyword">void</span> {}</code></pre><p>Brew it &quot;with quotes&quot; &lt;script&gt;alert(1)&lt;/script&gt;.</p><div class="params"><h4>Parameters</h4><table>
         <tr><th>x</th><td><code>string</code> the &quot;x&quot; value</td></tr>
-      </table></div><div class="returns"><h4>Returns</h4><p><code>void</code> nothing</p></div><div class="examples"><h4>Example</h4><pre class="code" data-lang="ts"><code><span class="tok-fn">brew</span>(<span class="tok-string">'a"b'</span>);</code></pre></div>
+      </table></div><div class="returns"><h4>Returns</h4><p><code>void</code> nothing</p></div><div class="examples"><h4>Example</h4><pre class="code" data-lang="ts"><code><span class="tok-fn">brew</span>(<span class="tok-string">&#39;a&quot;b&#39;</span>);</code></pre></div>
   </section></section>
       
     </main>
@@ -247,7 +247,7 @@ exports[`Golden output > renders the full page deterministically 1`] = `
   var toggle = document.getElementById("search-toggle");
   var NO_RESULTS = "No results";
 
-  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 
   function search(q) {
     q = q.toLowerCase().trim();

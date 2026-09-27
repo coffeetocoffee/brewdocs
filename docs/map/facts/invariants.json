@@ -21,9 +21,9 @@
     },
     {
       "id": "INV-4",
-      "rule": "Any HTML escape helper must escape \" and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).",
-      "why": "This is the contract, not one call site: the helper is named escapeHtml and is used for both text nodes and attributes. Escaping only &<> let a README link, a symbol description, or a git tag name inject an event handler into a generated site.",
-      "enforcedBy": "packages/core/test/markdown.test.ts"
+      "rule": "HTML escaping has one implementation (packages/core/src/escape.ts) that escapes \" and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).",
+      "why": "This is the contract, not one call site. The XSS shipped because escapeHtml escaped only &<>; local copies then multiplied (highlight, workspaces, registry, federation) and the gate only checked three fixed files. One source plus an all-files scan keeps a new quote-blind helper from slipping in.",
+      "enforcedBy": "packages/core/src/escape.ts (the single escaper) + scripts/gate.mjs (inv-4:escape-helpers-quote-safe scans every source file) + packages/core/test/escape.test.ts"
     },
     {
       "id": "INV-5",
@@ -108,6 +108,12 @@
       "rule": "The renderer must have a golden-output snapshot test over a full page, including hostile inputs.",
       "why": "A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.",
       "enforcedBy": "scripts/gate.mjs (inv-18:renderer-golden)"
+    },
+    {
+      "id": "INV-19",
+      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
+      "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
+      "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
     }
   ]
 }

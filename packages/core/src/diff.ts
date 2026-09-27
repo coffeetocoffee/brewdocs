@@ -1,5 +1,6 @@
 import type { SymbolDoc } from "./types.js";
 import { replacementHint } from "./replacements.js";
+import { escapeHtml } from "./escape.js";
 
 export type ChangeKind =
   | "added"
@@ -176,9 +177,6 @@ export function diffSymbols(
     summary,
   };
 }
-
-const escapeHtml = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Interface members grow breaking; class members grow non-breaking. */
 function membersBreaking(from: SymbolDoc, to: SymbolDoc): boolean {

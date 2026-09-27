@@ -82,27 +82,49 @@ function checkSourceConfinement() {
     );
 }
 
+/** Every non-test TypeScript file under the packages' src/ trees. */
+function sourceFiles() {
+  const out = [];
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+      const child = `${rel}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name !== "__snapshots__") walk(child);
+      } else if (e.name.endsWith(".ts") && !e.name.endsWith(".test.ts")) {
+        out.push(child);
+      }
+    }
+  };
+  for (const d of ["packages/core/src", "packages/cli/src"]) {
+    if (fs.existsSync(path.join(ROOT, d))) walk(d);
+  }
+  return out;
+}
+
 /**
- * INV-4: every escape helper must handle quotes. Two exist (render.ts and
- * markdown.ts); a new one that escapes only &<> is exactly how the XSS got in.
+ * INV-4: every HTML escaper must handle quotes, and the canonical one lives in
+ * packages/core/src/escape.ts. Scanning the whole tree — not a fixed file list —
+ * is the point: local escapers in highlight/workspaces/registry/federation used
+ * to escape only `&<>`, invisible to the old check. A quote-blind helper is
+ * exactly how the attribute-injection XSS shipped.
  */
 function checkEscapeHelpers() {
+  const canonical = "packages/core/src/escape.ts";
+  if (!fs.existsSync(path.join(ROOT, canonical))) {
+    return fail("inv-4:escape-helpers-quote-safe", `${canonical} is missing`);
+  }
+  const isEscaperName = (n) => /^esc(ape)?/i.test(n) || /escape/i.test(n);
+  const defRe =
+    /(?:function\s+(\w+)\s*\([^)]*\)\s*\{|(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|\w+)\s*=>)/g;
   const offenders = [];
-  const files = [
-    "packages/core/src/render.ts",
-    "packages/core/src/markdown.ts",
-    "packages/cli/src/server.ts",
-  ];
-  for (const f of files) {
-    if (!fs.existsSync(path.join(ROOT, f))) continue;
+  for (const f of sourceFiles()) {
     const src = read(f);
-    for (const m of src.matchAll(/function\s+(\w*escape\w*)\s*\([^)]*\)[^{]*\{([\s\S]{0,600}?)\n\}/gi)) {
-      const [_, name, body] = m;
-      const escapesQuotes = /&quot;|&#39;|&apos;/.test(body);
-      const escapesAngle = /&lt;/.test(body);
-      // Only a text/HTML escaper needs quote handling; a URL or path escaper
-      // is a different concern and is not asserted here.
-      if (escapesAngle && !escapesQuotes) offenders.push(`${f}:${name}`);
+    for (const m of src.matchAll(defRe)) {
+      const name = m[1] || m[2] || "";
+      if (!isEscaperName(name)) continue;
+      const body = src.slice(m.index, m.index + 700);
+      if (!/&lt;/.test(body)) continue; // not an HTML escaper (e.g. escapeRegExp)
+      if (!/&quot;|&#39;|&apos;/.test(body)) offenders.push(`${f}:${name}`);
     }
   }
   if (offenders.length === 0) pass("inv-4:escape-helpers-quote-safe");
@@ -110,6 +132,33 @@ function checkEscapeHelpers() {
     fail(
       "inv-4:escape-helpers-quote-safe",
       `escape helper(s) escape < but not quotes: ${offenders.join(", ")}`,
+    );
+}
+
+/**
+ * INV-19: every write endpoint must carry an explicit guard before it can act
+ * on caller input. A new POST route that forgets authorize() would otherwise
+ * ship as an open write surface; this asserts the guard from the parsed routes.
+ */
+function checkWriteEndpointsGuarded() {
+  const lines = read("packages/cli/src/server.ts").split("\n");
+  const offenders = [];
+  for (let i = 0; i < lines.length; i++) {
+    const route = /url\.pathname === "([^"]+)"/.exec(lines[i]);
+    if (!route) continue;
+    let end = i + 1;
+    while (end < lines.length && !/url\.pathname === "/.test(lines[end])) end++;
+    const block = lines.slice(i, end).join("\n");
+    if (!/req\.method === "POST"/.test(block)) continue;
+    if (!/authorize\(|guardSource\(|requireSiteAccess\(/.test(block)) {
+      offenders.push(route[1]);
+    }
+  }
+  if (offenders.length === 0) pass("inv-19:write-endpoints-guarded");
+  else
+    fail(
+      "inv-19:write-endpoints-guarded",
+      `write endpoint(s) with no guard: ${offenders.join(", ")}`,
     );
 }
 
@@ -136,10 +185,10 @@ function checkSubdomainValidation() {
 }
 
 function checkUrlSchemeValidation() {
-  const md = read("packages/core/src/markdown.ts");
-  const hasSafeUrl = /function safeUrl/.test(md);
-  const blocks = /javascript\|vbscript\|data/.test(md);
-  const stripsControl = /\\u0000-\\u001f/.test(md);
+  const src = read("packages/core/src/escape.ts");
+  const hasSafeUrl = /export function safeUrl/.test(src);
+  const blocks = /javascript\|vbscript\|data/.test(src);
+  const stripsControl = /\\u0000-\\u001f/.test(src);
   if (hasSafeUrl && blocks && stripsControl) pass("inv-7:url-scheme-validation");
   else
     fail(
@@ -356,6 +405,7 @@ checkBindDefault();
 checkIgnoreScripts();
 checkSourceConfinement();
 checkEscapeHelpers();
+checkWriteEndpointsGuarded();
 checkBoundaryContainment();
 checkSubdomainValidation();
 checkUrlSchemeValidation();

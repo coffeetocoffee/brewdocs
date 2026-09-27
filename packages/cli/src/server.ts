@@ -10,6 +10,7 @@ import {
   deploySite,
   deriveSubdomain,
   draftExpired,
+  escapeHtml,
   exportSite,
   buildMarkdown,
   resolveInput,
@@ -1036,25 +1037,25 @@ function dashboardHtml(
   topPaths: Array<{ path: string; views: number }> = [],
 ): string {
   const visibility = manifest.visibility ?? "public";
-  const title = manifest.title ? escapeText(manifest.title) : site;
+  const title = manifest.title ? escapeHtml(manifest.title) : site;
   const paths = topPaths.length
     ? `<h2>Top pages</h2><ul>${topPaths
         .map(
           (p) =>
-            `<li><code>${escapeText(p.path)}</code> — ${p.views} view${p.views === 1 ? "" : "s"}</li>`,
+            `<li><code>${escapeHtml(p.path)}</code> — ${p.views} view${p.views === 1 ? "" : "s"}</li>`,
         )
         .join("")}</ul>`
     : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stats — ${escapeText(site)} · BrewDocs</title>
+<title>Stats — ${escapeHtml(site)} · BrewDocs</title>
 <style>body{font-family:system-ui,sans-serif;max-width:680px;margin:3rem auto;padding:0 1rem;color:#2b2118}
 h1{font-family:Georgia,serif}.card{display:flex;gap:2rem;margin:1.5rem 0}
 .stat{background:#fffdf9;border:1px solid #e7ddd0;border-radius:12px;padding:1.2rem 1.6rem}
 .stat .n{font-size:2.2rem;font-weight:700;color:#b5651d}.stat .l{color:#7a6a58;font-size:.85rem}
 a{color:#b5651d}</style></head>
 <body><h1>📊 ${title}</h1>
-<p><code>${escapeText(site)}.brewdocs.dev</code> · ${visibility}${manifest.org ? " · org: " + escapeText(manifest.org) : ""}</p>
+<p><code>${escapeHtml(site)}.brewdocs.dev</code> · ${visibility}${manifest.org ? " · org: " + escapeHtml(manifest.org) : ""}</p>
 <div class="card">
   <div class="stat"><div class="n">${data.views}</div><div class="l">page views</div></div>
   <div class="stat"><div class="n">${data.builds}</div><div class="l">builds</div></div>
@@ -1062,22 +1063,6 @@ a{color:#b5651d}</style></head>
 ${paths}
 <p><a href="/s/${encodeURIComponent(site)}/">View site ↗</a> · <a href="/">← BrewDocs</a></p>
 </body></html>`;
-}
-
-/**
- * Escape for HTML output. Quotes are escaped too so the helper is safe in
- * quoted attributes as well as text nodes (see invariants INV-4 in
- * docs/map/facts/invariants.json) — several call sites below sit next to
- * `title="…"` markup, and manifest values are attacker-influenced because
- * they come from the built model's title.
- */
-function escapeText(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 async function runBuild(

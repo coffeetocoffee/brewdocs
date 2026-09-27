@@ -42,8 +42,8 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
   "readmeHtml": "<h1>lib</h1>
 <p>A small library used to exercise the <strong>JSDoc/TSDoc</strong> and <strong>exports</strong> extractors.</p>
 <h2>Usage</h2>
-<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">"lib"</span>;
-<span class="tok-fn">brew</span>(<span class="tok-string">"./repo"</span>, <span class="tok-number">3</span>);</code></pre>
+<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">&quot;lib&quot;</span>;
+<span class="tok-fn">brew</span>(<span class="tok-string">&quot;./repo&quot;</span>, <span class="tok-number">3</span>);</code></pre>
 <h2>Notes</h2>
 <p>This package intentionally documents its exports with JSDoc so Phase 1 can pull params, return values, examples, and deprecation notices.</p>",
   "sections": [
@@ -54,8 +54,8 @@ exports[`Phase 1 extractors > lib: extracts JSDoc-documented exports 1`] = `
       "title": "lib",
     },
     {
-      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">"lib"</span>;
-<span class="tok-fn">brew</span>(<span class="tok-string">"./repo"</span>, <span class="tok-number">3</span>);</code></pre>",
+      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { brew } <span class="tok-keyword">from</span> <span class="tok-string">&quot;lib&quot;</span>;
+<span class="tok-fn">brew</span>(<span class="tok-string">&quot;./repo&quot;</span>, <span class="tok-number">3</span>);</code></pre>",
       "id": "usage",
       "level": 2,
       "title": "Usage",
@@ -352,7 +352,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
   "readmeHtml": "<h1>widget</h1>
 <p>A package that exports a class, an interface, and constants — used to confirm the extractor handles multiple symbol kinds.</p>
 <h2>Usage</h2>
-<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">"widget"</span>;
+<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">&quot;widget&quot;</span>;
 <span class="tok-keyword">const</span> w = <span class="tok-keyword">new</span> <span class="tok-fn">Widget</span>(SIZE_SM);</code></pre>
 <h2>Notes</h2>
 <p>No JSDoc here on purpose, to verify the extractor still produces symbols without documentation comments.</p>",
@@ -364,7 +364,7 @@ exports[`Phase 1 extractors > widget: extracts multiple symbol kinds without JSD
       "title": "widget",
     },
     {
-      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">"widget"</span>;
+      "html": "<pre class="code" data-lang="ts"><code><span class="tok-keyword">import</span> { Widget, SIZE_SM } <span class="tok-keyword">from</span> <span class="tok-string">&quot;widget&quot;</span>;
 <span class="tok-keyword">const</span> w = <span class="tok-keyword">new</span> <span class="tok-fn">Widget</span>(SIZE_SM);</code></pre>",
       "id": "usage",
       "level": 2,

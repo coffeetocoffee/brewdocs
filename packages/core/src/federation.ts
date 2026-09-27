@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadDocModel } from "./mcp.js";
 import type { DocModelArtifact } from "./docmodel.js";
+import { escapeHtml } from "./escape.js";
 
 /**
  * v3.5 cross-repo federated search (local control-plane, same spirit as
@@ -254,8 +255,6 @@ export function searchFederation(
 export function buildFederatedPage(storeDir: string, outDir: string): string {
   const store = loadFederation(storeDir);
   const symbolCount = store.repos.reduce((n, r) => n + r.symbols.length, 0);
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   // JSON in a <script> tag: close-tag sequences must not terminate the block.
   const indexJson = JSON.stringify(
     store.repos.map((r) => ({
@@ -274,8 +273,8 @@ export function buildFederatedPage(storeDir: string, outDir: string): string {
   const repoList = store.repos
     .map(
       (r) =>
-        `<li><span class="r-name">${esc(r.name)}</span>${
-          r.version ? `<span class="r-ver">v${esc(r.version)}</span>` : ""
+        `<li><span class="r-name">${escapeHtml(r.name)}</span>${
+          r.version ? `<span class="r-ver">v${escapeHtml(r.version)}</span>` : ""
         }<span class="r-count">${r.symbols.length} symbol(s)</span></li>`,
     )
     .join("\n");

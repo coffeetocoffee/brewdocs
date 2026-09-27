@@ -162,6 +162,7 @@ export {
 } from "./harvest.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
 export { loadConfig, type BrewDocsConfig } from "./config.js";
+export { escapeHtml, safeUrl } from "./escape.js";
 export {
   type BrewDocsPlugin,
   type LanguageAdapter,

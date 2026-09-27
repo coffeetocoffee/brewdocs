@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.2.0 | commands + hosting server | 4 files / 3,139 loc | 8 files / 1,239 loc |
-| `@brewdocs/core` | 4.2.0 | pipeline: extract → model → render | 58 files / 13,844 loc | 42 files / 5,182 loc |
-| `@brewdocs/plugin-sdk` | 4.2.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
+| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,124 loc | 8 files / 1,239 loc |
+| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 59 files / 13,813 loc | 43 files / 5,214 loc |
+| `@brewdocs/plugin-sdk` | 4.3.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**355 test declarations across 51 files** — parsed from the tree, not typed.
+**359 test declarations across 52 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -32,15 +32,15 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
-| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:601` |
-| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:671` |
-| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:737` |
-| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:749` |
-| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:770` |
-| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:788` |
-| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:834` |
-| `/` | GET | **none** | `packages/cli/src/server.ts:882` |
-| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:898` |
+| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:602` |
+| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:672` |
+| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:738` |
+| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:750` |
+| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:771` |
+| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:789` |
+| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:835` |
+| `/` | GET | **none** | `packages/cli/src/server.ts:883` |
+| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:899` |
 
 ### Invariants a change must not break
 
@@ -53,9 +53,9 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-3** — Every endpoint that reads a caller-supplied local path must resolve it against sourceRoot and refuse anything outside with 403. Realpath first, so neither .. nor a symlink escapes.
   - _why:_ A build endpoint that renders any readable directory is a file-disclosure primitive; /api/export returned the HTML directly, so a README containing a key was disclosed verbatim.
   - _enforced by:_ packages/cli/src/server.test.ts (Phase 5 — source confinement)
-- **INV-4** — Any HTML escape helper must escape " and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).
-  - _why:_ This is the contract, not one call site: the helper is named escapeHtml and is used for both text nodes and attributes. Escaping only &<> let a README link, a symbol description, or a git tag name inject an event handler into a generated site.
-  - _enforced by:_ packages/core/test/markdown.test.ts
+- **INV-4** — HTML escaping has one implementation (packages/core/src/escape.ts) that escapes " and ' as well as & < >, because untrusted values are interpolated into quoted attributes (href, value, title).
+  - _why:_ This is the contract, not one call site. The XSS shipped because escapeHtml escaped only &<>; local copies then multiplied (highlight, workspaces, registry, federation) and the gate only checked three fixed files. One source plus an all-files scan keeps a new quote-blind helper from slipping in.
+  - _enforced by:_ packages/core/src/escape.ts (the single escaper) + scripts/gate.mjs (inv-4:escape-helpers-quote-safe scans every source file) + packages/core/test/escape.test.ts
 - **INV-5** — Path containment must be boundary-aware: resolve the candidate and require it to equal the root or start with root + path.sep. Never use a bare startsWith.
   - _why:_ startsWith accepted a sibling whose name shared the target's prefix (/s/acme/../acme-secret resolved outside hosting/acme). The existing traversal test passed for the wrong reason — Node's URL normalizer, not the code.
   - _enforced by:_ packages/cli/src/server.test.ts (prefix-confusion, dots-only subdomains)
@@ -98,6 +98,9 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-18** — The renderer must have a golden-output snapshot test over a full page, including hostile inputs.
   - _why:_ A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.
   - _enforced by:_ scripts/gate.mjs (inv-18:renderer-golden)
+- **INV-19** — Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.
+  - _why:_ The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.
+  - _enforced by:_ scripts/gate.mjs (inv-19:write-endpoints-guarded)
 
 ### Server defaults
 
