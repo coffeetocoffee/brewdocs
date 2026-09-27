@@ -17,5 +17,10 @@ export default defineConfig({
   test: {
     include: ["packages/**/*.test.ts"],
     environment: "node",
+    // Several tests shell out (npm/tsc/git) via blocking sync calls and take
+    // 20-30s. Vitest 4 enforces the timeout where 2 could not while the event
+    // loop was blocked, so the slow end needs an explicit budget.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });
