@@ -73,8 +73,10 @@ export {
   installPlugin,
   registryEntryPath,
   buildRegistryGallery,
+  verifyRegistry,
   type RegistryEntry,
   type RegistryStore,
+  type RegistryVerifyResult,
   type PublishOptions,
 } from "./registry.js";
 export { gitShaOf } from "./git.js";
@@ -161,7 +163,8 @@ export {
   type HarvestProposal,
 } from "./harvest.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
-export { loadConfig, type BrewDocsConfig } from "./config.js";
+export { loadConfig, type BrewDocsConfig, CURRENT_CONFIG_VERSION } from "./config.js";
+export { migrateConfig, renderMigrateText, type MigrateResult } from "./migrate.js";
 export { escapeHtml, safeUrl } from "./escape.js";
 export {
   type BrewDocsPlugin,

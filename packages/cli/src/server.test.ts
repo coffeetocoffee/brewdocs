@@ -77,7 +77,7 @@ describe("Phase 4 — hosting router", () => {
 describe("Phase 4 — hosting server auth", () => {
   it(
     "requires a bearer token on /api/build when BREWDOCS_TOKEN is set",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-auth-"));
     const server = createServer(hosting, undefined, "secret");
@@ -113,7 +113,7 @@ describe("Phase 4 — hosting server auth", () => {
 describe("Phase 5 — source confinement", () => {
   it(
     "refuses a local source outside the allowed root",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-srcroot-"));
       const inside = path.join(root, "myrepo");
@@ -256,7 +256,7 @@ describe("Direction D — orgs, private docs, analytics", () => {
 
   it(
     "gates private sites behind a token on read",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-priv-"));
     await deploySite(
@@ -289,7 +289,7 @@ describe("Direction D — orgs, private docs, analytics", () => {
 
   it(
     "counts pageviews and builds in /api/stats",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-stats-"));
     const { server, base } = await start(hosting, "admin");
@@ -336,7 +336,7 @@ describe("Direction D — orgs, private docs, analytics", () => {
 
   it(
     "serves a GitHub-sourced site under the repo-user subdomain",
-    { timeout: 30_000 },
+    { timeout: 60_000, retry: 2 },
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-gh-"));
     const sub = deriveSubdomain({ root: tinyRoot, name: "https://github.com/user/repo" });

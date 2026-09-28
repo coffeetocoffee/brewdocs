@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { escapeHtml } from "./escape.js";
 
 /**
@@ -18,6 +19,8 @@ export interface RegistryEntry {
   version: string;
   /** Stored entry file, relative to the registry dir. */
   entry: string;
+  /** sha256 of the stored module (tamper evidence; recorded at publish). */
+  integrity?: string;
   kind: "plugin" | "adapter" | "theme";
   description?: string;
   author?: string;
@@ -36,6 +39,11 @@ const REGISTRY_FILE = ".registry.json";
 
 function storeFile(dir: string): string {
   return path.join(dir, REGISTRY_FILE);
+}
+
+/** sha256 of an entry file's bytes, `sha256:<hex>` — tamper evidence, not signing. */
+function integrityOf(file: string): string {
+  return "sha256:" + createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
 export function loadRegistry(registryDir: string): RegistryStore {
@@ -136,6 +144,7 @@ export function publishPlugin(
     name,
     version,
     entry: relEntry,
+    integrity: integrityOf(absEntry),
     kind: opts.kind ?? "plugin",
     description: opts.description,
     author: opts.author,
@@ -183,17 +192,35 @@ export function unpublishPlugin(registryDir: string, name: string): boolean {
 /**
  * Copy a registry entry into `<targetRoot>/.brewdocs/plugins/<slug>.cjs` and
  * return the relative spec `loadPlugins` understands. Increments installs.
+ *
+ * Returns null on any refusal; pass `out` to learn why (the CLI reports the
+ * true cause instead of always claiming the plugin does not exist).
  */
 export function installPlugin(
   registryDir: string,
   name: string,
   targetRoot: string,
+  out?: { reason?: "not-found" | "missing-file" | "integrity" },
 ): { spec: string; entry: RegistryEntry } | null {
   const entry = getPlugin(registryDir, name);
-  if (!entry) return null;
+  if (!entry) {
+    if (out) out.reason = "not-found";
+    return null;
+  }
   const src = path.join(registryDir, ...entry.entry.split("/"));
   if (!fs.existsSync(src)) {
+    if (out) out.reason = "missing-file";
     console.warn(`[brewdocs] registry entry file missing: ${src}`);
+    return null;
+  }
+  // A recorded hash that no longer matches means the stored module changed
+  // after publish; refuse to install it. Entries published before integrity
+  // existed carry none and are still allowed (with a warning via verify).
+  if (entry.integrity && integrityOf(src) !== entry.integrity) {
+    if (out) out.reason = "integrity";
+    console.warn(
+      `[brewdocs] registry integrity mismatch for ${entry.name}@${entry.version} — refusing install (run \`brewdocs registry verify\`)`,
+    );
     return null;
   }
   const pluginsDir = path.join(targetRoot, ".brewdocs", "plugins");
@@ -214,7 +241,35 @@ export function registryEntryPath(registryDir: string, name: string): string | n
   const entry = getPlugin(registryDir, name);
   if (!entry) return null;
   const abs = path.join(registryDir, ...entry.entry.split("/"));
-  return fs.existsSync(abs) ? abs : null;
+  if (!fs.existsSync(abs)) return null;
+  if (entry.integrity && integrityOf(abs) !== entry.integrity) {
+    console.warn(`[brewdocs] registry integrity mismatch for ${entry.name} — refusing to load`);
+    return null;
+  }
+  return abs;
+}
+
+export interface RegistryVerifyResult {
+  name: string;
+  version: string;
+  status: "ok" | "mismatch" | "missing-file" | "unsigned";
+}
+
+/**
+ * Recompute every entry's recorded hash. `unsigned` = published before
+ * integrity was recorded (allowed to install, but re-publish to add it).
+ */
+export function verifyRegistry(registryDir: string): RegistryVerifyResult[] {
+  return listPlugins(registryDir).map((p) => {
+    const abs = path.join(registryDir, ...p.entry.split("/"));
+    if (!fs.existsSync(abs)) return { name: p.name, version: p.version, status: "missing-file" };
+    if (!p.integrity) return { name: p.name, version: p.version, status: "unsigned" };
+    return {
+      name: p.name,
+      version: p.version,
+      status: integrityOf(abs) === p.integrity ? "ok" : "mismatch",
+    };
+  });
 }
 
 /**

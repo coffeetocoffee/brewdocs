@@ -12,6 +12,7 @@ import {
   registryEntryPath,
   searchPlugins,
   unpublishPlugin,
+  verifyRegistry,
 } from "@brewdocs/core";
 
 function tmp(prefix: string): string {
@@ -103,5 +104,45 @@ describe("v3.0 plugin registry", () => {
     expect(html).toContain("exclaim");
     expect(html).toContain("brewdocs registry install exclaim");
     expect(html).toContain("<html lang=");
+  });
+});
+
+// v4.4 registry integrity: a content hash recorded at publish makes the local
+// store tamper-evident without a server.
+describe("v4.4 registry integrity", () => {
+  it("records a sha256 at publish and verifies clean", () => {
+    const { reg } = publishable();
+    expect(getPlugin(reg, "exclaim")!.integrity).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(verifyRegistry(reg)).toEqual([{ name: "exclaim", version: "1.0.0", status: "ok" }]);
+  });
+
+  it("detects a tampered entry and refuses to install or load it", () => {
+    const { reg } = publishable();
+    const entry = getPlugin(reg, "exclaim")!;
+    const stored = path.join(reg, ...entry.entry.split("/"));
+    fs.writeFileSync(stored, PLUGIN_CJS + "\n// tampered\n", "utf8");
+
+    expect(verifyRegistry(reg)[0].status).toBe("mismatch");
+    const source = tmp("brewdocs-reg-src-");
+    expect(installPlugin(reg, "exclaim", source)).toBeNull();
+    expect(registryEntryPath(reg, "exclaim")).toBeNull();
+  });
+
+  it("reports the true refusal reason so the CLI cannot call a tampered entry 'missing'", () => {
+    const source = tmp("brewdocs-reg-src-");
+    type Refusal = { reason?: "not-found" | "missing-file" | "integrity" };
+
+    const notFound: Refusal = {};
+    installPlugin(source, "ghost", source, notFound);
+    expect(notFound.reason).toBe("not-found");
+
+    const { reg } = publishable();
+    const entry = getPlugin(reg, "exclaim")!;
+    const stored = path.join(reg, ...entry.entry.split("/"));
+    fs.writeFileSync(stored, PLUGIN_CJS + "\n// tampered\n", "utf8");
+
+    const tampered: Refusal = {};
+    installPlugin(reg, "exclaim", source, tampered);
+    expect(tampered.reason).toBe("integrity");
   });
 });

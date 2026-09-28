@@ -13,16 +13,16 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.0
+## 🔥 Fresh out of the oven — v4.4
 
-Three things earlier roadmaps kept deferring — none of which added a runtime dependency.
+Two trust-and-hygiene features, still zero runtime dependencies.
 
 | New | What it gives you |
 | --- | --- |
-| ⚡ **Render cache** | Extraction was already cached; rendering wasn't. `--cache` now also skips unchanged rendering (`.brewdocs/render.json`) for `build`, `buildMulti` and versioned/`preview` builds, and re-stamps the footer date on reuse |
-| 👀 **Live reload** | `brewdocs preview --watch` rebuilds on change and refreshes the browser over SSE — no dependency, just the server that was already there |
-| 🐍 **Static Python by default** | The Python extractor no longer spawns an interpreter: parsing is line-based and safe on any source. The accurate `ast` parser is opt-in with `--plugins python-ast` (it still refuses fetched sources) |
-| 📦 **Deploy artifacts** | Every build emits `404.html`, `_headers`, `_redirects` — drop `dist/` on Netlify/Cloudflare Pages and the CDN does the hosting |
+| 🔏 **Registry integrity** | `registry publish` records a `sha256` of the stored module; `brewdocs registry verify` re-checks every entry, and `install`/load refuse a tampered one. Tamper-evident without a server |
+| 🔧 **Config migration** | `brewdocs.yml`/`.json` carry a `configVersion`; `brewdocs migrate [--write]` stamps it (comments preserved), and a config newer than the tool warns instead of being silently misread |
+
+Earlier this line: **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
 
 ---
 
@@ -65,10 +65,11 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 | `cloud …` | Orgs + members (`cloud org create\|list\|add-member\|remove-member\|delete`), org sites + stats |
 | `domains …` | Custom domains (`add --site`, `verify`, `list`, `remove`) |
 | `audit <dir>` | v3.0 a11y + SEO + perf audit of a built site (`--json`, `--min-score`, `--group`) |
-| `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|gallery`) |
+| `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|verify\|gallery`) — `verify` re-checks each entry's recorded `sha256` |
 | `drift <src>` | v3.5 doc drift detection (`--record`, `--from <ref>`, `--fail-on-drift`, `--json`) |
 | `federate …` | v3.5 cross-repo federated search (`add\|list\|remove\|search\|page`) |
 | `preview <src>` | Build + serve locally (`--watch` for rebuild + live reload) |
+| `migrate [src]` | v4.4 stamp `configVersion` on a `brewdocs.yml`/`.json` (`--write` to apply, `--json`) |
 | `gallery` | Example-sites gallery |
 | `themes` | List themes (`coffee`, `ink`, `matcha`, `newsprint` — or your manifest) |
 | `locales` | List UI locales (`en`, `de`, `es`, `fr`, `ja`, `id`) |

@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-09-27_
+_Generated: 2026-09-28_
 
 ## What this is
 
@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,124 loc | 8 files / 1,239 loc |
-| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 59 files / 13,813 loc | 43 files / 5,214 loc |
+| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,239 loc |
+| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 13,978 loc | 44 files / 5,312 loc |
 | `@brewdocs/plugin-sdk` | 4.3.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**359 test declarations across 52 files** — parsed from the tree, not typed.
+**366 test declarations across 53 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -125,7 +125,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 ## Boundaries and non-goals
 
-- **No backend service.** Deployment, orgs, domains, TLS issuance, analytics and the plugin marketplace are local emulations backed by JSON files beside the hosting dir. `brewdocs deploy` writes to a local directory unless `--storage s3` is given.
+- **No backend service.** Deployment, orgs, domains, TLS issuance, analytics, the plugin registry and federated search are local emulations backed by JSON files beside the hosting dir — there is deliberately no network service. `brewdocs deploy` writes to a local directory unless `--storage s3` is given; the registry records a content hash per entry (`registry verify`) so it is tamper-evident without a server. A hosted control plane would be a separate product, not a mode of this one.
 - **No real ACME.** TLS is serve-side: the operator supplies a certificate. `createSecureServer` wires it into the same request pipeline.
 - **No remote cache.** The incremental cache is local extraction-only; rendering always runs.
 - **No browser in CI.** `brewdocs audit` is static over emitted HTML by explicit design — contrast ratios, real render cost and JS execution are out of scope.

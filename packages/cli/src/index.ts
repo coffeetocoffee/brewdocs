@@ -71,6 +71,10 @@ import {
   unpublishPlugin,
   installPlugin,
   buildRegistryGallery,
+  verifyRegistry,
+  migrateConfig,
+  renderMigrateText,
+  CURRENT_CONFIG_VERSION,
   snapshotOf,
   compareDrift,
   loadDriftSnapshot,
@@ -1020,18 +1024,16 @@ export async function run(argv: string[]): Promise<void> {
       throw new Error(`${out} already exists — remove it or use --out <file>`);
     }
     let name = "";
-    let desc = "";
     try {
       const p = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
       if (typeof p.name === "string") name = p.name;
-      if (typeof p.description === "string") desc = p.description;
     } catch {
       /* not a package; leave blanks */
     }
     const tmpl = `# BrewDocs configuration
 # https://github.com/coffeetocoffee/brewdocs
+configVersion: ${CURRENT_CONFIG_VERSION}
 name: ${name}
-description: ${desc}
 theme: coffee
 dark: false
 # minCoverage: 80
@@ -1040,6 +1042,21 @@ dark: false
 `;
     fs.writeFileSync(target, tmpl, "utf8");
     console.log(`📝 Wrote ${target}`);
+    return;
+  }
+
+  if (command === "migrate") {
+    const source = rest.find((a) => !a.startsWith("-"));
+    const root = source ? path.resolve(process.cwd(), source) : process.cwd();
+    if (!fs.existsSync(root)) throw new Error(`source not found: ${root}`);
+    const write = rest.includes("--write");
+    const result = migrateConfig(root, { write });
+    if (!result) throw new Error(`no brewdocs.yml or brewdocs.json in ${root}`);
+    if (rest.includes("--json")) console.log(JSON.stringify(result, null, 2));
+    else {
+      console.log(renderMigrateText(result));
+      for (const n of result.notes) console.log(`   note: ${n}`);
+    }
     return;
   }
 
@@ -1487,9 +1504,18 @@ dark: false
       const name = rest[1];
       const into = path.resolve(process.cwd(), getFlag(rest, "--into") ?? ".");
       if (!name) throw new Error("usage: brewdocs registry install <name> --into <source-dir>");
-      const result = installPlugin(registryDir, name, into);
+      const out: { reason?: "not-found" | "missing-file" | "integrity" } = {};
+      const result = installPlugin(registryDir, name, into, out);
       if (!result) {
-        console.error(`x no plugin named "${name}" in ${registryDir}`);
+        if (out.reason === "integrity") {
+          console.error(
+            `x "${name}" failed integrity verification (the stored module changed after publish) — refusing install. Run \`brewdocs registry verify\`.`,
+          );
+        } else if (out.reason === "missing-file") {
+          console.error(`x "${name}" is listed in ${registryDir} but its module file is missing.`);
+        } else {
+          console.error(`x no plugin named "${name}" in ${registryDir}`);
+        }
         process.exitCode = 1;
         return;
       }
@@ -1510,7 +1536,19 @@ dark: false
       console.log(`🛒 Marketplace gallery -> ${file}`);
       return;
     }
-    throw new Error("usage: brewdocs registry publish|list|search|install|remove|gallery");
+    if (sub === "verify") {
+      const results = verifyRegistry(registryDir);
+      const bad = results.filter((r) => r.status !== "ok");
+      if (rest.includes("--json")) console.log(JSON.stringify(results, null, 2));
+      else if (results.length === 0) console.log(`No plugins in ${registryDir}/.registry.json`);
+      else for (const r of results) console.log(`- ${r.name}@${r.version}  ${r.status}`);
+      if (bad.length) {
+        console.error(`x ${bad.length} registry entr${bad.length === 1 ? "y" : "ies"} failed verification`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+    throw new Error("usage: brewdocs registry publish|list|search|install|remove|verify|gallery");
   }
 
   if (command === "drift") {
@@ -1769,6 +1807,7 @@ Usage:
   brewdocs prove <source> [--strict]   Typecheck every @example against the package
   brewdocs harvest <source> [--json]   Propose examples from README + tests
   brewdocs init [--out <file>]   Scaffold a brewdocs.yml config
+  brewdocs migrate [source] [--write] [--json]   Stamp configVersion on a brewdocs.yml/json
   brewdocs preview <source> [--port 4000] [--watch]  Build and serve locally (--watch live-reloads)
   brewdocs deploy <source> [--name <sub>] [--out <hosting>] [--theme <name>] [--dark] [--storage s3]
                     [--org <name>] [--private [token]] [--draft [--draft-hours N]] [--markdown]
@@ -1793,7 +1832,7 @@ Usage:
    brewdocs ci <source> --base <ref> [--post] [--min-coverage <pct>] [--fail-on-breaking] [--out <file>] [--json]
    brewdocs gate <source> --from <tag> [--to <tag>] [--out <dir>] [--acknowledge [note]] [--json]
    brewdocs audit <dir> [--json] [--min-score <n>] [--group a11y|seo|perf]   v3.0 site audit
-   brewdocs registry publish|list|search|install|remove|gallery   v3.0 plugin registry + marketplace
+   brewdocs registry publish|list|search|install|remove|verify|gallery   v3.0 plugin registry + marketplace
    brewdocs drift <source> [--record] [--from <ref>] [--fail-on-drift]   v3.5 doc drift detection
    brewdocs federate add|list|remove|search|page [--store <dir>]   v3.5 cross-repo federated search
 
@@ -1815,6 +1854,7 @@ Commands:
                      (add --strict to exit 1 on a failing example)
    harvest <src>    Propose @example snippets found in the README + test files
    init             Scaffold a brewdocs.yml in the current directory
+   migrate [src]    Stamp the current configVersion into brewdocs.yml/json (--write to apply)
    preview <src>    Build and serve the docs locally for a quick look
                      (add --watch to rebuild and live-reload on source changes)
    deploy <source>  Deploy to a local hosting dir as <subdomain>.brewdocs.dev
@@ -1846,7 +1886,7 @@ Commands:
                       --json, --min-score <n> gate, --group a11y|seo|perf
     registry         v3.0: plugin registry + marketplace
                       (publish <file> --name --version | list | search <q> |
-                       install <name> --into <src> | remove | gallery [--out])
+                       install <name> --into <src> | remove | verify [--json] | gallery [--out])
     drift            v3.5: doc drift detection — code changed, docs didn't
                       (<src> --record records a baseline in .brewdocs/drift.json;
                        --from <ref> compares against a git tag instead;
@@ -1873,7 +1913,8 @@ Options:
 
 Config: a brewdocs.yml or brewdocs.json in the source dir sets theme, dark,
 name, multi, storage (local | s3), plugins, cache, playground, locale, and
-contentDir defaults. CLI flags override it. v2.0: '--theme' also accepts a
+contentDir defaults (configVersion: current format; 'brewdocs migrate' stamps
+it). CLI flags override it. v2.0: '--theme' also accepts a
 theme manifest (themes/<name>.yml with 'base:', 'vars:', and 'slots:'
 partials); a 'content/' directory of .md/.mdx guide pages is published under
 content/. v3.0: 'aliases:' (name → version redirect pages), 'eol:' (end-of-life

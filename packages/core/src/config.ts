@@ -44,7 +44,12 @@ export interface BrewDocsConfig {
     publicDomain?: string;
   };
   version?: string;
+  /** Format version of this config file (see CURRENT_CONFIG_VERSION). */
+  configVersion?: number;
 }
+
+/** Config format version this build understands; written by `brewdocs migrate`. */
+export const CURRENT_CONFIG_VERSION = 2;
 
 function parseScalar(raw: string): string | boolean {
   const v = raw.trim();
@@ -100,6 +105,7 @@ const KEY_KINDS: Record<string, string> = {
   registry: "string",
   s3: "map",
   version: "string",
+  configVersion: "number",
 };
 
 /** Levenshtein distance, capped — only used to suggest a near-miss key. */
@@ -264,5 +270,27 @@ export function loadConfig(root: string): BrewDocsConfig {
   }
   if (!cfg || typeof cfg !== "object") return {};
   if (file) for (const w of validateConfig(cfg, path.basename(file))) warn(w);
+  // A version newer than we know means the file uses a format we may misread;
+  // an older one is a one-line `brewdocs migrate` away. Absent = legacy, silent.
+  const v = asNumber(cfg.configVersion);
+  if (v !== undefined) {
+    cfg.configVersion = v; // normalize the mini-YAML's numeric string
+    if (v > CURRENT_CONFIG_VERSION) {
+      warn(
+        `configVersion ${v} is newer than this BrewDocs supports (${CURRENT_CONFIG_VERSION}) — update brewdocs`,
+      );
+    } else if (v < CURRENT_CONFIG_VERSION) {
+      warn(`configVersion ${v} is out of date — run \`brewdocs migrate\``);
+    }
+  }
   return cfg;
+}
+
+/** Local coercion for the numeric-string the mini-YAML produces. */
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
 }

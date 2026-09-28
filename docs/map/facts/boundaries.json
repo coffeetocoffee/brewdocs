@@ -1,7 +1,7 @@
 {
   "_why": "What this project deliberately does not do. Stops 'why didn't they just—' review comments and scope creep.",
   "boundaries": [
-    "**No backend service.** Deployment, orgs, domains, TLS issuance, analytics and the plugin marketplace are local emulations backed by JSON files beside the hosting dir. `brewdocs deploy` writes to a local directory unless `--storage s3` is given.",
+    "**No backend service.** Deployment, orgs, domains, TLS issuance, analytics, the plugin registry and federated search are local emulations backed by JSON files beside the hosting dir — there is deliberately no network service. `brewdocs deploy` writes to a local directory unless `--storage s3` is given; the registry records a content hash per entry (`registry verify`) so it is tamper-evident without a server. A hosted control plane would be a separate product, not a mode of this one.",
     "**No real ACME.** TLS is serve-side: the operator supplies a certificate. `createSecureServer` wires it into the same request pipeline.",
     "**No remote cache.** The incremental cache is local extraction-only; rendering always runs.",
     "**No browser in CI.** `brewdocs audit` is static over emitted HTML by explicit design — contrast ratios, real render cost and JS execution are out of scope.",

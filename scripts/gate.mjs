@@ -389,10 +389,17 @@ function checkFindings() {
     try {
       execFileSync(f.verify, { cwd: ROOT, stdio: "pipe", shell: true });
       pass(`finding#${f.id}:verify`);
-    } catch {
+    } catch (e) {
+      // Distinguish a real failure from a signal kill (timeout/OOM under load),
+      // and surface the tail of the command's output. A bare "may have
+      // regressed" once hid a load-induced timeout behind a false regression.
+      const tail = (e.stderr?.toString() || e.stdout?.toString() || "").trim().split("\n").slice(-3).join(" / ");
+      const why = e.signal
+        ? `killed by ${e.signal} — likely a load/timeout flake, not a regression`
+        : `exit ${e.status ?? "?"}`;
       fail(
         `finding#${f.id}:verify`,
-        `verify command failed — "${f.title}" may have regressed`,
+        `verify command failed (${why}) — "${f.title}"${tail ? ` — ${tail}` : ""}`,
       );
     }
   }
