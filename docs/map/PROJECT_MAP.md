@@ -19,7 +19,7 @@ The product's whole job is rendering prose from repositories **you do not own** 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
 | `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,239 loc |
-| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 13,978 loc | 44 files / 5,312 loc |
+| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 13,980 loc | 44 files / 5,312 loc |
 | `@brewdocs/plugin-sdk` | 4.3.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
 **366 test declarations across 53 files** — parsed from the tree, not typed.
@@ -127,7 +127,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 - **No backend service.** Deployment, orgs, domains, TLS issuance, analytics, the plugin registry and federated search are local emulations backed by JSON files beside the hosting dir — there is deliberately no network service. `brewdocs deploy` writes to a local directory unless `--storage s3` is given; the registry records a content hash per entry (`registry verify`) so it is tamper-evident without a server. A hosted control plane would be a separate product, not a mode of this one.
 - **No real ACME.** TLS is serve-side: the operator supplies a certificate. `createSecureServer` wires it into the same request pipeline.
-- **No remote cache.** The incremental cache is local extraction-only; rendering always runs.
+- **No remote cache.** Both caches are local, on disk: extraction (`.brewdocs/extract.json`) and rendering (`.brewdocs/render.json`, opt-in via `--cache`). There is no shared or remote cache — a cache is per-source-deck, never uploaded.
 - **No browser in CI.** `brewdocs audit` is static over emitted HTML by explicit design — contrast ratios, real render cost and JS execution are out of scope.
 - **No AST parsers for non-JS languages.** Adapters are heuristics (D-3). Go is a regex parser; Python shells out to an embedded AST helper and degrades with a warning when `python` is absent.
 - **i18n covers UI chrome only.** README, guides and symbol docs stay as authored; 6 bundled locales over an EN fallback.
@@ -174,9 +174,13 @@ Related: MDX-generated markup (content.ts transformMdx) is HTML we emit ourselve
 
 </details>
 
-<details><summary><b>D-6</b> — The incremental cache is extraction-only and keyed on content hashes</summary>
+<details><summary><b>D-6</b> — Both caches are local, content-hash keyed, and opt-in</summary>
 
-`.brewdocs/extract.json` caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Render always rebuilds. Versioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the fingerprint (huge, irrelevant to the doc model).
+Two caches sit in `.brewdocs/`, both local and never uploaded. Extraction (`.brewdocs/extract.json`) caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Rendering (`.brewdocs/render.json`, added in v4.1) caches rendered pages keyed on `renderFingerprint(model, opts)` — real because rendering is not free once themes/search/export are in play — and is gated on `--cache` (or `config.cache`).
+
+Versioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the extraction fingerprint (huge, irrelevant to the doc model).
+
+Drift note: this entry and boundary #3 said 'rendering always runs' for three releases after v4.1 made that false. Nothing in `map:check` catches stale *prose* — `facts/*.json` is hand-written source, copied through faithfully. Read these files when you touch the pipeline; the generator will not warn you.
 
 </details>
 

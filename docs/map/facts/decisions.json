@@ -28,8 +28,8 @@
     },
     {
       "id": "D-6",
-      "title": "The incremental cache is extraction-only and keyed on content hashes",
-      "body": "`.brewdocs/extract.json` caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Render always rebuilds. Versioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the fingerprint (huge, irrelevant to the doc model)."
+      "title": "Both caches are local, content-hash keyed, and opt-in",
+      "body": "Two caches sit in `.brewdocs/`, both local and never uploaded. Extraction (`.brewdocs/extract.json`) caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Rendering (`.brewdocs/render.json`, added in v4.1) caches rendered pages keyed on `renderFingerprint(model, opts)` — real because rendering is not free once themes/search/export are in play — and is gated on `--cache` (or `config.cache`).\n\nVersioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the extraction fingerprint (huge, irrelevant to the doc model).\n\nDrift note: this entry and boundary #3 said 'rendering always runs' for three releases after v4.1 made that false. Nothing in `map:check` catches stale *prose* — `facts/*.json` is hand-written source, copied through faithfully. Read these files when you touch the pipeline; the generator will not warn you."
     }
   ]
 }

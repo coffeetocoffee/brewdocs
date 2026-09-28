@@ -9,8 +9,10 @@ import type { BrewDocsPlugin } from "./plugins.js";
 /**
  * v2.0 incremental extraction: content-address the source tree, cache the
  * (expensive) ExtractResult under `.brewdocs/extract.json`, and reuse it
- * byte-for-byte when nothing relevant changed. Only extraction is cached —
- * rendering is fast and theme/content inputs are checked per build.
+ * byte-for-byte when nothing relevant changed.
+ *
+ * Rendering has its own local cache (render-cache.ts, `.brewdocs/render.json`,
+ * v4.1, opt-in via `--cache`) — this module is extraction only.
  */
 
 const CACHE_VERSION = 1;

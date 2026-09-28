@@ -22,7 +22,7 @@
       "version": "4.3.0",
       "role": "pipeline: extract → model → render",
       "srcFiles": 60,
-      "srcLoc": 13978,
+      "srcLoc": 13980,
       "testFiles": 44,
       "testLoc": 5312
     },
