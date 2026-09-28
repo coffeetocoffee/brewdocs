@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/cli",
-  "version": "4.4.0",
+  "version": "4.4.1",
   "description": "BrewDocs command line interface. Brew your docs, serve them hot.",
   "type": "module",
   "license": "MIT",
