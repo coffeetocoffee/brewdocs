@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadConfig } from "@brewdocs/core";
+import { loadConfig, __resetConfigWarnings } from "@brewdocs/core";
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-cfg-"));
@@ -63,6 +63,7 @@ describe("loadConfig validation (warns, never throws)", () => {
   let warns: string[];
   let spy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
+    __resetConfigWarnings();
     warns = [];
     spy = vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => {
       warns.push(a.join(" "));
@@ -100,5 +101,58 @@ describe("loadConfig validation (warns, never throws)", () => {
     fs.writeFileSync(path.join(dir, "brewdocs.json"), "{ not valid json");
     expect(loadConfig(dir)).toEqual({});
     expect(warns.join("\n")).toMatch(/could not be parsed/);
+  });
+});
+
+// v4.4: a key with a fixed set of values is a *string* to matchesKind, so
+// `storage: lcoal` used to pass validation and then silently no-op.
+describe("loadConfig validation — enum values", () => {
+  let warns: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    __resetConfigWarnings();
+    warns = [];
+    spy = vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => {
+      warns.push(a.join(" "));
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it("warns and drops a typo'd storage value instead of silently going local", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), "storage: lcoal\n");
+    const cfg = loadConfig(dir);
+    expect(warns.join("\n")).toMatch(/"storage" .*must be one of local, s3/);
+    expect(cfg.storage).toBeUndefined();
+  });
+
+  it("accepts a valid storage value silently", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), "storage: s3\n");
+    expect(loadConfig(dir).storage).toBe("s3");
+    expect(warns).toEqual([]);
+  });
+
+  it("warns on an unknown locale but accepts region/base forms", () => {
+    const bad = tmp();
+    fs.writeFileSync(path.join(bad, "brewdocs.yml"), "locale: xx\n");
+    const badCfg = loadConfig(bad);
+    expect(warns.join("\n")).toMatch(/"locale" .*must be one of/);
+    expect(badCfg.locale).toBeUndefined();
+
+    warns = [];
+    const good = tmp();
+    fs.writeFileSync(path.join(good, "brewdocs.yml"), "locale: id-ID\n");
+    expect(loadConfig(good).locale).toBe("id-ID");
+    expect(warns).toEqual([]);
+  });
+
+  it("warns once per problem, not once per loadConfig call", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "brewdocs.yml"), "storage: lcoal\n");
+    loadConfig(dir);
+    loadConfig(dir);
+    loadConfig(dir);
+    expect(warns.filter((w) => /storage/.test(w))).toHaveLength(1);
   });
 });

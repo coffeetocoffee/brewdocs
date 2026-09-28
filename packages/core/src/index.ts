@@ -163,7 +163,12 @@ export {
   type HarvestProposal,
 } from "./harvest.js";
 export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
-export { loadConfig, type BrewDocsConfig, CURRENT_CONFIG_VERSION } from "./config.js";
+export {
+  loadConfig,
+  __resetConfigWarnings,
+  type BrewDocsConfig,
+  CURRENT_CONFIG_VERSION,
+} from "./config.js";
 export { migrateConfig, renderMigrateText, type MigrateResult } from "./migrate.js";
 export { escapeHtml, safeUrl } from "./escape.js";
 export {

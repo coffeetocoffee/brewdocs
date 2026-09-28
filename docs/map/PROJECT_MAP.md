@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,239 loc |
-| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 13,980 loc | 44 files / 5,312 loc |
+| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,241 loc |
+| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 14,042 loc | 44 files / 5,377 loc |
 | `@brewdocs/plugin-sdk` | 4.3.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**366 test declarations across 53 files** — parsed from the tree, not typed.
+**370 test declarations across 53 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -189,6 +189,16 @@ Drift note: this entry and boundary #3 said 'rendering always runs' for three re
 `searchFederation` (federation.ts) scores every indexed symbol with plain substring term matching: a symbol-name hit adds 5 per query term, body hits add their (capped-at-10) occurrence count per term, and the repo name is folded into the body so a repo-name query surfaces that repo's symbols. Results sort by score. There is no embedding model, no vector index and no web crawl — the index is exactly the local `docmodel.json` files added via `brewdocs federate`.
 
 Consequence, and why this is recorded: ranking is *lexical*, so it is fast and dependency-free but blind to synonyms and paraphrase. 'auth' will not find a symbol documented as 'login'. That is the tradeoff (D-1 keeps the pipeline dependency-free); a semantic ranker is a separate product decision, not a bug to file. The in-page search reimplements the same scoring in vanilla JS, so the two stay intentionally in sync.
+
+</details>
+
+<details><summary><b>D-8</b> — Config validation is shape-and-enum only; it warns and drops, never throws</summary>
+
+`validateConfig` (config.ts) checks three things and nothing more: the key is known (with a Levenshtein 'did you mean'), the value has the right JSON shape, and — since v4.4 — a key with a fixed value set (`storage` local|s3, `locale` a bundled code) holds one of them. Anything deeper (a valid bucket name, a real path, a coherent combination of flags) is *not* validated.
+
+Why enums got their own check: `matchesKind` sees `storage` as a plain string, so `storage: lcoal` was a legal value, passed validation, and then no-op'd — `buildStorage` compares against `"s3"` and quietly deployed locally. The whole point of this function is to turn a silently-ignored setting into a warning, so a typo'd enum was the one case it most needed to catch. `locale` accepts region/base forms (`id-ID`, `EN`) by comparing the base code, mirroring `normalizeLocale`.
+
+Two conventions hold. It degrades — warn and drop the key so defaults apply — never throws (a malformed config used to be swallowed whole). And warnings are de-duplicated per message per process (`warnedMessages`): `loadConfig` runs many times in one build (cache, content, theme, deploy, every command), so without this a single typo printed five times.
 
 </details>
 

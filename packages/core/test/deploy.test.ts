@@ -39,7 +39,10 @@ describe("Phase 4 — deploy", () => {
     expect(combineSubdomain("Acme Corp", "My Lib!")).toBe("acme-corp--my-lib");
   });
 
-  it("exportSite writes a self-contained index.html", async () => {
+  // These three invoke a full build (25-35s each). Under `npm run verify` the
+  // gate's own server test runs alongside them, so 60s alone can be exceeded;
+  // retry keeps a loaded machine from looking like a regression.
+  it("exportSite writes a self-contained index.html", { timeout: 60_000, retry: 2 }, async () => {
     const out = tmp();
     const file = await exportSite({ root: libRoot }, out);
     expect(fs.existsSync(file)).toBe(true);
@@ -48,40 +51,48 @@ describe("Phase 4 — deploy", () => {
     expect(html).toContain('id="search-index"');
   });
 
-  it("deploySite writes to hosting/<subdomain> and returns a hosted URL", async () => {
-    const hosting = tmp();
-    const result = await deploySite(
-      { root: libRoot, name: "lib" },
-      hosting,
-      "mylib",
-    );
-    expect(result.url).toBe("https://mylib.brewdocs.dev");
-    expect(fs.existsSync(path.join(hosting, "mylib", "index.html"))).toBe(true);
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(hosting, "mylib", ".brewdocs.json"), "utf8"),
-    );
-    expect(manifest.subdomain).toBe("mylib");
-    expect(manifest.url).toBe("https://mylib.brewdocs.dev");
-  });
+  it(
+    "deploySite writes to hosting/<subdomain> and returns a hosted URL",
+    { timeout: 60_000, retry: 2 },
+    async () => {
+      const hosting = tmp();
+      const result = await deploySite(
+        { root: libRoot, name: "lib" },
+        hosting,
+        "mylib",
+      );
+      expect(result.url).toBe("https://mylib.brewdocs.dev");
+      expect(fs.existsSync(path.join(hosting, "mylib", "index.html"))).toBe(true);
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(hosting, "mylib", ".brewdocs.json"), "utf8"),
+      );
+      expect(manifest.subdomain).toBe("mylib");
+      expect(manifest.url).toBe("https://mylib.brewdocs.dev");
+    },
+  );
 
-  it("deploySite records org + private visibility and hashes the token", async () => {
-    const hosting = tmp();
-    const result = await deploySite(
-      { root: libRoot, name: "lib" },
-      hosting,
-      "acme--mylib",
-      {},
-      undefined,
-      { org: "acme", visibility: "private", token: "s3cret" },
-    );
-    expect(result.visibility).toBe("private");
-    expect(result.org).toBe("acme");
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(hosting, "acme--mylib", ".brewdocs.json"), "utf8"),
-    );
+  it(
+    "deploySite records org + private visibility and hashes the token",
+    { timeout: 60_000, retry: 2 },
+    async () => {
+      const hosting = tmp();
+      const result = await deploySite(
+        { root: libRoot, name: "lib" },
+        hosting,
+        "acme--mylib",
+        {},
+        undefined,
+        { org: "acme", visibility: "private", token: "s3cret" },
+      );
+      expect(result.visibility).toBe("private");
+      expect(result.org).toBe("acme");
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(hosting, "acme--mylib", ".brewdocs.json"), "utf8"),
+      );
     expect(manifest.visibility).toBe("private");
     expect(manifest.org).toBe("acme");
     expect(manifest.tokenHash).toBeTruthy();
     expect(manifest.tokenHash).not.toBe("s3cret");
-  });
+    },
+  );
 });

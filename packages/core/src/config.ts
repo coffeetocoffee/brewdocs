@@ -1,5 +1,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { listLocales } from "./i18n.js";
+
+/**
+ * Config warnings already emitted this process, so the many `loadConfig`
+ * calls in one build (cache, content, theme, deploy, each command) do not
+ * repeat the same complaint. Keyed on the message text.
+ */
+const warnedMessages = new Set<string>();
+
+/** Test hook: clear the warn-once memory so each test starts clean. */
+export function __resetConfigWarnings(): void {
+  warnedMessages.clear();
+}
 
 export interface BrewDocsConfig {
   theme?: string;
@@ -108,6 +121,32 @@ const KEY_KINDS: Record<string, string> = {
   configVersion: "number",
 };
 
+/**
+ * Keys whose value is one of a fixed set, not a free string. `matchesKind`
+ * only checks the JSON shape, so these need an explicit value check — a typo
+ * like `storage: lcoal` is a valid *string* and would otherwise be accepted
+ * and silently ignored.
+ */
+const KEY_ENUMS: Record<string, readonly string[]> = {
+  storage: ["local", "s3"],
+  locale: listLocales().map((l) => l.code),
+};
+
+/**
+ * Enum membership for a config key. `locale` mirrors `normalizeLocale`: it
+ * accepts `id-ID`/`EN`/`pt-BR` forms and only rejects a base code that is not
+ * one of the bundled locales (`xx` would silently fall back to `en`).
+ */
+function enumAllows(key: string, value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const allowed = KEY_ENUMS[key] ?? [];
+  if (key === "locale") {
+    const base = value.toLowerCase().split(/[-_]/)[0];
+    return allowed.includes(base);
+  }
+  return allowed.includes(value);
+}
+
 /** Levenshtein distance, capped — only used to suggest a near-miss key. */
 function editDistance(a: string, b: string): number {
   const m = a.length;
@@ -183,6 +222,17 @@ function validateConfig(cfg: BrewDocsConfig, file: string): string[] {
         `"${key}" in ${file} should be a ${kind}, got ${Array.isArray(value) ? "list" : typeof value} (ignored)`,
       );
       delete (cfg as Record<string, unknown>)[key];
+      continue;
+    }
+    // A key with a fixed set of valid values needs a value check too: the
+    // `kind` is "string", so `storage: lcoal` satisfies matchesKind and then
+    // silently no-ops downstream. Warn + drop instead.
+    const allowed = KEY_ENUMS[key];
+    if (allowed && !enumAllows(key, value)) {
+      warnings.push(
+        `"${key}" in ${file} must be one of ${allowed.join(", ")}, got "${String(value)}" (ignored — falling back to the default)`,
+      );
+      delete (cfg as Record<string, unknown>)[key];
     }
   }
   return warnings;
@@ -248,7 +298,14 @@ function parseSimpleYaml(text: string): BrewDocsConfig {
 export function loadConfig(root: string): BrewDocsConfig {
   const yamlPath = path.join(root, "brewdocs.yml");
   const jsonPath = path.join(root, "brewdocs.json");
-  const warn = (msg: string) => console.warn(`[brewdocs] ${msg}`);
+  // `loadConfig` runs many times per build (cache, content, theme, each
+  // command). A config problem is the same every time, so warn once per
+  // distinct message per process — otherwise a single typo prints five times.
+  const warn = (msg: string) => {
+    if (warnedMessages.has(msg)) return;
+    warnedMessages.add(msg);
+    console.warn(`[brewdocs] ${msg}`);
+  };
 
   let cfg: BrewDocsConfig | undefined;
   let file: string | undefined;
