@@ -18,9 +18,9 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.3.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,241 loc |
-| `@brewdocs/core` | 4.3.0 | pipeline: extract → model → render | 60 files / 14,042 loc | 44 files / 5,377 loc |
-| `@brewdocs/plugin-sdk` | 4.3.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
+| `@brewdocs/cli` | 4.4.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,241 loc |
+| `@brewdocs/core` | 4.4.0 | pipeline: extract → model → render | 60 files / 14,042 loc | 44 files / 5,377 loc |
+| `@brewdocs/plugin-sdk` | 4.4.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
 **370 test declarations across 53 files** — parsed from the tree, not typed.
 
