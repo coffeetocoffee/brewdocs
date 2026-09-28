@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.4.0 | commands + hosting server | 4 files / 3,165 loc | 8 files / 1,241 loc |
-| `@brewdocs/core` | 4.4.0 | pipeline: extract → model → render | 60 files / 14,042 loc | 44 files / 5,377 loc |
+| `@brewdocs/cli` | 4.4.0 | commands + hosting server | 4 files / 3,172 loc | 8 files / 1,241 loc |
+| `@brewdocs/core` | 4.4.0 | pipeline: extract → model → render | 60 files / 14,069 loc | 45 files / 5,503 loc |
 | `@brewdocs/plugin-sdk` | 4.4.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**370 test declarations across 53 files** — parsed from the tree, not typed.
+**376 test declarations across 54 files** — parsed from the tree, not typed.
 
 > 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -101,6 +101,9 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-19** — Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.
   - _why:_ The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.
   - _enforced by:_ scripts/gate.mjs (inv-19:write-endpoints-guarded)
+- **INV-20** — A fetched (npm/git) source must not be able to name its own plugins: plugins listed in the source's brewdocs.yml are ignored unless the source was chosen locally. Plugins the operator passed explicitly (--plugins) still load.
+  - _why:_ A plugin is arbitrary code — loaded via require/import, with no signature and no sandbox. The specifier is read from the source's own brewdocs.yml, and BrewDocs' stated job is rendering repos you do not own, so honoring it turns every doc build into remote code execution on the operator's machine. This is the same threat INV-17 already refuses for the python adapter, in a wider blast radius. The subtle part is propagation:  must survive every hop from resolveInput to resolveSetup, and each hop that rebuilt a Source without it silently re-enabled the repo's plugins. That is how the first version of this fix was bypassed three times (per-version worktree, extractVersion, and the CLI build command) before the gate check was written to assert all of them.
+  - _enforced by:_ packages/core/test/plugin-fetched.test.ts + scripts/gate.mjs (inv-20:fetched-source-cannot-name-plugins, which asserts the guard and every Source re-construction site)
 
 ### Server defaults
 
@@ -202,11 +205,17 @@ Two conventions hold. It degrades — warn and drop the key so defaults apply �
 
 </details>
 
+<details><summary><b>D-9</b> — Plugins are trusted code, so only the operator may choose them</summary>
+
+A plugin is arbitrary code: loadPlugin resolves the specifier with createRequire and imports it, with no signature, no sandbox and no capability limit (D-1 keeps the runtime dependency-free, so there is no isolation mechanism to lean on). The question is therefore not whether a plugin is safe — it is who is allowed to name one. A locally chosen repo may name its own plugins: that is the plugin feature. A fetched repo may not, because BrewDocs exists to render codebases the operator does not own, and a brewdocs.yml that can name a plugin turns every doc build into remote code execution (finding #19, INV-20). Plugins passed explicitly with --plugins always load, on a fetched source or not, because that is the operator decision rather than the repo. The general rule this encodes: anything the SOURCE tree controls (config values that select code, theme slot paths, redirects) is untrusted input, and anything the OPERATOR passes on the command line is a decision. If a new config key can cause code to load rather than merely change output, it belongs on the untrusted side of that line.
+
+</details>
+
 ## Findings
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**18 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**19 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -228,6 +237,7 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 16 | low | No CSRF/Origin check on write endpoints | fixed | `npx vitest run packages/cli/src/server.test.ts` |
 | 17 | low | No golden-output test for the renderer | fixed | `inv-18:renderer-golden` |
 | 18 | low | api.test.ts was flaky under load (2 tests at a 30s timeout) | fixed | `npx vitest run packages/cli/src/api.test.ts` |
+| 19 | high | A fetched repo brewdocs.yml could name a plugin, executing arbitrary code at build time (RCE) | fixed | `inv-20:fetched-source-cannot-name-plugins` |
 
 ## Working in this repo
 

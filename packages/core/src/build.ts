@@ -41,9 +41,24 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
     : process.env.BREWDOCS_REGISTRY
       ? path.resolve(process.env.BREWDOCS_REGISTRY)
       : undefined;
+  // Finding #19: a plugin is arbitrary code, loaded via require/import with no
+  // signature and no sandbox. The specifier comes from the source's own
+  // brewdocs.yml, so honoring it on a fetched (npm/git) source would let any
+  // repo you document run code on your machine the moment you `brewdocs build`
+  // it — the same threat INV-17 already refuses for the python adapter. Plugins
+  // the *operator* passed explicitly (options.plugins / --plugins) still load:
+  // those are the caller's own choice, not the repo's.
+  const configPlugins = config.plugins ?? [];
+  let repoPlugins = configPlugins;
+  if (source.fetched && configPlugins.length > 0) {
+    console.warn(
+      `[brewdocs] ignoring ${configPlugins.length} plugin(s) named in this source's brewdocs.yml — a fetched source cannot choose code that runs on your machine (pass --plugins to load one explicitly)`,
+    );
+    repoPlugins = [];
+  }
   const plugins: BrewDocsPlugin[] = [
     ...(options.plugins ?? []),
-    ...loadPlugins(config.plugins, root, registryDir),
+    ...loadPlugins(repoPlugins, root, registryDir),
   ];
   const themeRef = options.theme ?? config.theme;
   const manifest = themeRef ? loadThemeManifest(themeRef, root) : null;
@@ -233,7 +248,12 @@ export async function extractVersion(
   }
 
   try {
-    return extractFromSource({ root: srcRoot, name: source.name }, opts.plugins ?? []);
+    // Finding #19: preserve `fetched` so a versioned extraction from a fetched
+    // repo is still treated as untrusted (see buildVersions).
+    return extractFromSource(
+      { root: srcRoot, name: source.name, fetched: source.fetched },
+      opts.plugins ?? [],
+    );
   } finally {
     if (cleanup) cleanup();
   }
@@ -352,7 +372,7 @@ export async function buildVersion(
   }
 
   const file = build(
-    { root: srcRoot, name: source.name },
+    { root: srcRoot, name: source.name, fetched: source.fetched },
     outDir,
     {
       ...options,
@@ -416,7 +436,14 @@ export async function buildVersions(
       cleanup = () => removeWorktree(gitRoot, tmp);
     }
 
-    const model = buildModel({ root: srcRoot, name: source.name }, singleOptions);
+    // Finding #19: carry `fetched` onto the per-version source. A checked-out
+    // worktree is still the fetched repo's tree — dropping the flag here would
+    // let a versioned build re-read that tree's brewdocs.yml and load its
+    // plugins even though the working-tree build refused them.
+    const model = buildModel(
+      { root: srcRoot, name: source.name, fetched: source.fetched },
+      singleOptions,
+    );
     models.set(v, model);
     const links = versions.map((o) => ({
       version: o,

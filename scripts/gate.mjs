@@ -338,6 +338,42 @@ function checkPythonFetchedGuard() {
   else fail("inv-17:python-refuses-fetched", "python adapter no longer checks ctx.fetched");
 }
 
+/**
+ * INV-20: a plugin is arbitrary code, and its specifier is read from the
+ * source's own brewdocs.yml. A fetched (npm/git) source must not get to choose
+ * code that runs on the operator's machine (finding #19).
+ *
+ * The interesting failure mode here is propagation, not the guard itself.
+ * `fetched` has to survive every hop between resolveInput and resolveSetup, and
+ * each hop that rebuilt a Source without it silently re-enabled the repo's
+ * plugins — which is exactly how the first version of this fix was bypassed
+ * three times. So this asserts the guard *and* every re-construction site.
+ */
+function checkPluginFetchedGuard() {
+  const buildSrc = read("packages/core/src/build.ts");
+  const cliSrc = read("packages/cli/src/index.ts");
+
+  // The guard itself: repo-config plugins are dropped when source.fetched...
+  const guarded = /if \(source\.fetched && configPlugins\.length > 0\)/.test(buildSrc);
+  // ...and the drop is announced, not silent.
+  const warns = /cannot choose code that runs on your machine/.test(buildSrc);
+
+  // Every place a Source is rebuilt for a per-version worktree, or handed to
+  // build() from the CLI, must carry `fetched` through.
+  const versioned = (
+    buildSrc.match(/root: srcRoot, name: source\.name, fetched: source\.fetched/g) ?? []
+  ).length;
+  const cliPropagates = /fetched: resolved\.source\.fetched/.test(cliSrc);
+
+  if (guarded && warns && versioned >= 3 && cliPropagates)
+    pass("inv-20:fetched-source-cannot-name-plugins");
+  else
+    fail(
+      "inv-20:fetched-source-cannot-name-plugins",
+      `guard=${guarded}, warns=${warns}, versionedRebuilds=${versioned}/3, cliPropagates=${cliPropagates}`,
+    );
+}
+
 /** INV-18: the renderer has a golden-output snapshot (finding #17). */
 function checkRendererGolden() {
   const test = path.join(ROOT, "packages", "core", "test", "render.golden.test.ts");
@@ -425,6 +461,7 @@ checkReleaseVerify();
 checkTrustProxy();
 checkReadGuards();
 checkPythonFetchedGuard();
+checkPluginFetchedGuard();
 checkRendererGolden();
 checkFindings();
 

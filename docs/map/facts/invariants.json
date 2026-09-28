@@ -114,6 +114,12 @@
       "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
       "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
       "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
+    },
+    {
+      "id": "INV-20",
+      "rule": "A fetched (npm/git) source must not be able to name its own plugins: plugins listed in the source's brewdocs.yml are ignored unless the source was chosen locally. Plugins the operator passed explicitly (--plugins) still load.",
+      "why": "A plugin is arbitrary code — loaded via require/import, with no signature and no sandbox. The specifier is read from the source's own brewdocs.yml, and BrewDocs' stated job is rendering repos you do not own, so honoring it turns every doc build into remote code execution on the operator's machine. This is the same threat INV-17 already refuses for the python adapter, in a wider blast radius. The subtle part is propagation:  must survive every hop from resolveInput to resolveSetup, and each hop that rebuilt a Source without it silently re-enabled the repo's plugins. That is how the first version of this fix was bypassed three times (per-version worktree, extractVersion, and the CLI build command) before the gate check was written to assert all of them.",
+      "enforcedBy": "packages/core/test/plugin-fetched.test.ts + scripts/gate.mjs (inv-20:fetched-source-cannot-name-plugins, which asserts the guard and every Source re-construction site)"
     }
   ]
 }

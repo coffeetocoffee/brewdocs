@@ -13,7 +13,7 @@
       "version": "4.4.0",
       "role": "commands + hosting server",
       "srcFiles": 4,
-      "srcLoc": 3165,
+      "srcLoc": 3172,
       "testFiles": 8,
       "testLoc": 1241
     },
@@ -22,9 +22,9 @@
       "version": "4.4.0",
       "role": "pipeline: extract → model → render",
       "srcFiles": 60,
-      "srcLoc": 14042,
-      "testFiles": 44,
-      "testLoc": 5377
+      "srcLoc": 14069,
+      "testFiles": 45,
+      "testLoc": 5503
     },
     {
       "name": "@brewdocs/plugin-sdk",
@@ -37,8 +37,8 @@
     }
   ],
   "tests": {
-    "files": 53,
-    "total": 370,
+    "files": 54,
+    "total": 376,
     "skipped": 0,
     "loopFiles": [
       "packages/core/test/audit.test.ts",
@@ -254,6 +254,12 @@
       "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
       "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
       "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
+    },
+    {
+      "id": "INV-20",
+      "rule": "A fetched (npm/git) source must not be able to name its own plugins: plugins listed in the source's brewdocs.yml are ignored unless the source was chosen locally. Plugins the operator passed explicitly (--plugins) still load.",
+      "why": "A plugin is arbitrary code — loaded via require/import, with no signature and no sandbox. The specifier is read from the source's own brewdocs.yml, and BrewDocs' stated job is rendering repos you do not own, so honoring it turns every doc build into remote code execution on the operator's machine. This is the same threat INV-17 already refuses for the python adapter, in a wider blast radius. The subtle part is propagation:  must survive every hop from resolveInput to resolveSetup, and each hop that rebuilt a Source without it silently re-enabled the repo's plugins. That is how the first version of this fix was bypassed three times (per-version worktree, extractVersion, and the CLI build command) before the gate check was written to assert all of them.",
+      "enforcedBy": "packages/core/test/plugin-fetched.test.ts + scripts/gate.mjs (inv-20:fetched-source-cannot-name-plugins, which asserts the guard and every Source re-construction site)"
     }
   ],
   "findings": [
@@ -436,6 +442,17 @@
       "fixedIn": "v3.8.0",
       "detail": "A full-suite run on 2026-09-26 failed two endpoint tests at 31.2s / 33.9s against `{ timeout: 30_000 }`; a solo run of the file passed in 28.7s and an immediate re-run of the full suite went green. Both tests do a full TS extraction synchronously, so they are sensitive to load. Found by running the suite while building the map generator.",
       "verify": "npx vitest run packages/cli/src/api.test.ts",
+      "proven": true
+    },
+    {
+      "id": 19,
+      "severity": "high",
+      "title": "A fetched repo brewdocs.yml could name a plugin, executing arbitrary code at build time (RCE)",
+      "status": "fixed",
+      "fixedIn": "v4.4.1",
+      "detail": "Reproduced by execution on 2026-09-28, not inferred: a synthetic repo whose brewdocs.yml contained plugins: [./pwn.cjs], with the plugin writing a marker file, ran that code during brewdocs build. loadPlugin resolves the specifier with requireFrom(root)(abs) — no signature, no sandbox — and build.ts called loadPlugins(config.plugins, ...) with no check of source.fetched. The guard for this class already existed and was simply not applied: finding #15 / INV-17 made the python adapter refuse a fetched source for exactly this reason. Three further bypasses were found while fixing it, all the same root cause (a Source rebuilt without carrying fetched): the per-version worktree in buildVersions, the extractVersion checkout, and the CLI build command resolveCliSource, which dropped the flag on the main brewdocs build path. All four sites now propagate fetched and resolveSetup drops repo-config plugins for a fetched source. Operator-passed --plugins still load, since that is the caller own choice, and a locally chosen source is unaffected.",
+      "checkedBy": "inv-20:fetched-source-cannot-name-plugins",
+      "verify": "npx vitest run packages/core/test/plugin-fetched.test.ts",
       "proven": true
     }
   ]

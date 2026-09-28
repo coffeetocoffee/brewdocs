@@ -247,13 +247,20 @@ function resolveCliSource(
   input: string,
   nameOverride: string | undefined,
 ): {
-  src: { root: string; name?: string };
+  src: { root: string; name?: string; fetched?: boolean };
   name: string | undefined;
   cleanup: () => void;
 } {
   const resolved = resolveInput(input);
   return {
-    src: { root: resolved.source.root, name: nameOverride ?? resolved.source.name },
+    // Finding #19: `fetched` must survive this hop. resolveInput sets it for
+    // npm/git sources, and it is what stops a fetched repo's brewdocs.yml from
+    // naming a plugin that would run arbitrary code on the operator's machine.
+    src: {
+      root: resolved.source.root,
+      name: nameOverride ?? resolved.source.name,
+      fetched: resolved.source.fetched,
+    },
     name: resolved.source.name,
     cleanup: resolved.cleanup,
   };
