@@ -30,6 +30,11 @@
       "id": "D-6",
       "title": "Both caches are local, content-hash keyed, and opt-in",
       "body": "Two caches sit in `.brewdocs/`, both local and never uploaded. Extraction (`.brewdocs/extract.json`) caches the ExtractResult keyed on a fingerprint of sorted relpath+sha256 plus the plugin names. Rendering (`.brewdocs/render.json`, added in v4.1) caches rendered pages keyed on `renderFingerprint(model, opts)` — real because rendering is not free once themes/search/export are in play — and is gated on `--cache` (or `config.cache`).\n\nVersioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the extraction fingerprint (huge, irrelevant to the doc model).\n\nDrift note: this entry and boundary #3 said 'rendering always runs' for three releases after v4.1 made that false. Nothing in `map:check` catches stale *prose* — `facts/*.json` is hand-written source, copied through faithfully. Read these files when you touch the pipeline; the generator will not warn you."
+    },
+    {
+      "id": "D-7",
+      "title": "Federated search ranks by term counting — no embeddings, no crawl",
+      "body": "`searchFederation` (federation.ts) scores every indexed symbol with plain substring term matching: a symbol-name hit adds 5 per query term, body hits add their (capped-at-10) occurrence count per term, and the repo name is folded into the body so a repo-name query surfaces that repo's symbols. Results sort by score. There is no embedding model, no vector index and no web crawl — the index is exactly the local `docmodel.json` files added via `brewdocs federate`.\n\nConsequence, and why this is recorded: ranking is *lexical*, so it is fast and dependency-free but blind to synonyms and paraphrase. 'auth' will not find a symbol documented as 'login'. That is the tradeoff (D-1 keeps the pipeline dependency-free); a semantic ranker is a separate product decision, not a bug to file. The in-page search reimplements the same scoring in vanilla JS, so the two stay intentionally in sync."
     }
   ]
 }

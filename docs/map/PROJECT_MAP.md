@@ -126,7 +126,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 ## Boundaries and non-goals
 
 - **No backend service.** Deployment, orgs, domains, TLS issuance, analytics, the plugin registry and federated search are local emulations backed by JSON files beside the hosting dir — there is deliberately no network service. `brewdocs deploy` writes to a local directory unless `--storage s3` is given; the registry records a content hash per entry (`registry verify`) so it is tamper-evident without a server. A hosted control plane would be a separate product, not a mode of this one.
-- **No real ACME.** TLS is serve-side: the operator supplies a certificate. `createSecureServer` wires it into the same request pipeline.
+- **No real ACME.** TLS is serve-side: the operator supplies a certificate. `createSecureServer` wires it into the same request pipeline. Corollary for testing: because there is nothing to issue against, the TLS surface is verified **fail-fast** — invalid credentials throw and a missing cert file degrades to `undefined` — not end-to-end. An 'actually serves HTTPS' test would require certificate issuance, which boundary #1 and D-4 rule out.
 - **No remote cache.** Both caches are local, on disk: extraction (`.brewdocs/extract.json`) and rendering (`.brewdocs/render.json`, opt-in via `--cache`). There is no shared or remote cache — a cache is per-source-deck, never uploaded.
 - **No browser in CI.** `brewdocs audit` is static over emitted HTML by explicit design — contrast ratios, real render cost and JS execution are out of scope.
 - **No AST parsers for non-JS languages.** Adapters are heuristics (D-3). Go is a regex parser; Python shells out to an embedded AST helper and degrades with a warning when `python` is absent.
@@ -181,6 +181,14 @@ Two caches sit in `.brewdocs/`, both local and never uploaded. Extraction (`.bre
 Versioned builds pass `cache: false` because git-worktree churn makes the fingerprint useless. package-lock.json is excluded from the extraction fingerprint (huge, irrelevant to the doc model).
 
 Drift note: this entry and boundary #3 said 'rendering always runs' for three releases after v4.1 made that false. Nothing in `map:check` catches stale *prose* — `facts/*.json` is hand-written source, copied through faithfully. Read these files when you touch the pipeline; the generator will not warn you.
+
+</details>
+
+<details><summary><b>D-7</b> — Federated search ranks by term counting — no embeddings, no crawl</summary>
+
+`searchFederation` (federation.ts) scores every indexed symbol with plain substring term matching: a symbol-name hit adds 5 per query term, body hits add their (capped-at-10) occurrence count per term, and the repo name is folded into the body so a repo-name query surfaces that repo's symbols. Results sort by score. There is no embedding model, no vector index and no web crawl — the index is exactly the local `docmodel.json` files added via `brewdocs federate`.
+
+Consequence, and why this is recorded: ranking is *lexical*, so it is fast and dependency-free but blind to synonyms and paraphrase. 'auth' will not find a symbol documented as 'login'. That is the tradeoff (D-1 keeps the pipeline dependency-free); a semantic ranker is a separate product decision, not a bug to file. The in-page search reimplements the same scoring in vanilla JS, so the two stay intentionally in sync.
 
 </details>
 
