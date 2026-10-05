@@ -13,7 +13,9 @@ import {
   escapeHtml,
   exportSite,
   buildMarkdown,
+  handleMcpRequest,
   resolveInput,
+  type McpToolCall,
   type RenderOptions,
   type Source,
   type StorageAdapter,
@@ -63,9 +65,36 @@ interface SiteStats {
   paths?: Record<string, number>;
   lastViewed?: string;
   lastBuild?: string;
+  /** v4.5: total MCP tool calls served for this site. */
+  toolCalls?: number;
+  /** v4.5: one row per distinct (tool, query) — the closed-loop signal. */
+  queries?: Record<string, QueryStat>;
 }
 
-/** Per-site pageview/build counters, persisted next to the hosting dir. */
+/**
+ * v4.5: what agents asked a site's docmodel for, and whether they found it.
+ * A miss (lastHits 0) is the actionable half: the symbols people want that the
+ * docs do not name. Aggregated per (tool, query) so repeated misses rank up.
+ */
+interface QueryStat {
+  tool: string;
+  query: string;
+  calls: number;
+  misses: number;
+  lastHits: number;
+  lastAt: string;
+}
+
+/** One unanswered-query row, as returned by `gapReport`. */
+export interface GapEntry {
+  site: string;
+  tool: string;
+  query: string;
+  calls: number;
+  misses: number;
+}
+
+/** Per-site pageview/build/tool-call counters, persisted next to the hosting dir. */
 class StatsStore {
   private data = new Map<string, SiteStats>();
   constructor(private file: string) {
@@ -107,6 +136,57 @@ class StatsStore {
     this.data.set(sub, s);
     this.save();
   }
+  /**
+   * v4.5: record one MCP `tools/call`. `call.hits === 0` is a miss — the agent
+   * asked for something the docs could not name. This is the only write path
+   * that turns a site's consumption back into a signal its owner can act on.
+   */
+  recordToolCall(sub: string, call: McpToolCall): void {
+    const s = this.data.get(sub) ?? { views: 0, builds: 0 };
+    s.toolCalls = (s.toolCalls ?? 0) + 1;
+    s.queries ??= {};
+    const key = `${call.tool}\u0000${call.query}`;
+    const row = s.queries[key] ?? {
+      tool: call.tool,
+      query: call.query,
+      calls: 0,
+      misses: 0,
+      lastHits: 0,
+      lastAt: "",
+    };
+    row.calls++;
+    if (call.hits === 0) row.misses++;
+    row.lastHits = call.hits;
+    row.lastAt = new Date().toISOString();
+    s.queries[key] = row;
+    this.data.set(sub, s);
+    this.save();
+  }
+  /**
+   * Queries that returned nothing, ranked by miss count. With no `site`, rolls
+   * up every site. This is what `brewdocs gap` prints: the documentation gap
+   * the product can see because it now watches what it is asked for.
+   */
+  gapReport(site?: string, limit = 20): GapEntry[] {
+    const out: GapEntry[] = [];
+    for (const [sub, s] of this.data) {
+      if (site && sub !== site) continue;
+      for (const row of Object.values(s.queries ?? {})) {
+        if (row.misses > 0) {
+          out.push({
+            site: sub,
+            tool: row.tool,
+            query: row.query,
+            calls: row.calls,
+            misses: row.misses,
+          });
+        }
+      }
+    }
+    return out
+      .sort((a, b) => b.misses - a.misses || a.query.localeCompare(b.query))
+      .slice(0, limit);
+  }
   /** Top-viewed paths for a site (dashboard + org rollup). */
   topPaths(sub: string, limit = 8): Array<{ path: string; views: number }> {
     const paths = this.data.get(sub)?.paths ?? {};
@@ -119,6 +199,18 @@ class StatsStore {
     if (sub) return this.data.get(sub) ?? { views: 0, builds: 0 };
     return Object.fromEntries(this.data);
   }
+}
+
+/**
+ * v4.5: read the query-gap report from a hosting dir's analytics store. Shared
+ * by the CLI `gap` command and `GET /api/gap`, so both answer from one place.
+ */
+export function readGapReport(
+  hostingDir: string,
+  site?: string,
+  limit = 20,
+): GapEntry[] {
+  return new StatsStore(path.join(hostingDir, ".analytics.json")).gapReport(site, limit);
 }
 
 export interface ServeOptions {
@@ -763,6 +855,71 @@ function buildRequestHandler(
       res
         .writeHead(200, { "content-type": TYPES[".json"] })
         .end(JSON.stringify(plugins));
+      return;
+    }
+
+    // v4.5 MCP over HTTP: the same three tools the stdio server speaks, served
+    // against a deployed site's docmodel.json. A deployed site already serves
+    // that artifact (the static path below); this adds the tool-shaped layer an
+    // agent needs, so an agent can query a live site instead of a local file.
+    // Guarded like the other reads: needsAuth gates it when auth is configured,
+    // and a private site additionally requires its access token. The cross-site
+    // POST check above applies too.
+    if (url.pathname === "/mcp" && req.method === "POST") {
+      const siteName = url.searchParams.get("site") ?? "";
+      if (!siteName) {
+        res
+          .writeHead(400, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify({ error: "missing ?site=<subdomain>" }));
+        return;
+      }
+      if (!authorizeRead(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      const manifest = readManifest(hostingDir, siteName);
+      if (!manifest) {
+        res
+          .writeHead(404, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify({ error: "site not found" }));
+        return;
+      }
+      if (
+        manifest.visibility === "private" &&
+        !requireSiteAccess(req, manifest, token, hostingDir)
+      ) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      const limited = limiter.check(clientKey(req, trustProxy));
+      if (!limited.ok) {
+        res
+          .writeHead(429, { "retry-after": String(limited.retryAfterSec) })
+          .end(JSON.stringify({ error: "rate limited", retryAfter: limited.retryAfterSec }));
+        return;
+      }
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      const docmodelFile = path.join(hostingDir, siteName, "docmodel.json");
+      const out = handleMcpRequest(docmodelFile, body, (call: McpToolCall) =>
+        stats.recordToolCall(siteName, call),
+      );
+      res.writeHead(out.status, { "content-type": TYPES[".json"] }).end(out.body);
+      return;
+    }
+
+    // v4.5: the query gap — which symbols agents asked for and did not find.
+    // Owner-facing; rolled up across sites unless ?site= narrows it.
+    if (url.pathname === "/api/gap") {
+      if (!authorizeRead(req)) {
+        res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      const site = url.searchParams.get("site") ?? undefined;
+      const limit = Number(url.searchParams.get("limit")) || 20;
+      res
+        .writeHead(200, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify({ site: site ?? "*", gaps: stats.gapReport(site, limit) }));
       return;
     }
 

@@ -14,16 +14,18 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.4
+## 🔥 Fresh out of the oven — v4.5
 
-Two trust-and-hygiene features, still zero runtime dependencies.
+The loop closes: agents can now query a **deployed** site, and you can see what they asked for.
 
 | New | What it gives you |
 | --- | --- |
-| 🔏 **Registry integrity** | `registry publish` records a `sha256` of the stored module; `brewdocs registry verify` re-checks every entry, and `install`/load refuse a tampered one. Tamper-evident without a server |
-| 🔧 **Config migration** | `brewdocs.yml`/`.json` carry a `configVersion`; `brewdocs migrate [--write]` stamps it (comments preserved), and a config newer than the tool warns instead of being silently misread |
+| 🤖 **MCP over HTTP** | A deployed site answers `POST /mcp?site=<sub>` with the same three tools the stdio server speaks — auth-gated like every other read, private sites included |
+| 🕳️ **`brewdocs gap`** | Every agent query is counted locally (same store as views/builds, no backend). `gap` prints what agents asked for and the docs did **not** name |
+| 🔭 **Federate from a live site** | `federate add <name> <site-url>` fetches the deployed `docmodel.json` over HTTP — no local file needed |
+| 📖 **Dogfooded** | BrewDocs on its own core package: coverage **41% → 90%** (params 331/331, returns 181/181) |
 
-Earlier this line: **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
+Earlier this line: **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
 
 ---
 
@@ -68,7 +70,8 @@ Non-devs: `brewdocs serve`, paste a repo URL, hit **Brew**. ☕✨
 | `audit <dir>` | v3.0 a11y + SEO + perf audit of a built site (`--json`, `--min-score`, `--group`) |
 | `registry …` | v3.0 plugin registry + marketplace (`publish\|list\|search\|install\|remove\|verify\|gallery`) — `verify` re-checks each entry's recorded `sha256` |
 | `drift <src>` | v3.5 doc drift detection (`--record`, `--from <ref>`, `--fail-on-drift`, `--json`) |
-| `federate …` | v3.5 cross-repo federated search (`add\|list\|remove\|search\|page`) |
+| `federate …` | v3.5 cross-repo federated search (`add\|list\|remove\|search\|page`) — v4.5: `add <name> <site-url>` fetches the deployed site's `docmodel.json` over HTTP |
+| `gap` | v4.5 the closed loop: which symbols agents asked for over MCP and did not find (`--hosting`, `--site`, `--limit`, `--json`) |
 | `preview <src>` | Build + serve locally (`--watch` for rebuild + live reload) |
 | `migrate [src]` | v4.4 stamp `configVersion` on a `brewdocs.yml`/`.json` (`--write` to apply, `--json`) |
 | `gallery` | Example-sites gallery |
@@ -99,6 +102,7 @@ Common flags: `-o/--out`, `-t/--theme`, `--dark`, `-v/--version`, `-n/--name`, `
 - `prove [--strict]` — typecheck every `@example` (yes, really)
 - `harvest` — propose examples from README + tests
 - `mcp [docmodel.json]` — MCP stdio server: `search_symbols`, `symbol_signature`, `deprecated_replacements` (freshness-checked, so agents never sip stale docs)
+- **v4.5: the same MCP tools over HTTP** — a deployed site answers `POST /mcp?site=<sub>` (auth-gated like every other read), and every call is counted. `brewdocs gap` then shows what agents asked for and the docs did not name.
 - `drafts` / `keys` — private draft links + API keys
 
 </details>
@@ -156,6 +160,13 @@ Every build emits `docmodel.json` (schema: `brewdocs/docmodel@1`) — symbols, t
 
 ```bash
 brewdocs mcp dist/docmodel.json   # agents, come get your docs
+
+# or against a deployed site (v4.5) — no local file needed:
+curl -X POST "https://<site>.brewdocs.dev/mcp?site=<site>" \
+     -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_symbols","arguments":{"query":"brew"}}}'
+
+brewdocs gap                       # what agents asked for and didn't find
 ```
 
 ## 🚀 Ship it

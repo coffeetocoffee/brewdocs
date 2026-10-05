@@ -9,7 +9,12 @@ import * as path from "node:path";
  * render a banner + switcher marker; `redirects:` keep moved pages alive.
  */
 
-/** Filesystem-safe directory name for a version string (shared with build). */
+/**
+ * Filesystem-safe directory name for a version string (shared with build).
+ *
+ * @param version - version string to sanitize.
+ * @returns the version with characters outside `[A-Za-z0-9._-]` replaced by underscores.
+ */
 export function dirSafe(version: string): string {
   return version.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -22,6 +27,10 @@ export function dirSafe(version: string): string {
  * before the comparison, and the result must equal the root or sit under
  * root + separator. A bare startsWith() would accept a sibling directory whose
  * name shares the prefix.
+ *
+ * @param outDir - output directory that the resolved path must stay inside.
+ * @param rel - site-root-relative path from config to resolve.
+ * @returns the absolute write target, or null when it escapes `outDir` or names the dir itself.
  */
 export function resolveInOutDir(outDir: string, rel: string): string | null {
   const root = path.resolve(outDir);
@@ -39,6 +48,10 @@ function bare(version: string): string {
 /**
  * Is a version end-of-life per config? Exact match (with or without `v`)
  * or a `"1.x"` / `"1"` major pattern.
+ *
+ * @param version - version to test (with or without a leading `v`).
+ * @param eol - configured end-of-life entries; undefined/empty means nothing is EOL.
+ * @returns true when the version matches an EOL entry exactly or by major pattern.
  */
 export function isEolVersion(version: string, eol: string[] | undefined): boolean {
   if (!eol || eol.length === 0) return false;
@@ -53,7 +66,13 @@ export function isEolVersion(version: string, eol: string[] | undefined): boolea
   });
 }
 
-/** Minimal standalone meta-refresh page (no JS; works from file://). */
+/**
+ * Minimal standalone meta-refresh page (no JS; works from file://).
+ *
+ * @param target - URL the page redirects to (quotes escaped in the markup).
+ * @param label - text shown in the page title and link.
+ * @returns the redirect HTML document.
+ */
 export function redirectHtml(target: string, label: string): string {
   const safe = target.replace(/"/g, "&quot;");
   return `<!doctype html>
@@ -77,6 +96,12 @@ export function redirectHtml(target: string, label: string): string {
  * every alias whose target version was actually built. Returns the files
  * written. Aliases pointing at missing versions are skipped (warn), never
  * fatal — a half-published alias beats a crashed build-all.
+ *
+ * @param outDir - built site root where alias directories are written.
+ * @param builtVersions - versions actually built (aliases targeting others are skipped).
+ * @param aliases - alias name to target version map from brewdocs.yml.
+ * @param opts - `eol` list used to mark an alias target as end-of-life.
+ * @returns the paths of every alias `index.html` written.
  */
 export function emitAliasPages(
   outDir: string,
@@ -121,6 +146,10 @@ export function emitAliasPages(
 /**
  * Write `redirects:` pages (old path → new path, both site-root-relative).
  * Works for single-version builds and versioned sites alike.
+ *
+ * @param outDir - built site root where redirect pages are written.
+ * @param redirects - old site-root-relative path to new path map from brewdocs.yml.
+ * @returns the paths of every redirect page written.
  */
 export function emitRedirects(
   outDir: string,

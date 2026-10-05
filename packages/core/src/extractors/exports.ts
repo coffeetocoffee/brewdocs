@@ -406,6 +406,10 @@ function extractEntry(
  * Extract exported symbols (with JSDoc/TSDoc) from every entry the package
  * exposes. Subpath entries re-exporting the same symbol dedupe by
  * name+kind, so `export { x }` in two subpaths yields one symbol.
+ *
+ * @param root - package root whose entry points are resolved and parsed.
+ * @param pkg - parsed package.json used to resolve entry/subpath exports.
+ * @returns the deduped exported symbols with their JSDoc/TSDoc.
  */
 export function extractExports(root: string, pkg: Record<string, unknown>): SymbolDoc[] {
   const entries = resolveEntries(root, pkg);

@@ -25,6 +25,9 @@ export interface WorkspacePackage {
  *
  * Returns member directories that contain a package.json, deduped and
  * sorted by name for deterministic builds.
+ *
+ * @param root - workspace root whose `package.json` declares the workspace globs.
+ * @returns member packages containing a package.json, deduped and sorted by name.
  */
 export function detectWorkspaces(root: string): WorkspacePackage[] {
   const rootPath = path.resolve(root);
@@ -98,6 +101,10 @@ function expandGlob(root: string, glob: string): string[] {
  * href relative to the referencing member's output dir. Local symbols
  * resolve to in-page anchors by the renderer; only names another member
  * exports fall through to these targets.
+ *
+ * @param members - workspace members to index.
+ * @param models - per-member render models keyed by member name.
+ * @returns exported symbol name to owning package/dir mapping (first exporter wins).
  */
 export function crossPackageLinks(
   members: WorkspacePackage[],
@@ -126,6 +133,10 @@ export function crossPackageLinks(
  * The docmodels are the source of truth — each member's `docmodel.json`
  * (already emitted by default) carries the exported symbol set, so a CI
  * job or editor can rebuild this table from artifacts alone.
+ *
+ * @param member - member whose external links are being built.
+ * @param cross - workspace-wide symbol to package/dir table.
+ * @returns symbol name to `../<dir>/index.html#…` href map for cross-package symbols.
  */
 export function externalLinksFor(
   member: WorkspacePackage,
@@ -150,7 +161,13 @@ export interface WorkspaceRollup {
   score: number;
 }
 
-/** Run `doctor` per package and compute a symbol-weighted rollup score. */
+/**
+ * Run `doctor` per package and compute a symbol-weighted rollup score.
+ *
+ * @param members - workspace members to analyze.
+ * @param models - per-member render models keyed by member name.
+ * @returns per-package reports plus the workspace rollup score.
+ */
 export function rollupCoverage(
   members: WorkspacePackage[],
   models: Map<string, RenderModel>,
@@ -204,6 +221,11 @@ export function rollupCoverage(
  * docmodel.json included) plus a root `index.html` listing them with the
  * rollup coverage chip. Cross-package type references between members are
  * linked. Returns the written index files.
+ *
+ * @param source - workspace root source to build.
+ * @param outDir - output root; each member is built into `<outDir>/<dir>/`.
+ * @param options - render options applied to each member build.
+ * @returns the written member index files followed by the root index.
  */
 export function buildWorkspaces(
   source: Source,

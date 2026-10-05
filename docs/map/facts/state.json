@@ -7,7 +7,7 @@
     { "what": "Custom domain → subdomain mapping + verification token", "file": "hosting/.domains.json", "by": "core/src/domains.ts — `brewdocs domains`" },
     { "what": "Plugin registry entries (local marketplace)", "file": "<registryDir>/.registry.json", "by": "core/src/registry.ts — `brewdocs registry`" },
     { "what": "Federated search index (per-repo symbols from docmodel.json)", "file": "<storeDir>/.federation.json", "by": "core/src/federation.ts — `brewdocs federate`" },
-    { "what": "Pageview/build counters and top paths", "file": "hosting/.analytics.json", "by": "cli/src/server.ts StatsStore" },
+    { "what": "Pageview/build counters, top paths, and (v4.5) MCP tool-call query telemetry", "file": "hosting/.analytics.json", "by": "cli/src/server.ts StatsStore — recordView/recordBuild/recordToolCall" },
     { "what": "Drift baseline (code vs docs fingerprints per symbol)", "file": "<src>/.brewdocs/drift.json", "by": "core/src/drift.ts — `brewdocs drift --record`" },
     { "what": "Coverage trend history", "file": "<src>/.brewdocs/coverage.json", "by": "core/src/doctor.ts — `brewdocs doctor --record`" },
     { "what": "Extraction cache (content-hash keyed)", "file": "<src>/.brewdocs/extract.json", "by": "core/src/cache.ts" },

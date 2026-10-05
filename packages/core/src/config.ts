@@ -9,11 +9,16 @@ import { listLocales } from "./i18n.js";
  */
 const warnedMessages = new Set<string>();
 
-/** Test hook: clear the warn-once memory so each test starts clean. */
+/**
+ * Test hook: clear the warn-once memory so each test starts clean.
+ *
+ * @returns nothing; resets the module-level warning cache in place.
+ */
 export function __resetConfigWarnings(): void {
   warnedMessages.clear();
 }
 
+/** Parsed `brewdocs.yml`/`brewdocs.json` (unknown or invalid keys are warned and dropped). */
 export interface BrewDocsConfig {
   theme?: string;
   dark?: boolean;
@@ -294,6 +299,9 @@ function parseSimpleYaml(text: string): BrewDocsConfig {
 /**
  * Load BrewDocs configuration from `brewdocs.yml` or `brewdocs.json` in `root`.
  * Returns an empty object when neither exists.
+ *
+ * @param root - source root that may contain brewdocs.yml or brewdocs.json.
+ * @returns the parsed config (empty when neither file exists or parsing fails).
  */
 export function loadConfig(root: string): BrewDocsConfig {
   const yamlPath = path.join(root, "brewdocs.yml");

@@ -51,6 +51,9 @@ const NOT_IDENTIFIERS = new Set([
  * Pure: map each deprecated symbol to the exported symbols it points at.
  * Only names that exist in the exported set count as successors — prose
  * references to internal types or plain English are ignored.
+ *
+ * @param symbols - extracted symbols to scan for deprecation references.
+ * @returns deprecated symbol name to successor symbol names map.
  */
 export function resolveReplacements(symbols: SymbolDoc[]): Record<string, string[]> {
   const names = new Set(symbols.map((s) => s.name));
@@ -80,7 +83,12 @@ function candidateTexts(sym: SymbolDoc): string[] {
   return texts;
 }
 
-/** `use \`X\` instead` when a successor is known, "" otherwise. */
+/**
+ * `use \`X\` instead` when a successor is known, "" otherwise.
+ *
+ * @param replacements - successor symbol names, or undefined when unknown.
+ * @returns the hint phrase, or an empty string when there is nothing to suggest.
+ */
 export function replacementHint(replacements: string[] | undefined): string {
   if (!replacements || replacements.length === 0) return "";
   return `use \`${replacements.join("` or `")}\` instead`;

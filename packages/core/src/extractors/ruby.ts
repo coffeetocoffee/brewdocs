@@ -342,6 +342,7 @@ function looksLikeRubyProject(root: string): boolean {
   return walkSourceFiles(root, [".rb"], { maxDepth: 4 }).length > 0;
 }
 
+/** Built-in Ruby adapter: line-based def/class scan (see D-3). */
 export const rubyAdapter: LanguageAdapter = {
   id: "ruby",
   detect(ctx) {

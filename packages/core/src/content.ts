@@ -20,7 +20,12 @@ import type { ContentPage, NavGroup } from "./types.js";
 
 /* ------------------------------------------------------------------ nav */
 
-/** Parse `nav.yml`: `Title:` lines start groups, `  Text: link` items follow. */
+/**
+ * Parse `nav.yml`: `Title:` lines start groups, `  Text: link` items follow.
+ *
+ * @param text - raw nav.yml contents.
+ * @returns the parsed nav groups in file order.
+ */
 export function parseNavYaml(text: string): NavGroup[] {
   const groups: NavGroup[] = [];
   let current: NavGroup | null = null;
@@ -45,6 +50,12 @@ export function parseNavYaml(text: string): NavGroup[] {
   return groups;
 }
 
+/**
+ * Load the sidebar nav from `nav.yml`/`nav.yaml`/`nav.json` in `root`.
+ *
+ * @param root - source root that may contain a nav file.
+ * @returns the nav groups, or undefined when no nav file exists or it is empty.
+ */
 export function loadNav(root: string): NavGroup[] | undefined {
   for (const name of ["nav.yml", "nav.yaml", "nav.json"]) {
     const file = path.join(root, name);
@@ -63,7 +74,12 @@ export function loadNav(root: string): NavGroup[] | undefined {
 
 /* ------------------------------------------------------------- mdx-lite */
 
-/** Compile JSX-ish components to styled, addressable placeholders. */
+/**
+ * Compile JSX-ish components to styled, addressable placeholders.
+ *
+ * @param src - raw MDX source (imports/exports and components).
+ * @returns the transformed source with components compiled to div placeholders.
+ */
 export function transformMdx(src: string): string {
   // Strip MDX import/export statements.
   let out = src.replace(/^\s*import\s+[^\n]+$/gm, "").replace(/^\s*export\s+(const|default)\s[^\n]*=?\s*$/gm, "");
@@ -129,7 +145,13 @@ function walkContent(dir: string, base: string, files: string[]): void {
   }
 }
 
-/** Render one content source string to {html, headings, title, description}. */
+/**
+ * Render one content source string to {html, headings, title, description}.
+ *
+ * @param src - raw page source including optional frontmatter.
+ * @param isMdx - when true, run the MDX-lite transform before markdown.
+ * @returns the rendered HTML, extracted headings and frontmatter meta.
+ */
 export function renderContentSource(src: string, isMdx: boolean): {
   html: string;
   headings: { id: string; title: string }[];
@@ -165,7 +187,12 @@ export function renderContentSource(src: string, isMdx: boolean): {
   return { html, headings, meta };
 }
 
-/** Discover and compile all guide pages under `<root>/<contentDir>`. */
+/**
+ * Discover and compile all guide pages under `<root>/<contentDir>`.
+ *
+ * @param root - source root containing the content directory.
+ * @returns the compiled content pages, ordered by frontmatter order then slug.
+ */
 export function loadContent(root: string): ContentPage[] {
   const dirName = loadConfig(root).contentDir ?? "content";
   const dir = path.join(root, dirName);

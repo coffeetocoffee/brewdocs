@@ -21,15 +21,27 @@ export interface CoverageRecord {
   documentedSymbols: number;
 }
 
+/** Hidden marker line that lets a re-run replace its own PR comment. */
 export const CI_COMMENT_MARKER = "<!-- brewdocs:ci -->";
 
 const MAX_HISTORY = 100;
 
+/**
+ * Path of the coverage history file for a source root.
+ *
+ * @param root - source root whose `.brewdocs/coverage.json` path is computed.
+ * @returns the coverage history file path.
+ */
 export function coverageFilePath(root: string): string {
   return path.join(root, ".brewdocs", "coverage.json");
 }
 
-/** Load the coverage history for a source root ([] when none recorded yet). */
+/**
+ * Load the coverage history for a source root ([] when none recorded yet).
+ *
+ * @param root - source root whose `.brewdocs/coverage.json` is read.
+ * @returns the recorded coverage entries, or an empty array when absent or malformed.
+ */
 export function loadCoverageHistory(root: string): CoverageRecord[] {
   try {
     const parsed = JSON.parse(fs.readFileSync(coverageFilePath(root), "utf8"));
@@ -44,6 +56,11 @@ export function loadCoverageHistory(root: string): CoverageRecord[] {
  * One record per version: re-recording a version replaces its previous
  * entry. History is capped at MAX_HISTORY (oldest entries dropped) so the
  * file stays commit-friendly.
+ *
+ * @param root - source root whose `.brewdocs/coverage.json` is updated.
+ * @param report - doctor report supplying the score and symbol counts.
+ * @param version - package version (or "dev") this build is recorded for.
+ * @returns the trimmed coverage history after the append.
  */
 export function recordCoverage(
   root: string,
@@ -69,7 +86,12 @@ export function recordCoverage(
 
 const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-/** Terminal sparkline over an absolute 0-100 scale (shape-honest). */
+/**
+ * Terminal sparkline over an absolute 0-100 scale (shape-honest).
+ *
+ * @param scores - coverage scores (0-100) in chronological order.
+ * @returns the sparkline string, or an empty string when there are no scores.
+ */
 export function sparklineUnicode(scores: number[]): string {
   if (scores.length === 0) return "";
   const step = 100 / BLOCKS.length;
@@ -80,7 +102,14 @@ export function sparklineUnicode(scores: number[]): string {
     .join("");
 }
 
-/** Inline SVG sparkline (polyline) colored by the latest score. */
+/**
+ * Inline SVG sparkline (polyline) colored by the latest score.
+ *
+ * @param scores - coverage scores (0-100) in chronological order.
+ * @param width - rendered SVG width in pixels.
+ * @param height - rendered SVG height in pixels.
+ * @returns the SVG markup, or an empty string when there are no scores.
+ */
 export function sparklineSvg(
   scores: number[],
   width = 120,
@@ -97,6 +126,12 @@ export function sparklineSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="docs coverage trend"><polyline fill="none" stroke="${colorFor(last)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}"/></svg>`;
 }
 
+/**
+ * The removed and breaking-changed symbols from a version diff.
+ *
+ * @param diff - version diff to filter.
+ * @returns removed symbols followed by changed symbols flagged breaking.
+ */
 export function breakingChangesOf(diff: VersionDiff): SymbolChange[] {
   return [...diff.removed, ...diff.changed.filter((c) => c.breaking)];
 }
@@ -139,7 +174,13 @@ function migrationHint(c: SymbolChange): string {
   return parts.join("; ");
 }
 
-/** "What's new / What broke / Migration notes" as a markdown section. */
+/**
+ * "What's new / What broke / Migration notes" as a markdown section.
+ *
+ * @param diff - version diff describing the release's API changes.
+ * @param title - package title used in the section heading.
+ * @returns the changelog section as markdown text.
+ */
 export function renderChangelogMarkdown(diff: VersionDiff, title: string): string {
   const lines: string[] = [];
   lines.push(`## ${title} v${versionLabel(diff.fromVersion)} → v${versionLabel(diff.toVersion)}`, "");
@@ -186,6 +227,10 @@ export function renderChangelogMarkdown(diff: VersionDiff, title: string): strin
 /**
  * Insert a changelog section into an existing markdown file: after the
  * leading H1 when present, prepended otherwise. Newest section ends up on top.
+ *
+ * @param existing - current changelog file contents (may be empty).
+ * @param section - new changelog section to insert.
+ * @returns the changelog with the new section inserted below the H1.
  */
 export function insertChangelogSection(
   existing: string,
@@ -205,6 +250,7 @@ export function insertChangelogSection(
   return existing.length === 0 ? body : `${body}${nl}${nl}${existing}`;
 }
 
+/** Everything `renderCiMarkdown` needs to write the CI summary comment. */
 export interface CiReportInput {
   title: string;
   /** Doctor report of the head (working tree / PR branch). */
@@ -223,7 +269,12 @@ export interface CiReportInput {
   examplesProven?: { passed: number; total: number };
 }
 
-/** The PR comment: coverage delta + trend sparkline + API diff summary. */
+/**
+ * The PR comment: coverage delta + trend sparkline + API diff summary.
+ *
+ * @param input - CI report inputs: head/base doctor reports, diff, history and versions.
+ * @returns the markdown body of the PR comment.
+ */
 export function renderCiMarkdown(input: CiReportInput): string {
   const { head, base, diff, history } = input;
   const headLabel = input.headVersion ?? "head";
@@ -340,6 +391,7 @@ export function renderCiMarkdown(input: CiReportInput): string {
   return lines.join("\n") + "\n";
 }
 
+/** Inputs to `gateDecision`: the API diff, its version span and the acknowledgement. */
 export interface GateInput {
   breakingCount: number;
   /** A migration guide was generated during this run. */
@@ -350,6 +402,7 @@ export interface GateInput {
   unprovenExamples?: number;
 }
 
+/** Verdict of `gateDecision`: whether the release may proceed, and why. */
 export interface GateDecision {
   ok: boolean;
   reason: string;
@@ -360,6 +413,9 @@ export interface GateDecision {
  * was generated or the break is explicitly acknowledged. When example
  * proving ran, a failing doc example blocks too — with an override path via
  * the same acknowledgment.
+ *
+ * @param input - gate inputs: breaking count, guide/acknowledgment flags and unproven examples.
+ * @returns whether the release may proceed and the reason for the decision.
  */
 export function gateDecision(input: GateInput): GateDecision {
   if ((input.unprovenExamples ?? 0) > 0 && !input.acknowledged) {
@@ -394,7 +450,14 @@ function ackPath(root: string, from: string, to: string): string {
   return path.join(root, ".brewdocs", `migration-${safe(from)}-${safe(to)}.ack.json`);
 }
 
-/** Whether the from→to release pair has a recorded acknowledgment. */
+/**
+ * Whether the from→to release pair has a recorded acknowledgment.
+ *
+ * @param root - source root whose `.brewdocs/` holds acknowledgment files.
+ * @param from - older version label of the release pair.
+ * @param to - newer version label of the release pair.
+ * @returns true when the acknowledgment file exists.
+ */
 export function readAcknowledgment(
   root: string,
   from: string,
@@ -403,7 +466,15 @@ export function readAcknowledgment(
   return fs.existsSync(ackPath(root, from, to));
 }
 
-/** Record an acknowledgment for the from→to release pair; returns the file. */
+/**
+ * Record an acknowledgment for the from→to release pair; returns the file.
+ *
+ * @param root - source root whose `.brewdocs/` receives the acknowledgment file.
+ * @param from - older version label of the release pair.
+ * @param to - newer version label of the release pair.
+ * @param note - optional free-text note explaining the acknowledgment.
+ * @returns the path of the written acknowledgment file.
+ */
 export function writeAcknowledgment(
   root: string,
   from: string,
@@ -424,6 +495,7 @@ export function writeAcknowledgment(
   return file;
 }
 
+/** Repository + issue number a CI comment is posted to. */
 export interface GitHubCommentTarget {
   token: string;
   /** "owner/name". */
@@ -438,6 +510,9 @@ export interface GitHubCommentTarget {
 /**
  * Post (or update, when a comment with the marker already exists) a PR
  * comment via the GitHub REST API. Dependency-free: uses global fetch.
+ *
+ * @param target - GitHub API target: token, `owner/name` repo, PR number, markdown and optional marker/apiBase.
+ * @returns whether a new comment was created and its HTML URL.
  */
 export async function postGitHubComment(
   target: GitHubCommentTarget,

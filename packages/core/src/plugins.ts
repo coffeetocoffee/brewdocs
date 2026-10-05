@@ -69,6 +69,7 @@ export interface ThemeContribution {
   slots?: ThemeSlotPartials;
 }
 
+/** Plugin contract: language adapters plus onExtract/onRender hooks and theme contributions. */
 export interface BrewDocsPlugin {
   name: string;
   adapters?: LanguageAdapter[];
@@ -88,6 +89,7 @@ const PYTHON_AST_PLUGIN: BrewDocsPlugin = {
   adapters: [pythonAdapter],
 };
 
+/** Adapters that always ship: python (static), go, OpenAPI, GraphQL and the compiled-language scanners. */
 export const BUILTIN_PLUGINS: BrewDocsPlugin[] = [
   { name: "brewdocs:python", adapters: [pythonStaticAdapter] },
   { name: "brewdocs:go", adapters: [goAdapter] },
@@ -139,6 +141,11 @@ function normalizePlugin(mod: unknown, id: string): BrewDocsPlugin | null {
  * async variant `loadPluginAsync` covers those). v3.0: bare names that aren't
  * npm-resolvable also get one more chance in the plugin `registryDir`
  * (brewdocs.yml `registry:` / BREWDOCS_REGISTRY) before being dropped.
+ *
+ * @param id - plugin specifier: a local path or a package name.
+ * @param root - source root the specifier is resolved relative to.
+ * @param registryDir - optional plugin registry directory for bare non-npm names.
+ * @returns the loaded plugin, or null when it cannot be resolved or is not a plugin.
  */
 export function loadPlugin(
   id: string,
@@ -170,7 +177,14 @@ export function loadPlugin(
   }
 }
 
-/** Async variant supporting ESM plugin modules too (under `tsx`, `.ts` plugins work). */
+/**
+ * Async variant supporting ESM plugin modules too (under `tsx`, `.ts` plugins work).
+ *
+ * @param id - plugin specifier: a local path or a package name.
+ * @param root - source root the specifier is resolved relative to.
+ * @param registryDir - optional plugin registry directory for bare non-npm names.
+ * @returns the loaded plugin, or null when neither the sync nor ESM load succeeds.
+ */
 export async function loadPluginAsync(
   id: string,
   root: string,
@@ -192,7 +206,14 @@ function requireFrom(root: string): NodeRequire {
   return createRequire(path.join(path.resolve(root), "index.js"));
 }
 
-/** Resolve plugin specifiers (paths/names) against a source root, dropping unknowns. */
+/**
+ * Resolve plugin specifiers (paths/names) against a source root, dropping unknowns.
+ *
+ * @param specs - plugin specifiers from config/CLI; built-in aliases resolve first.
+ * @param root - source root specifiers are resolved relative to.
+ * @param registryDir - optional plugin registry directory for bare non-npm names.
+ * @returns the resolved plugins (unresolvable specs are skipped with a warning).
+ */
 export function loadPlugins(
   specs: string[] | undefined,
   root: string,
@@ -217,6 +238,9 @@ export function loadPlugins(
  * All adapters from built-in + user plugins, user plugins first (they win
  * detection order) and deduped by adapter id — so an opt-in that swaps an
  * adapter (e.g. `python-ast`) replaces the built-in of the same id.
+ *
+ * @param plugins - user plugins to consider ahead of the built-ins.
+ * @returns the deduped adapters, user plugins first.
  */
 export function collectAdapters(plugins: BrewDocsPlugin[]): LanguageAdapter[] {
   const out: LanguageAdapter[] = [];
@@ -231,7 +255,13 @@ export function collectAdapters(plugins: BrewDocsPlugin[]): LanguageAdapter[] {
   return out;
 }
 
-/** Run every adapter whose `detect` matched, deduping symbol names (first wins). */
+/**
+ * Run every adapter whose `detect` matched, deduping symbol names (first wins).
+ *
+ * @param plugins - plugins whose adapters (plus built-ins) are run.
+ * @param ctx - adapter context describing the source being extracted.
+ * @returns the extracted symbols, deduped by name and sorted.
+ */
 export function runAdapters(
   plugins: BrewDocsPlugin[],
   ctx: AdapterContext,
@@ -260,7 +290,14 @@ export function runAdapters(
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Fold the onExtract hook over a fresh result (plugins may replace it). */
+/**
+ * Fold the onExtract hook over a fresh result (plugins may replace it).
+ *
+ * @param plugins - plugins whose `onExtract` hooks are applied in order.
+ * @param result - freshly extracted result to pass through the hooks.
+ * @param source - source the extraction came from, passed to each hook.
+ * @returns the result after all hooks (a hook may return a replacement).
+ */
 export function applyOnExtract(
   plugins: BrewDocsPlugin[],
   result: ExtractResult,
@@ -283,7 +320,14 @@ export function applyOnExtract(
   return current;
 }
 
-/** Fold the onRender hook over a finished page (plugin errors keep the page). */
+/**
+ * Fold the onRender hook over a finished page (plugin errors keep the page).
+ *
+ * @param plugins - plugins whose `onRender` hooks are applied in order.
+ * @param html - rendered page HTML to pass through the hooks.
+ * @param page - page descriptor (its output path) passed to each hook.
+ * @returns the HTML after all hooks (a hook may return a replacement string).
+ */
 export function applyOnRender(
   plugins: BrewDocsPlugin[],
   html: string,
@@ -306,7 +350,12 @@ export function applyOnRender(
   return current;
 }
 
-/** Merge every plugin's theme contribution into one (later wins per key). */
+/**
+ * Merge every plugin's theme contribution into one (later wins per key).
+ *
+ * @param plugins - plugins whose `theme` contributions are merged.
+ * @returns the merged contribution, or undefined when no plugin contributes a theme.
+ */
 export function mergePluginThemes(plugins: BrewDocsPlugin[]): ThemeContribution | undefined {
   const merged: ThemeContribution = { vars: {}, darkVars: {}, slots: {} };
   let any = false;

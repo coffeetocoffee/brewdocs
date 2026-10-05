@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-09-28_
+_Generated: 2026-10-05_
 
 ## What this is
 
@@ -18,13 +18,13 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.4.1 | commands + hosting server | 4 files / 3,172 loc | 8 files / 1,241 loc |
-| `@brewdocs/core` | 4.4.1 | pipeline: extract → model → render | 60 files / 14,069 loc | 45 files / 5,503 loc |
+| `@brewdocs/cli` | 4.4.1 | commands + hosting server | 4 files / 3,371 loc | 10 files / 1,588 loc |
+| `@brewdocs/core` | 4.4.1 | pipeline: extract → model → render | 60 files / 15,331 loc | 45 files / 5,651 loc |
 | `@brewdocs/plugin-sdk` | 4.4.1 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**376 test declarations across 54 files** — parsed from the tree, not typed.
+**393 test declarations across 56 files** — parsed from the tree, not typed.
 
-> 13 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
+> 14 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
 ## Trust boundaries
 
@@ -32,15 +32,17 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
-| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:602` |
-| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:672` |
-| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:738` |
-| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:750` |
-| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:771` |
-| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:789` |
-| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:835` |
-| `/` | GET | **none** | `packages/cli/src/server.ts:883` |
-| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:899` |
+| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:694` |
+| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:764` |
+| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:830` |
+| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:842` |
+| `/mcp` | POST | `authorizeRead` | `packages/cli/src/server.ts:868` |
+| `/api/gap` | GET | `authorizeRead` | `packages/cli/src/server.ts:913` |
+| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:928` |
+| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:946` |
+| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:992` |
+| `/` | GET | **none** | `packages/cli/src/server.ts:1040` |
+| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:1056` |
 
 ### Invariants a change must not break
 
@@ -104,6 +106,12 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-20** — A fetched (npm/git) source must not be able to name its own plugins: plugins listed in the source's brewdocs.yml are ignored unless the source was chosen locally. Plugins the operator passed explicitly (--plugins) still load.
   - _why:_ A plugin is arbitrary code — loaded via require/import, with no signature and no sandbox. The specifier is read from the source's own brewdocs.yml, and BrewDocs' stated job is rendering repos you do not own, so honoring it turns every doc build into remote code execution on the operator's machine. This is the same threat INV-17 already refuses for the python adapter, in a wider blast radius. The subtle part is propagation:  must survive every hop from resolveInput to resolveSetup, and each hop that rebuilt a Source without it silently re-enabled the repo's plugins. That is how the first version of this fix was bypassed three times (per-version worktree, extractVersion, and the CLI build command) before the gate check was written to assert all of them.
   - _enforced by:_ packages/core/test/plugin-fetched.test.ts + scripts/gate.mjs (inv-20:fetched-source-cannot-name-plugins, which asserts the guard and every Source re-construction site)
+- **INV-21** — The HTTP MCP transport (POST /mcp?site=<sub>) must be gated like the other reads — 401 once auth is configured, and a private site additionally requires its access token — and it must record every tools/call into the analytics store.
+  - _why:_ This endpoint exposes a site's docmodel to agents, so an unauthenticated caller on a server with auth configured must not reach it, and a private site's docs must not leak through the agent-shaped door when they are closed on the HTML door. Recording the call is the endpoint's whole purpose: without it, the product never learns which symbols were asked for and not found, which is the gap this release exists to close.
+  - _enforced by:_ scripts/gate.mjs (inv-21:mcp-http-guarded) + packages/cli/src/mcp-http.test.ts (auth, private-site token, telemetry round-trip)
+- **INV-22** — The stdio and HTTP MCP transports must answer through one shared message handler; a tool added or changed must behave identically on both.
+  - _why:_ Two transports over the same protocol is exactly the shape that lets a fix land in one path and not the other — the same failure mode that let the plugin 'fetched' guard be bypassed three times (INV-20). One handler means the protocol has a single implementation to keep correct.
+  - _enforced by:_ scripts/gate.mjs (inv-22:mcp-one-protocol-handler) + packages/core/test/mcp.test.ts (handleMcpMessage is the single dispatcher)
 
 ### Server defaults
 
@@ -120,7 +128,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 | Custom domain → subdomain mapping + verification token | `hosting/.domains.json` | core/src/domains.ts — `brewdocs domains` |
 | Plugin registry entries (local marketplace) | `<registryDir>/.registry.json` | core/src/registry.ts — `brewdocs registry` |
 | Federated search index (per-repo symbols from docmodel.json) | `<storeDir>/.federation.json` | core/src/federation.ts — `brewdocs federate` |
-| Pageview/build counters and top paths | `hosting/.analytics.json` | cli/src/server.ts StatsStore |
+| Pageview/build counters, top paths, and (v4.5) MCP tool-call query telemetry | `hosting/.analytics.json` | cli/src/server.ts StatsStore — recordView/recordBuild/recordToolCall |
 | Drift baseline (code vs docs fingerprints per symbol) | `<src>/.brewdocs/drift.json` | core/src/drift.ts — `brewdocs drift --record` |
 | Coverage trend history | `<src>/.brewdocs/coverage.json` | core/src/doctor.ts — `brewdocs doctor --record` |
 | Extraction cache (content-hash keyed) | `<src>/.brewdocs/extract.json` | core/src/cache.ts |
@@ -208,6 +216,12 @@ Two conventions hold. It degrades — warn and drop the key so defaults apply �
 <details><summary><b>D-9</b> — Plugins are trusted code, so only the operator may choose them</summary>
 
 A plugin is arbitrary code: loadPlugin resolves the specifier with createRequire and imports it, with no signature, no sandbox and no capability limit (D-1 keeps the runtime dependency-free, so there is no isolation mechanism to lean on). The question is therefore not whether a plugin is safe — it is who is allowed to name one. A locally chosen repo may name its own plugins: that is the plugin feature. A fetched repo may not, because BrewDocs exists to render codebases the operator does not own, and a brewdocs.yml that can name a plugin turns every doc build into remote code execution (finding #19, INV-20). Plugins passed explicitly with --plugins always load, on a fetched source or not, because that is the operator decision rather than the repo. The general rule this encodes: anything the SOURCE tree controls (config values that select code, theme slot paths, redirects) is untrusted input, and anything the OPERATOR passes on the command line is a decision. If a new config key can cause code to load rather than merely change output, it belongs on the untrusted side of that line.
+
+</details>
+
+<details><summary><b>D-10</b> — MCP query telemetry is local-only, stored beside the views/builds it sits next to</summary>
+
+v4.5 closes the feedback loop: agents query a deployed site's docmodel over POST /mcp, and every tools/call (tool, query, hit/miss) is written into the same hosting-side .analytics.json that already holds pageviews and builds. `brewdocs gap` reads it back and answers "which symbols did people ask for and not find". The decision is where that data lives: locally, next to the site, exactly like views and builds — no backend, no phone-home, no query text leaving the machine. That keeps the no-backend posture (boundary #1) intact and makes the privacy cost identical to the pageview counter that was already there. It also keeps the feature honest about its own limits: a site nobody queries produces an empty gap report, and an empty report is not evidence that the docs are complete. A hosted analytics service would be a different product (boundary #1), not an extension of this store.
 
 </details>
 

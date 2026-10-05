@@ -23,7 +23,12 @@ function parseFrontmatter(
   return { data, rest: body.slice(match[0].length) };
 }
 
-/** Convert a README into frontmatter + heading-delimited sections. */
+/**
+ * Convert a README into frontmatter + heading-delimited sections.
+ *
+ * @param markdown - raw README markdown, optionally with YAML frontmatter.
+ * @returns the parsed frontmatter, sections and rendered HTML.
+ */
 export function extractReadme(markdown: string): ReadmeResult {
   const { data, rest } = parseFrontmatter(markdown);
   const lines = rest.replace(/\r\n/g, "\n").split("\n");

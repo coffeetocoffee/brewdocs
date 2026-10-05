@@ -31,6 +31,7 @@ export interface RegistryEntry {
   versions?: { version: string; publishedAt: string }[];
 }
 
+/** On-disk shape of `.registry.json` — every published plugin entry. */
 export interface RegistryStore {
   plugins: RegistryEntry[];
 }
@@ -46,6 +47,12 @@ function integrityOf(file: string): string {
   return "sha256:" + createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+/**
+ * Load the plugin registry from `<registryDir>/.registry.json`.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @returns the parsed store, or an empty store when the file is missing or malformed.
+ */
 export function loadRegistry(registryDir: string): RegistryStore {
   try {
     const raw = JSON.parse(fs.readFileSync(storeFile(registryDir), "utf8")) as RegistryStore;
@@ -61,6 +68,12 @@ function saveRegistry(registryDir: string, store: RegistryStore): void {
   fs.writeFileSync(storeFile(registryDir), JSON.stringify(store, null, 2), "utf8");
 }
 
+/**
+ * Slugify a plugin name into its registry key.
+ *
+ * @param name - plugin name (may include an npm scope like `@org/pkg`).
+ * @returns the lowercased slug with scopes and slashes flattened to dashes.
+ */
 export function slug(name: string): string {
   return name
     .toLowerCase()
@@ -95,6 +108,7 @@ function looksLikePluginModule(source: string): boolean {
   );
 }
 
+/** Metadata recorded at publish time: version, description, entry file. */
 export interface PublishOptions {
   name: string;
   version: string;
@@ -104,7 +118,14 @@ export interface PublishOptions {
   keywords?: string[];
 }
 
-/** Publish a plugin module file; republish needs a newer version. */
+/**
+ * Publish a plugin module file; republish needs a newer version.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param modulePath - path to the plugin module file to store.
+ * @param opts - publish metadata: name, version, kind, description, author, keywords.
+ * @returns the stored registry entry, or null when rejected (bad name/version, unreadable or non-plugin file, or version not newer).
+ */
 export function publishPlugin(
   registryDir: string,
   modulePath: string,
@@ -159,15 +180,35 @@ export function publishPlugin(
   return record;
 }
 
+/**
+ * List every plugin published to the registry.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @returns entries sorted by name.
+ */
 export function listPlugins(registryDir: string): RegistryEntry[] {
   return loadRegistry(registryDir).plugins.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Look up a single registry entry by name.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param name - plugin name to find (slugged before lookup).
+ * @returns the registry entry, or undefined when no plugin matches.
+ */
 export function getPlugin(registryDir: string, name: string): RegistryEntry | undefined {
   const s = slug(name);
   return loadRegistry(registryDir).plugins.find((p) => p.name === s);
 }
 
+/**
+ * Search registry entries by name, description, keywords or kind.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param query - case-insensitive substring (empty returns every plugin).
+ * @returns the matching registry entries.
+ */
 export function searchPlugins(registryDir: string, query: string): RegistryEntry[] {
   const q = query.toLowerCase().trim();
   if (!q) return listPlugins(registryDir);
@@ -179,6 +220,13 @@ export function searchPlugins(registryDir: string, query: string): RegistryEntry
   );
 }
 
+/**
+ * Remove a plugin from the registry.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param name - plugin name to remove (slugged before lookup).
+ * @returns true when an entry was removed, false when no plugin matched.
+ */
 export function unpublishPlugin(registryDir: string, name: string): boolean {
   const store = loadRegistry(registryDir);
   const s = slug(name);
@@ -195,6 +243,12 @@ export function unpublishPlugin(registryDir: string, name: string): boolean {
  *
  * Returns null on any refusal; pass `out` to learn why (the CLI reports the
  * true cause instead of always claiming the plugin does not exist).
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param name - plugin name to install.
+ * @param targetRoot - project root that receives `.brewdocs/plugins/<slug>.cjs`.
+ * @param out - optional object set with a `reason` when the install is refused.
+ * @returns the relative plugin spec and entry, or null on refusal.
  */
 export function installPlugin(
   registryDir: string,
@@ -236,7 +290,13 @@ export function installPlugin(
   return { spec: `./.brewdocs/plugins/${entry.name}.cjs`, entry };
 }
 
-/** Absolute path of a registry entry's module, or null (used by loadPlugin). */
+/**
+ * Absolute path of a registry entry's module, or null (used by loadPlugin).
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param name - plugin name to resolve.
+ * @returns the absolute entry module path, or null when missing or failing integrity.
+ */
 export function registryEntryPath(registryDir: string, name: string): string | null {
   const entry = getPlugin(registryDir, name);
   if (!entry) return null;
@@ -249,6 +309,7 @@ export function registryEntryPath(registryDir: string, name: string): string | n
   return abs;
 }
 
+/** Per-entry integrity check outcome (ok / mismatch / missing-file / unsigned). */
 export interface RegistryVerifyResult {
   name: string;
   version: string;
@@ -258,6 +319,9 @@ export interface RegistryVerifyResult {
 /**
  * Recompute every entry's recorded hash. `unsigned` = published before
  * integrity was recorded (allowed to install, but re-publish to add it).
+ *
+ * @param registryDir - directory holding the registry store.
+ * @returns a per-entry verification status (ok, mismatch, missing-file or unsigned).
  */
 export function verifyRegistry(registryDir: string): RegistryVerifyResult[] {
   return listPlugins(registryDir).map((p) => {
@@ -275,6 +339,10 @@ export function verifyRegistry(registryDir: string): RegistryVerifyResult[] {
 /**
  * Static marketplace gallery of the registry (standalone HTML, theme-free
  * like gallery.ts). Returns the written index.html path.
+ *
+ * @param registryDir - directory holding the registry store.
+ * @param outDir - directory the marketplace page is written into.
+ * @returns the path of the generated index.html.
  */
 export function buildRegistryGallery(registryDir: string, outDir: string): string {
   const entries = listPlugins(registryDir);

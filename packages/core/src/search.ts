@@ -1,5 +1,6 @@
 import type { RenderModel } from "./types.js";
 
+/** One client-search document: title, kind, href and searchable text. */
 export interface SearchDoc {
   id: string;
   title: string;
@@ -20,6 +21,10 @@ function stripHtml(html: string): string {
  * Build a serializable search index from a render model. Covers README
  * sections and exported symbols. Designed to be embedded in the page and
  * queried client-side with no external dependency.
+ *
+ * @param model - render model whose sections and symbols are indexed.
+ * @param multiPage - when true, symbol URLs point at per-symbol pages instead of anchors.
+ * @returns the serializable search documents.
  */
 export function buildSearchIndex(model: RenderModel, multiPage = false): SearchDoc[] {
   const docs: SearchDoc[] = [];

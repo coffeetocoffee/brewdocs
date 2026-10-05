@@ -353,6 +353,7 @@ function looksLikeJavaProject(root: string): boolean {
   return walkSourceFiles(root, [".java"], { maxDepth: 6 }).length > 0;
 }
 
+/** Built-in Java adapter: line-based class/method scan (see D-3). */
 export const javaAdapter: LanguageAdapter = {
   id: "java",
   detect(ctx) {

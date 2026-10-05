@@ -81,6 +81,7 @@ import {
   saveDriftSnapshot,
   renderDriftText,
   addFederatedRepo,
+  addFederatedRepoFromUrl,
   buildFederatedPage,
   listFederatedRepos,
   loadFederation,
@@ -92,7 +93,7 @@ import {
   type StorageAdapter,
   type SymbolDoc,
 } from "@brewdocs/core";
-import { createServer, createSecureServer } from "./server.js";
+import { createServer, createSecureServer, readGapReport } from "./server.js";
 import { addKey, listKeys, revokeKey, ALL_SCOPES, type ApiKeyRecord } from "./keys.js";
 import * as http from "node:http";
 import * as fs from "node:fs";
@@ -1632,12 +1633,18 @@ dark: false
       const target = rest[2];
       if (!name || !target) {
         throw new Error(
-          "usage: brewdocs federate add <name> <docmodel.json | dir> [--url <site-url>] [--store <dir>]",
+          "usage: brewdocs federate add <name> <docmodel.json | dir | site-url> [--url <site-url>] [--store <dir>]",
         );
       }
-      const repo = addFederatedRepo(storeDir, name, path.resolve(process.cwd(), target), {
-        url: getFlag(rest, "--url"),
-      });
+      // v4.5: a URL is fetched (the deployed site already serves its
+      // docmodel.json); anything else is a local file or directory.
+      const repo = /^https?:\/\//i.test(target)
+        ? await addFederatedRepoFromUrl(storeDir, name, target, {
+            url: getFlag(rest, "--url") ?? target,
+          })
+        : addFederatedRepo(storeDir, name, path.resolve(process.cwd(), target), {
+            url: getFlag(rest, "--url"),
+          });
       if (!repo) {
         process.exitCode = 1;
         return;
@@ -1709,6 +1716,34 @@ dark: false
     throw new Error(
       "usage: brewdocs federate add|list|remove|search|page [--store <dir>]",
     );
+  }
+
+  // v4.5: close the loop. Agents query a deployed site's docmodel over
+  // POST /mcp; every tools/call is recorded locally. `gap` surfaces the
+  // queries that returned nothing — the symbols people ask for that the docs
+  // do not name. Read-only over the analytics store the server already keeps.
+  if (command === "gap") {
+    const hosting = path.resolve(process.cwd(), getFlag(rest, "--hosting") ?? "./hosting");
+    const site = getFlag(rest, "--site");
+    const limit = Number(getFlag(rest, "--limit")) || 20;
+    const gaps = readGapReport(hosting, site, limit);
+    if (rest.includes("--json")) {
+      console.log(JSON.stringify({ site: site ?? "*", gaps }, null, 2));
+      return;
+    }
+    if (gaps.length === 0) {
+      console.log(
+        `No unanswered queries recorded${site ? ` for ${site}` : ""} — either nothing has been asked, or every query found a symbol.`,
+      );
+      return;
+    }
+    console.log(
+      `🕳️  ${gaps.length} unanswered quer${gaps.length === 1 ? "y" : "ies"}${site ? ` for ${site}` : ""} (misses · query · tool · site):`,
+    );
+    for (const g of gaps) {
+      console.log(`   ${String(g.misses).padStart(3)}×  "${g.query}"  [${g.tool}]  ${g.site}`);
+    }
+    return;
   }
 
   if (command === "mcp") {
@@ -1842,6 +1877,10 @@ Usage:
    brewdocs registry publish|list|search|install|remove|verify|gallery   v3.0 plugin registry + marketplace
    brewdocs drift <source> [--record] [--from <ref>] [--fail-on-drift]   v3.5 doc drift detection
    brewdocs federate add|list|remove|search|page [--store <dir>]   v3.5 cross-repo federated search
+                (add <name> <docmodel.json|dir|site-url> — a URL fetches the
+                 deployed site's docmodel.json over HTTP, v4.5)
+   brewdocs gap [--hosting <dir>] [--site <sub>] [--limit N] [--json]   v4.5: which
+                symbols agents asked for over MCP and did not find
 
 Commands:
     build <source>   Extract docs and write a single index.html (add --multi for symbol pages, --watch to rebuild)
@@ -1899,10 +1938,13 @@ Commands:
                        --from <ref> compares against a git tag instead;
                        --fail-on-drift exits 1 for CI)
     federate         v3.5: cross-repo federated search
-                      (add <name> <docmodel.json|dir> [--url <site>] | list |
-                       remove <name> | search <query...> | page [--out])
+                      (add <name> <docmodel.json|dir|site-url> [--url <site>] |
+                       list | remove <name> | search <query...> | page [--out])
+    gap              v4.5: unanswered MCP queries — what agents asked for and
+                      the docs did not name (reads the hosting analytics store)
     drafts           Manage private draft links (list / extend / revoke)
     mcp              MCP stdio server over docmodel.json for agent workflows
+                     (also served over HTTP: POST /mcp?site=<sub> on 'brewdocs serve')
     help             Show this help
 
 Options:

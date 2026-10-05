@@ -118,6 +118,9 @@ function testFiles(root: string): string[] {
  * Propose example snippets for every exported symbol that has no `@example`.
  * Sources: fenced blocks in the README and calls in test files. One proposal
  * per symbol (first hit wins). Pure analysis — never writes files.
+ *
+ * @param source - source root (and optional name) to extract and scan for examples.
+ * @returns example proposals for symbols that have no `@example` yet.
  */
 export function harvestExamples(source: { root: string; name?: string }): HarvestProposal[] {
   const extracted = extractFromSource(source);

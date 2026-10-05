@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { loadDocModel } from "./mcp.js";
+import { loadDocModel, parseDocModel } from "./mcp.js";
 import type { DocModelArtifact } from "./docmodel.js";
 import { escapeHtml } from "./escape.js";
 
@@ -9,7 +9,9 @@ import { escapeHtml } from "./escape.js";
  * registry.ts/cloud.ts): one JSON store `<storeDir>/.federation.json` indexes
  * the `docmodel.json` of every registered repo, so a query searches all of
  * them at once. `federate add|search|page` + server `GET /api/search`.
- * No network: repos are indexed from local docmodel.json files.
+ * v4.5: a repo may be indexed from a local file OR fetched from a deployed
+ * site's URL (`addFederatedRepoFromUrl`); either way the artifact is validated
+ * against the published schema before it is trusted.
  */
 
 export interface FederationSymbol {
@@ -21,6 +23,7 @@ export interface FederationSymbol {
   url?: string;
 }
 
+/** One indexed repo: identity, freshness stamps and its symbol list. */
 export interface FederationRepo {
   /** Display name. */
   name: string;
@@ -40,6 +43,7 @@ export interface FederationRepo {
   symbols: FederationSymbol[];
 }
 
+/** On-disk shape of `.federation.json` — the indexed repos. */
 export interface FederationStore {
   repos: FederationRepo[];
 }
@@ -50,6 +54,12 @@ function storeFile(storeDir: string): string {
   return path.join(storeDir, STORE_FILE);
 }
 
+/**
+ * Load the federation store from `<storeDir>/.federation.json`.
+ *
+ * @param storeDir - directory holding the `.federation.json` index.
+ * @returns the parsed store, or an empty store when the file is missing or malformed.
+ */
 export function loadFederation(storeDir: string): FederationStore {
   try {
     const raw = JSON.parse(fs.readFileSync(storeFile(storeDir), "utf8")) as FederationStore;
@@ -65,6 +75,12 @@ function saveFederation(storeDir: string, store: FederationStore): void {
   fs.writeFileSync(storeFile(storeDir), JSON.stringify(store, null, 2), "utf8");
 }
 
+/**
+ * Slugify a repo name into a filesystem/URL-safe key.
+ *
+ * @param name - repo name (may include an npm scope like `@org/pkg`).
+ * @returns the lowercased slug with scopes and slashes flattened to dashes.
+ */
 export function slug(name: string): string {
   return name
     .toLowerCase()
@@ -74,7 +90,12 @@ export function slug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Resolve a file or directory to its docmodel.json path. */
+/**
+ * Resolve a file or directory to its docmodel.json path.
+ *
+ * @param input - path to a `docmodel.json` file or a directory containing one.
+ * @returns the resolved docmodel.json path, or null when the input does not exist or has no docmodel.
+ */
 export function resolveDocModelPath(input: string): string | null {
   const abs = path.resolve(input);
   try {
@@ -106,10 +127,49 @@ export interface AddRepoOptions {
   url?: string;
 }
 
+/** Build a federation record from a validated artifact and store it. */
+function indexArtifact(
+  storeDir: string,
+  name: string,
+  artifact: DocModelArtifact,
+  opts: AddRepoOptions & { source: string },
+): FederationRepo | null {
+  const s = slug(name);
+  if (!s) {
+    console.warn(`[brewdocs] federate: name "${name}" is empty after slugging`);
+    return null;
+  }
+  const store = loadFederation(storeDir);
+  const record: FederationRepo = {
+    name,
+    slug: s,
+    version: artifact.version ?? artifact.package?.version,
+    description: artifact.description ?? artifact.package?.description,
+    source: opts.source,
+    gitSha: artifact.source?.gitSha,
+    generatedAt: artifact.generatedAt,
+    indexedAt: new Date().toISOString(),
+    url: opts.url,
+    symbols: symbolsOf(artifact, opts.url),
+  };
+  const existing = store.repos.findIndex((r) => r.slug === s);
+  if (existing >= 0) store.repos[existing] = record;
+  else store.repos.push(record);
+  store.repos.sort((a, b) => a.slug.localeCompare(b.slug));
+  saveFederation(storeDir, store);
+  return record;
+}
+
 /**
  * Add or re-index a repo from its `docmodel.json` (file or directory). A
  * re-add replaces the entry in place — same-name repos never duplicate.
  * Returns null (with a warning) when the file is missing or invalid.
+ *
+ * @param storeDir - directory holding the federation index to update.
+ * @param name - display name of the repo being indexed.
+ * @param docmodelInput - path to the repo's `docmodel.json` file or its containing directory.
+ * @param opts - add options; `url` supplies the base for symbol deep links.
+ * @returns the stored federation record, or null when the docmodel is missing/invalid or the name slugs to empty.
  */
 export function addFederatedRepo(
   storeDir: string,
@@ -135,36 +195,100 @@ export function addFederatedRepo(
     );
     return null;
   }
-  const s = slug(name);
-  if (!s) {
-    console.warn(`[brewdocs] federate: name "${name}" is empty after slugging`);
-    return null;
-  }
-  const store = loadFederation(storeDir);
-  const record: FederationRepo = {
-    name,
-    slug: s,
-    version: artifact.version ?? artifact.package?.version,
-    description: artifact.description ?? artifact.package?.description,
-    source: file,
-    gitSha: artifact.source?.gitSha,
-    generatedAt: artifact.generatedAt,
-    indexedAt: new Date().toISOString(),
-    url: opts.url,
-    symbols: symbolsOf(artifact, opts.url),
-  };
-  const existing = store.repos.findIndex((r) => r.slug === s);
-  if (existing >= 0) store.repos[existing] = record;
-  else store.repos.push(record);
-  store.repos.sort((a, b) => a.slug.localeCompare(b.slug));
-  saveFederation(storeDir, store);
-  return record;
+  return indexArtifact(storeDir, name, artifact, { ...opts, source: file });
 }
 
+/**
+ * The `docmodel.json` URL for a site base (or the input itself if it is one).
+ *
+ * @param input - site base URL, or a URL already ending in `.json`.
+ * @returns the `docmodel.json` URL with any trailing slashes trimmed.
+ */
+export function docModelUrl(input: string): string {
+  const u = input.trim().replace(/\/+$/, "");
+  return /\.json$/i.test(u) ? u : `${u}/docmodel.json`;
+}
+
+/**
+ * v4.5: fetch a deployed site's `docmodel.json` over HTTP. A deployed BrewDocs
+ * site already serves this artifact; this lets `federate add <name> <url>` pull
+ * it in, so a federation index is no longer limited to local files.
+ * Returns null (with a warning) on a non-2xx response, a timeout, or invalid
+ * JSON, matching `addFederatedRepo`'s degrade-don't-throw contract.
+ *
+ * @param input - site base URL (or a direct docmodel.json URL) to fetch from.
+ * @param timeoutMs - abort the request after this many milliseconds.
+ * @returns the parsed artifact plus its source URL, or null on HTTP error, timeout or invalid JSON.
+ */
+export async function fetchDocModelFromUrl(
+  input: string,
+  timeoutMs = 15_000,
+): Promise<{ artifact: DocModelArtifact; source: string } | null> {
+  const url = docModelUrl(input);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) {
+      console.warn(`[brewdocs] federate: ${url} returned HTTP ${res.status}`);
+      return null;
+    }
+    const text = await res.text();
+    return { artifact: parseDocModel(text), source: url };
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    console.warn(`[brewdocs] federate: could not fetch ${url} — ${why}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * v4.5: index a repo from a deployed site's URL. Validates the fetched artifact
+ * against the published schema before trusting it, then stores it exactly like
+ * a local add.
+ *
+ * @param storeDir - directory holding the federation index to update.
+ * @param name - display name of the repo being indexed.
+ * @param siteUrl - base URL of the deployed site serving the repo's `docmodel.json`.
+ * @param opts - add options; `url` supplies the base for symbol deep links.
+ * @returns the stored federation record, or null when the remote docmodel cannot be fetched or is invalid.
+ */
+export async function addFederatedRepoFromUrl(
+  storeDir: string,
+  name: string,
+  siteUrl: string,
+  opts: AddRepoOptions = {},
+): Promise<FederationRepo | null> {
+  const fetched = await fetchDocModelFromUrl(siteUrl);
+  if (!fetched) return null;
+  return indexArtifact(storeDir, name, fetched.artifact, {
+    ...opts,
+    source: fetched.source,
+  });
+}
+
+/**
+ * List every repo indexed in the federation store.
+ *
+ * @param storeDir - directory holding the federation index.
+ * @returns a copy of the indexed repo records.
+ */
 export function listFederatedRepos(storeDir: string): FederationRepo[] {
   return loadFederation(storeDir).repos.slice();
 }
 
+/**
+ * Remove a repo from the federation index by name.
+ *
+ * @param storeDir - directory holding the federation index.
+ * @param name - display name of the repo to remove (slugged for matching).
+ * @returns true when a repo was removed, false when no matching slug existed.
+ */
 export function removeFederatedRepo(storeDir: string, name: string): boolean {
   const store = loadFederation(storeDir);
   const s = slug(name);
@@ -175,6 +299,7 @@ export function removeFederatedRepo(storeDir: string, name: string): boolean {
   return true;
 }
 
+/** One ranked search hit: repo, symbol, score inputs and deep link. */
 export interface FederatedHit {
   repo: string;
   slug: string;
@@ -191,6 +316,11 @@ export interface FederatedHit {
  * Ranked search across every indexed repo. Scoring mirrors the in-page
  * search: symbol-name hits dominate (5/term), body hits add up (capped), and
  * the repo name rides in the body so "acme" surfaces acme's symbols.
+ *
+ * @param store - federation store to search across.
+ * @param query - whitespace-separated search terms.
+ * @param opts - search options; `limit` caps the number of hits returned.
+ * @returns matching symbols ranked by score (name hits above body hits).
  */
 export function searchFederation(
   store: FederationStore,
@@ -251,6 +381,10 @@ export function searchFederation(
  * Standalone federated-search page (theme-free like gallery.ts): embeds the
  * whole index and searches client-side, so the page works offline from
  * file:// with zero dependencies. Returns the written index.html path.
+ *
+ * @param storeDir - directory holding the federation index to embed.
+ * @param outDir - directory to write the standalone search page into.
+ * @returns the path of the generated index.html.
  */
 export function buildFederatedPage(storeDir: string, outDir: string): string {
   const store = loadFederation(storeDir);

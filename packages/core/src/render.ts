@@ -8,6 +8,7 @@ import { themeFromRef, type Slots } from "./theme-manifest.js";
 import { applyOnRender, mergePluginThemes, type BrewDocsPlugin } from "./plugins.js";
 import { normalizeLocale, uiStrings, type UiStrings } from "./i18n.js";
 
+/** One entry of the version switcher (version, path, EOL flag). */
 export interface VersionLink {
   version: string;
   path: string;
@@ -17,6 +18,7 @@ export interface VersionLink {
   eol?: boolean;
 }
 
+/** Render-time options: theme, dark mode, locale, playground, versions, freshness. */
 export interface RenderOptions {
   theme?: string;
   dark?: boolean;
@@ -592,6 +594,10 @@ function freshnessHtml(fresh?: { gitSha?: string; generatedAt?: string }): strin
  * keys without the timestamp (otherwise it would never hit), so a cached page
  * carries the date it was first rendered — replace that one span with the
  * current stamp. Idempotent for a freshly rendered page.
+ *
+ * @param html - rendered page HTML whose freshness span should be refreshed.
+ * @param fresh - current git sha / generation date; omitted means an empty stamp.
+ * @returns the HTML with its freshness span replaced.
  */
 export function restampFreshness(
   html: string,
@@ -703,7 +709,13 @@ ${opts.renderOptions.playground ? PLAYGROUND_JS : ""}
 `;
 }
 
-/** Render the model into a complete, standalone, themeable HTML document. */
+/**
+ * Render the model into a complete, standalone, themeable HTML document.
+ *
+ * @param model - render model (title, sections, symbols) to render.
+ * @param options - render options: theme, locale, plugins, external links and extras.
+ * @returns the full HTML document for the index page.
+ */
 export function renderToHtml(model: RenderModel, options: RenderOptions = {}): string {
   const ui = uiStrings(options.locale);
   const indexJson = searchIndexJson(model, Boolean(options.multiPage));
@@ -766,6 +778,7 @@ export function renderToHtml(model: RenderModel, options: RenderOptions = {}): s
   );
 }
 
+/** One emitted page: site-relative path plus its HTML. */
 export interface RenderedPage {
   path: string;
   html: string;
@@ -775,6 +788,10 @@ export interface RenderedPage {
  * Render the model into multiple pages: one `index.html` (README + API summary
  * with links) plus one `symbols/<slug>.html` per exported symbol. The search
  * index links symbol results to their dedicated pages.
+ *
+ * @param model - render model to render into multiple pages.
+ * @param options - render options: theme, locale, plugins and external links.
+ * @returns the index page plus one page per exported symbol.
  */
 export function renderToHtmlMulti(
   model: RenderModel,
@@ -897,7 +914,13 @@ function navGroupsFor(
     .join("");
 }
 
-/** Render every guide page of the model (used by build()/buildMulti()). */
+/**
+ * Render every guide page of the model (used by build()/buildMulti()).
+ *
+ * @param model - render model whose `content` pages are emitted.
+ * @param options - render options; `locale` selects the UI strings.
+ * @returns one rendered page per guide, or [] when the model has no content pages.
+ */
 export function renderContentPages(
   model: RenderModel,
   options: RenderOptions = {},
@@ -946,7 +969,13 @@ export function renderContentPages(
   return out;
 }
 
-/** Links (toc entries) for the guide section on the main index page. */
+/**
+ * Links (toc entries) for the guide section on the main index page.
+ *
+ * @param model - render model; only its `content` pages matter here.
+ * @param ui - UI strings; defaults to the English bundle.
+ * @returns the toc `<li>` linking to the guides section, or "" when no guides exist.
+ */
 export function contentIndexToc(model: RenderModel, ui?: UiStrings): string {
   const pages = model.content ?? [];
   if (pages.length === 0) return "";
@@ -954,7 +983,13 @@ export function contentIndexToc(model: RenderModel, ui?: UiStrings): string {
   return `<li><a href="#guides">${escapeHtml(t.guides)}</a></li>`;
 }
 
-/** HTML block listing guide pages, appended to the index page body. */
+/**
+ * HTML block listing guide pages, appended to the index page body.
+ *
+ * @param model - render model; only its `content` pages matter here.
+ * @param ui - UI strings; defaults to the English bundle.
+ * @returns the guides `<section>`, or "" when the model has no guide pages.
+ */
 export function contentIndexSection(model: RenderModel, ui?: UiStrings): string {
   const pages = model.content ?? [];
   if (pages.length === 0) return "";

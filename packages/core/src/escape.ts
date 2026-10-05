@@ -5,6 +5,9 @@
  * A local escaper that forgets a quote is exactly how the attribute-injection
  * XSS shipped (finding #3), so every module imports this one and the gate
  * (`inv-4`) scans *all* source files for a home-grown HTML escaper.
+ *
+ * @param s - raw text to escape for HTML text/attribute contexts.
+ * @returns the text with `& < > " '` replaced by entities.
  */
 export function escapeHtml(s: string): string {
   return s
@@ -19,6 +22,9 @@ export function escapeHtml(s: string): string {
  * Drop URLs whose scheme executes in a browser; keep everything else. Control
  * characters are stripped before sniffing because `java\nscript:` is still
  * javascript: to a browser. Returns the trimmed URL, or undefined to omit it.
+ *
+ * @param raw - URL string to validate.
+ * @returns the trimmed URL, or undefined when it uses an executable scheme.
  */
 export function safeUrl(raw: string): string | undefined {
   const trimmed = raw.trim();

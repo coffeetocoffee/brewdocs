@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Source } from "./types.js";
 
+/** A resolved build input: local root, display name, cleanup, fetched flag. */
 export interface ResolvedSource {
   source: Source;
   /** Remove any temp dirs created during resolution. */
@@ -17,6 +18,9 @@ const GITHUB_URL = /github\.com[/:]([^/]+)\/([^/#?.\s]+)/i;
  * Turn a user input (local path, npm package, or GitHub URL) into a local
  * source directory. Network steps (npm install / git clone) are best-effort
  * and throw a clear error when unavailable, so the web UI can surface it.
+ *
+ * @param input - local path, npm package name/URL, or GitHub URL to resolve.
+ * @returns the resolved local source plus a cleanup callback for temp dirs.
  */
 export function resolveInput(input: string): ResolvedSource {
   const raw = input.trim();
@@ -53,6 +57,10 @@ export function resolveInput(input: string): ResolvedSource {
  * The child environment is trimmed to what npm itself needs (PATH/HOME/tmp/
  * proxy and npm config) so no unrelated secret from the parent process is
  * inherited into a package's install scripts.
+ *
+ * @param args - npm CLI arguments to run.
+ * @param opts - `capture` pipes stdout back instead of discarding it.
+ * @returns the captured stdout (empty when not captured).
  */
 export function runNpm(args: string[], opts: { capture?: boolean } = {}): string {
   const win = process.platform === "win32";

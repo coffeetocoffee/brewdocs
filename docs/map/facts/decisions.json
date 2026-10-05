@@ -45,6 +45,11 @@
       "id": "D-9",
       "title": "Plugins are trusted code, so only the operator may choose them",
       "body": "A plugin is arbitrary code: loadPlugin resolves the specifier with createRequire and imports it, with no signature, no sandbox and no capability limit (D-1 keeps the runtime dependency-free, so there is no isolation mechanism to lean on). The question is therefore not whether a plugin is safe — it is who is allowed to name one. A locally chosen repo may name its own plugins: that is the plugin feature. A fetched repo may not, because BrewDocs exists to render codebases the operator does not own, and a brewdocs.yml that can name a plugin turns every doc build into remote code execution (finding #19, INV-20). Plugins passed explicitly with --plugins always load, on a fetched source or not, because that is the operator decision rather than the repo. The general rule this encodes: anything the SOURCE tree controls (config values that select code, theme slot paths, redirects) is untrusted input, and anything the OPERATOR passes on the command line is a decision. If a new config key can cause code to load rather than merely change output, it belongs on the untrusted side of that line."
+    },
+    {
+      "id": "D-10",
+      "title": "MCP query telemetry is local-only, stored beside the views/builds it sits next to",
+      "body": "v4.5 closes the feedback loop: agents query a deployed site's docmodel over POST /mcp, and every tools/call (tool, query, hit/miss) is written into the same hosting-side .analytics.json that already holds pageviews and builds. `brewdocs gap` reads it back and answers \"which symbols did people ask for and not find\". The decision is where that data lives: locally, next to the site, exactly like views and builds — no backend, no phone-home, no query text leaving the machine. That keeps the no-backend posture (boundary #1) intact and makes the privacy cost identical to the pageview counter that was already there. It also keeps the feature honest about its own limits: a site nobody queries produces an empty gap report, and an empty report is not evidence that the docs are complete. A hosted analytics service would be a different product (boundary #1), not an extension of this store."
     }
   ]
 }

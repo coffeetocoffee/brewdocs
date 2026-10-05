@@ -370,7 +370,11 @@ function findPython(): string | null {
   return null;
 }
 
-/** Test hook: pretend python appeared/vanished mid-session. */
+/**
+ * Test hook: pretend python appeared/vanished mid-session.
+ *
+ * @returns nothing; clears the cached interpreter probe.
+ */
 export function resetPythonProbe(): void {
   cachedPython = undefined;
 }
@@ -388,6 +392,7 @@ function looksLikePythonPackage(root: string): boolean {
   return false;
 }
 
+/** Opt-in python-ast adapter: runs a bundled AST helper when `python` is on PATH. */
 export const pythonAdapter: LanguageAdapter = {
   id: "python",
   detect(ctx) {

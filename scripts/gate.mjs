@@ -382,6 +382,53 @@ function checkRendererGolden() {
   else fail("inv-18:renderer-golden", "renderer golden test or its snapshot is missing");
 }
 
+/**
+ * INV-21: the HTTP MCP transport must be gated exactly like the other reads —
+ * an unauthenticated caller on a server with auth configured must not query a
+ * site's docmodel, and a private site needs its access token. It must also
+ * record what it was asked, or the whole point of the endpoint (closing the
+ * feedback loop) is lost. Asserted from the parsed route block, so moving the
+ * guard out of the block is caught rather than a token merely existing.
+ */
+function checkMcpHttpGuarded() {
+  const lines = read("packages/cli/src/server.ts").split("\n");
+  const start = lines.findIndex((l) => /url\.pathname === "\/mcp"/.test(l));
+  if (start < 0) return fail("inv-21:mcp-http-guarded", "no /mcp route in server.ts");
+  let end = start + 1;
+  while (end < lines.length && !/url\.pathname === "/.test(lines[end])) end++;
+  const block = lines.slice(start, end).join("\n");
+
+  const isPost = /req\.method === "POST"/.test(block);
+  const readGuard = /authorizeRead\(req\)/.test(block);
+  const privateGuard = /requireSiteAccess\(/.test(block);
+  const telemetry = /recordToolCall\(/.test(block);
+  if (isPost && readGuard && privateGuard && telemetry)
+    pass("inv-21:mcp-http-guarded");
+  else
+    fail(
+      "inv-21:mcp-http-guarded",
+      `POST=${isPost}, authorizeRead=${readGuard}, requireSiteAccess=${privateGuard}, recordToolCall=${telemetry}`,
+    );
+}
+
+/**
+ * INV-22: stdio and HTTP must speak one protocol. Both transports route through
+ * `handleMcpMessage`, so a change to tool dispatch cannot land in only one of
+ * them — the class of bug that made the plugin `fetched` guard fail three times.
+ */
+function checkMcpSharedHandler() {
+  const src = read("packages/core/src/mcp.ts");
+  const exported = /export function handleMcpMessage/.test(src);
+  const stdioUses = /runMcpServer[\s\S]{0,1400}?handleMcpMessage\(/.test(src);
+  const httpUses = /handleMcpRequest[\s\S]{0,900}?handleMcpMessage\(/.test(src);
+  if (exported && stdioUses && httpUses) pass("inv-22:mcp-one-protocol-handler");
+  else
+    fail(
+      "inv-22:mcp-one-protocol-handler",
+      `exported=${exported}, stdioUses=${stdioUses}, httpUses=${httpUses}`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -463,6 +510,8 @@ checkReadGuards();
 checkPythonFetchedGuard();
 checkPluginFetchedGuard();
 checkRendererGolden();
+checkMcpHttpGuarded();
+checkMcpSharedHandler();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

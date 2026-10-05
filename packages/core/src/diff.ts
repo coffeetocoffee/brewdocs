@@ -11,6 +11,7 @@ export type ChangeKind =
   | "undeprecated"
   | "kind-changed";
 
+/** One symbol's change between two versions (added/removed/changed/signature). */
 export interface SymbolChange {
   name: string;
   changes: ChangeKind[];
@@ -20,6 +21,7 @@ export interface SymbolChange {
   to?: SymbolDoc;
 }
 
+/** API diff between two versions: the change list plus summary counts. */
 export interface VersionDiff {
   fromVersion: string;
   toVersion: string;
@@ -68,6 +70,13 @@ function docsFingerprint(s: SymbolDoc): string {
   });
 }
 
+/**
+ * Human-readable label for a single kind of change within a symbol change.
+ *
+ * @param kind - the change category to describe.
+ * @param c - the symbol change (supplies from/to kinds and replacement hints).
+ * @returns a short phrase such as "removed" or "signature changed".
+ */
 export function describeChange(kind: ChangeKind, c: SymbolChange): string {
   switch (kind) {
     case "removed":
@@ -92,6 +101,12 @@ export function describeChange(kind: ChangeKind, c: SymbolChange): string {
 /**
  * Diff two extracted symbol sets into a structured migration report.
  * `from`/`to` are the older and newer extractions respectively.
+ *
+ * @param fromVersion - version label of the older extraction.
+ * @param from - older symbol set.
+ * @param toVersion - version label of the newer extraction.
+ * @param to - newer symbol set.
+ * @returns the structured diff of added, removed and changed symbols.
  */
 export function diffSymbols(
   fromVersion: string,
@@ -194,7 +209,12 @@ function membersBreaking(from: SymbolDoc, to: SymbolDoc): boolean {
   return false;
 }
 
-/** Strip a leading "v"/"V" so tags like "v1.2.0" render as "v1.2.0", not "vv1.2.0". */
+/**
+ * Strip a leading "v"/"V" so tags like "v1.2.0" render as "v1.2.0", not "vv1.2.0".
+ *
+ * @param version - version string that may carry a leading "v"/"V".
+ * @returns the version without its leading "v" prefix.
+ */
 export function versionLabel(version: string): string {
   return version.replace(/^v/i, "");
 }
@@ -205,7 +225,13 @@ const sigBlock = (s: SymbolDoc | undefined): string =>
 const note = (c: SymbolChange): string =>
   c.changes.map((k) => describeChange(k, c)).map(escapeHtml).join(" · ");
 
-/** Render a VersionDiff as a standalone themed HTML page. */
+/**
+ * Render a VersionDiff as a standalone themed HTML page.
+ *
+ * @param diff - structured version diff to render.
+ * @param title - package title shown in the page heading and title.
+ * @returns the full HTML document for the diff page.
+ */
 export function renderDiffHtml(diff: VersionDiff, title: string): string {
   const breakingTone = diff.breakingCount > 0 ? "#cb2431" : "#4c1";
 

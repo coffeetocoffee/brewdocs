@@ -113,8 +113,16 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 }
 
+/** Where a deploy writes: the local hosting dir, or an S3-compatible bucket. */
 export type StorageKind = "local" | "s3";
 
+/**
+ * Construct a storage adapter for the requested backend.
+ *
+ * @param kind - backend to create: "local" (filesystem) or "s3".
+ * @param options - per-backend configuration (`local` baseDir or `s3` credentials).
+ * @returns the storage adapter (S3 throws when its configuration is missing).
+ */
 export function createStorage(
   kind: StorageKind,
   options: { local?: LocalStorageOptions; s3?: S3Options },

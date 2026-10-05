@@ -15,6 +15,10 @@ const ALIAS_UNWRAP_DEPTH = 5;
  * annotating a param resolves to `string`, so a diff between `UserId` and
  * `string` is not flagged breaking. Generic aliases (`Box<T>`) keep their
  * name — unwrapping would lose the type argument.
+ *
+ * @param typeNode - type annotation to display.
+ * @param checker - TypeScript type checker used to resolve aliases.
+ * @returns the display string for the (alias-unwrapped) type.
  */
 export function resolveTypeDisplay(typeNode: ts.TypeNode, checker: ts.TypeChecker): string {
   try {
@@ -34,7 +38,13 @@ export function resolveTypeDisplay(typeNode: ts.TypeNode, checker: ts.TypeChecke
   }
 }
 
-/** Alias-unwrapped type for one parameter, with rest/optional markers kept. */
+/**
+ * Alias-unwrapped type for one parameter, with rest/optional markers kept.
+ *
+ * @param p - parameter declaration to resolve.
+ * @param checker - TypeScript type checker used to resolve the type.
+ * @returns the display type, prefixed with "..." for rest and suffixed with "?" when optional.
+ */
 export function resolvedParamType(p: ts.ParameterDeclaration, checker: ts.TypeChecker): string {
   const rest = p.dotDotDotToken ? "..." : "";
   const type = p.type
@@ -44,7 +54,13 @@ export function resolvedParamType(p: ts.ParameterDeclaration, checker: ts.TypeCh
   return `${rest}${type}${optional}`;
 }
 
-/** Alias-unwrapped return type for a function-like declaration. */
+/**
+ * Alias-unwrapped return type for a function-like declaration.
+ *
+ * @param decl - function-like declaration whose return type is resolved.
+ * @param checker - TypeScript type checker used to resolve the type.
+ * @returns the display return type, or undefined when it cannot be resolved.
+ */
 export function resolvedReturnType(
   decl: ts.SignatureDeclaration,
   checker: ts.TypeChecker,
@@ -58,7 +74,12 @@ export function resolvedReturnType(
   }
 }
 
-/** Extract generic type parameters (`<K extends string, V = number>`) from any declaration that can carry them. */
+/**
+ * Extract generic type parameters (`<K extends string, V = number>`) from any declaration that can carry them.
+ *
+ * @param decl - declaration that may carry type parameters.
+ * @returns the type parameter docs, or undefined when there are none.
+ */
 export function typeParamsOf(decl: ts.Declaration): TypeParamDoc[] | undefined {
   const tps = (decl as { typeParameters?: readonly ts.TypeParameterDeclaration[] })
     .typeParameters;
@@ -197,6 +218,10 @@ function memberDoc(
  * Extract method/property/constructor members from a class or interface
  * declaration, or the values of an enum. Returns undefined for anything else
  * (or empty shapes), so SymbolDoc stays lean.
+ *
+ * @param decl - class, interface or enum declaration to inspect.
+ * @param checker - TypeScript type checker used to resolve member types.
+ * @returns the extracted members, or undefined when the declaration has none.
  */
 export function extractMembers(
   decl: ts.Declaration,

@@ -13,7 +13,9 @@ import { loadConfig } from "./config.js";
  */
 
 const SLOT_KEYS = ["head", "header", "mainBefore", "mainAfter", "footer"] as const;
+/** Named theme slots a manifest may override (hero, mainBefore, mainAfter, footer). */
 export type SlotName = (typeof SLOT_KEYS)[number];
+/** Manifest slot overrides: slot name -> inline HTML or a confined partial path. */
 export type Slots = Partial<Record<SlotName, string>>;
 
 function parseScalar(raw: string): string {
@@ -103,6 +105,10 @@ function readManifestFile(file: string, sourceRoot?: string): ThemeManifest | nu
  * Resolve a theme reference to a manifest, searching (in order):
  * the literal path, `themes/<ref>.yml|json` under root, and a
  * `themeFile`/`theme: path` from brewdocs.yml. Returns null for built-ins.
+ *
+ * @param ref - theme reference: literal path or `themes/<name>` (undefined yields null).
+ * @param root - source root the reference is resolved against.
+ * @returns the parsed theme manifest, or null when no manifest file matches.
  */
 export function loadThemeManifest(ref: string | undefined, root: string): ThemeManifest | null {
   if (!ref) return null;
@@ -122,7 +128,13 @@ export function loadThemeManifest(ref: string | undefined, root: string): ThemeM
   return null;
 }
 
-/** Theme name from `--theme`/config plus optional manifest override. */
+/**
+ * Theme name from `--theme`/config plus optional manifest override.
+ *
+ * @param ref - explicit theme reference from the caller, if any.
+ * @param root - source root used to locate a manifest and read brewdocs.yml.
+ * @returns the base theme name and the manifest, when one was found.
+ */
 export function resolveThemeRef(ref: string | undefined, root: string): { name?: string; manifest?: ThemeManifest } {
   const config = loadConfig(root);
   const candidate = ref ?? config.themeFile;
@@ -143,6 +155,9 @@ export function resolveThemeRef(ref: string | undefined, root: string): { name?:
  * are repo-controlled config, so without this a `themes/brand.yml` shipped by
  * the repo being documented could name `../../id_rsa`, and the build would read
  * it and embed it in a page the user then publishes.
+ *
+ * @param manifest - theme manifest whose slots are materialized.
+ * @returns the resolved slot partials (inline HTML or file contents).
  */
 export function manifestSlots(manifest: ThemeManifest | undefined): Slots {
   const slots: Slots = {};
@@ -176,7 +191,13 @@ export function manifestSlots(manifest: ThemeManifest | undefined): Slots {
   return slots;
 }
 
-/** Apply a manifest on top of a base theme: vars, dark vars, and css extra. */
+/**
+ * Apply a manifest on top of a base theme: vars, dark vars, and css extra.
+ *
+ * @param base - base theme to merge onto.
+ * @param manifest - manifest overrides, or undefined to return the base unchanged.
+ * @returns the merged theme with an optional extra css string.
+ */
 export function applyManifest(base: Theme, manifest: ThemeManifest | undefined): Theme & { css?: string } {
   if (!manifest) return { ...base };
   const light: ThemeVars = { ...base.light, ...(manifest.vars ?? {}) };
@@ -190,7 +211,13 @@ export function applyManifest(base: Theme, manifest: ThemeManifest | undefined):
   };
 }
 
-/** Full resolution used by the renderer: built-in lookup + manifest merge. */
+/**
+ * Full resolution used by the renderer: built-in lookup + manifest merge.
+ *
+ * @param ref - theme reference from CLI/config (undefined uses the default theme).
+ * @param root - source root used to resolve a manifest; omit for built-ins only.
+ * @returns the resolved theme, merged with any manifest customizations.
+ */
 export function themeFromRef(ref: string | undefined, root?: string): Theme & { css?: string } {
   if (!root) return getTheme(ref);
   const { name, manifest } = resolveThemeRef(ref, root);

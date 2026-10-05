@@ -168,7 +168,11 @@ export const DOCMODEL_SCHEMA_OBJECT = {
   },
 } as const;
 
-/** Pretty-printed schema JSON with trailing newline (what ships). */
+/**
+ * Pretty-printed schema JSON with trailing newline (what ships).
+ *
+ * @returns the `brewdocs/docmodel@1` JSON Schema as formatted text.
+ */
 export function docModelSchemaJson(): string {
   return JSON.stringify(DOCMODEL_SCHEMA_OBJECT, null, 2) + "\n";
 }

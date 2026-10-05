@@ -323,6 +323,7 @@ function looksLikeRustProject(root: string): boolean {
   return walkSourceFiles(root, [".rs"], { maxDepth: 3 }).length > 0;
 }
 
+/** Built-in Rust adapter: brace-counting pub-item scan (see D-3). */
 export const rustAdapter: LanguageAdapter = {
   id: "rust",
   detect(ctx) {

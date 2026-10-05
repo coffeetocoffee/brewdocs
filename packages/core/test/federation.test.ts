@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { buildDocModel } from "../src/docmodel.js";
 import {
   addFederatedRepo,
+  addFederatedRepoFromUrl,
   buildFederatedPage,
   listFederatedRepos,
   loadFederation,
@@ -171,5 +172,72 @@ describe("v3.5 federation — page", () => {
   it("renders an empty state when nothing is indexed", () => {
     const html = fs.readFileSync(buildFederatedPage(tmpDir(), tmpDir()), "utf8");
     expect(html).toContain("federate add");
+  });
+});
+
+describe("v4.5 federation — index a deployed site over HTTP", () => {
+  /** Serve `body` at every path; returns the base URL. */
+  async function serve(body: string, status = 200): Promise<{ base: string; close: () => Promise<void> }> {
+    const http = await import("node:http");
+    const server = http.createServer((_req, res) => {
+      res.writeHead(status, { "content-type": "application/json" }).end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    return {
+      base: `http://127.0.0.1:${port}`,
+      close: () => new Promise<void>((r) => server.close(() => r())),
+    };
+  }
+
+  it("fetches a site's docmodel.json and indexes it", async () => {
+    const repoDir = builtRepo("remote-lib", [
+      { name: "brew", desc: "Brew a cup.", sig: "" },
+      { name: "pour", desc: "Pour it.", sig: "" },
+    ]);
+    const body = fs.readFileSync(path.join(repoDir, "docmodel.json"), "utf8");
+    const { base, close } = await serve(body);
+    try {
+      const store = tmpDir();
+      const repo = await addFederatedRepoFromUrl(store, "remote-lib", `${base}/s/remote-lib/`);
+      expect(repo).not.toBeNull();
+      expect(repo!.symbols.map((s) => s.name).sort()).toEqual(["brew", "pour"]);
+      // The record remembers where it came from — a URL, not a local path.
+      expect(repo!.source).toContain("/s/remote-lib/docmodel.json");
+      expect(listFederatedRepos(store)).toHaveLength(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("uses the input verbatim when it already names a .json artifact", async () => {
+    const repoDir = builtRepo("direct", [{ name: "x", desc: "X.", sig: "" }]);
+    const body = fs.readFileSync(path.join(repoDir, "docmodel.json"), "utf8");
+    const { base, close } = await serve(body);
+    try {
+      const store = tmpDir();
+      const repo = await addFederatedRepoFromUrl(store, "direct", `${base}/custom/docmodel.json`);
+      expect(repo!.source).toBe(`${base}/custom/docmodel.json`);
+    } finally {
+      await close();
+    }
+  });
+
+  it("degrades to null on a non-2xx response or invalid JSON, without throwing", async () => {
+    const store = tmpDir();
+    const notFound = await serve('{"error":"nope"}', 404);
+    try {
+      expect(await addFederatedRepoFromUrl(store, "gone", notFound.base)).toBeNull();
+    } finally {
+      await notFound.close();
+    }
+    const bad = await serve("not a docmodel");
+    try {
+      expect(await addFederatedRepoFromUrl(store, "bad", bad.base)).toBeNull();
+    } finally {
+      await bad.close();
+    }
+    expect(listFederatedRepos(store)).toHaveLength(0);
   });
 });

@@ -106,6 +106,10 @@ function typecheckExample(
 /**
  * Prove every `@example` snippet in the extracted API by typechecking it
  * against the package. Returns one `ProveResult` per proven example.
+ *
+ * @param source - source root (and optional name) whose examples are proven.
+ * @returns one result per example (skipped snippets included), or [] when the
+ *   source has no symbols or no resolvable entry point.
  */
 export function proveSource(source: { root: string; name?: string }): ProveResult[] {
   const extracted = extractFromSource(source);
@@ -139,6 +143,12 @@ export function proveSource(source: { root: string; name?: string }): ProveResul
   return results;
 }
 
+/**
+ * Summarize a `proveSource` run into totals.
+ *
+ * @param results - results returned by `proveSource`.
+ * @returns counts of proven (typechecked), passed, failed and skipped examples.
+ */
 export function proveSummary(results: ProveResult[]): {
   proven: number;
   passed: number;

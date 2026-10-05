@@ -50,6 +50,11 @@ const HEADERS = `/*
 /**
  * Emit `404.html`, `_headers` and (when `redirects:` is configured)
  * `_redirects` next to the built pages. Returns the written paths.
+ *
+ * @param outDir - built site root where the deploy artifacts are written.
+ * @param model - render model supplying the site title for the 404 page.
+ * @param redirects - old-to-new path map that becomes `_redirects`, when non-empty.
+ * @returns the paths of the artifact files written.
  */
 export function emitDeployArtifacts(
   outDir: string,

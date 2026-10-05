@@ -95,6 +95,10 @@ function packageBlock(pkg?: PackageInfo): DocModelPackage | undefined {
 /**
  * Build the artifact object from a render model. Pure — no filesystem or
  * subprocess access; freshness metadata comes in via `meta`.
+ *
+ * @param model - render model whose symbols and metadata form the artifact.
+ * @param meta - freshness/metadata overrides (generatedAt, gitSha, generatorVersion, version).
+ * @returns the DocModel artifact object.
  */
 export function docModelArtifact(
   model: RenderModel,
@@ -134,7 +138,13 @@ export function docModelArtifact(
   };
 }
 
-/** Render the artifact as stable, pretty JSON with a trailing newline. */
+/**
+ * Render the artifact as stable, pretty JSON with a trailing newline.
+ *
+ * @param model - render model to serialize.
+ * @param meta - freshness/metadata overrides passed to `docModelArtifact`.
+ * @returns the pretty-printed artifact JSON.
+ */
 export function renderDocModelJson(
   model: RenderModel,
   meta: DocModelMeta = {},
@@ -146,6 +156,10 @@ export function renderDocModelJson(
  * Build the DocModel for a source and write `docmodel.json` into `outDir`,
  * stamping the current git sha of the source repo when one exists. Returns
  * the written file path.
+ *
+ * @param source - docs source to model and serialize.
+ * @param outDir - directory the `docmodel.json` is written into.
+ * @returns the path of the written docmodel.json.
  */
 export function buildDocModel(source: Source, outDir: string): string {
   const model = buildModel(source);

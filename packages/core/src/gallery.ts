@@ -4,6 +4,7 @@ import { build } from "./build.js";
 import type { RenderOptions } from "./render.js";
 import type { Source } from "./types.js";
 
+/** One gallery card: plugin name, version, description and links. */
 export interface GalleryEntry {
   name: string;
   root: string;
@@ -54,6 +55,11 @@ function galleryPage(entries: GalleryEntry[]): string {
  * Build an examples gallery: each entry becomes `<outDir>/<name>/index.html`,
  * plus a root `<outDir>/index.html` listing them. Useful as a self-hosted
  * showcase ("docs for BrewDocs, written in BrewDocs").
+ *
+ * @param entries - gallery entries (name + source root) to build and list.
+ * @param outDir - output root; each entry is built into `<outDir>/<name>/`.
+ * @param options - render options applied to every entry build.
+ * @returns the path of the root gallery `index.html`.
  */
 export function buildGallery(
   entries: GalleryEntry[],

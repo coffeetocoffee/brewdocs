@@ -1,6 +1,11 @@
 import type { PackageInfo } from "../types.js";
 
-/** Coerce a parsed package.json into the structured PackageInfo shape. */
+/**
+ * Coerce a parsed package.json into the structured PackageInfo shape.
+ *
+ * @param pkg - parsed package.json object.
+ * @returns the normalized package info (name, version, license, deps, …).
+ */
 export function extractPackage(pkg: Record<string, unknown>): PackageInfo {
   const str = (v: unknown): string | undefined =>
     typeof v === "string" ? v : undefined;

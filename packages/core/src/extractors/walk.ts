@@ -28,6 +28,14 @@ const SKIP_DIRS = new Set([
   "__pycache__",
 ]);
 
+/**
+ * Recursively collect source files under `root` matching the given extensions.
+ *
+ * @param root - directory to walk.
+ * @param exts - file extensions to match (case-insensitive, e.g. ".rs").
+ * @param opts - `maxDepth` bounds recursion (defaults to 8).
+ * @returns the matching file paths, sorted.
+ */
 export function walkSourceFiles(
   root: string,
   exts: string[],
@@ -60,7 +68,12 @@ export function walkSourceFiles(
   return out.sort();
 }
 
-/** Bracket depth (strings not parsed; heuristic by design). */
+/**
+ * Bracket depth (strings not parsed; heuristic by design).
+ *
+ * @param cur - source text whose bracket nesting depth is counted.
+ * @returns the running depth after opening brackets minus closing brackets.
+ */
 export function depthOf(cur: string): number {
   let depth = 0;
   for (const ch of cur) {
@@ -82,6 +95,11 @@ function needsContinuation(cur: string): boolean {
  * head. Blank lines end a balanced continuation (so the next declaration —
  * or its doc comment — is never swallowed); a lone `{` on the following
  * line is folded in, which is how brace-on-next-line styles parse.
+ *
+ * @param lines - source lines to fold.
+ * @param start - index of the first physical line of the declaration.
+ * @param isTrivia - predicate marking lines (comments/blanks) to skip while folding.
+ * @returns the folded declaration head and the index of its last consumed line.
  */
 export function readDeclHead(
   lines: string[],

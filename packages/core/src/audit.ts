@@ -11,6 +11,7 @@ import * as path from "node:path";
 
 export type AuditGroup = "a11y" | "seo" | "perf";
 
+/** One static a11y/SEO/perf check and the pages that failed it. */
 export interface AuditCheck {
   /** Stable id, e.g. "img-alt". */
   id: string;
@@ -23,6 +24,7 @@ export interface AuditCheck {
   files: string[];
 }
 
+/** Audit result: score, per-group scores, checks and pages scanned. */
 export interface AuditReport {
   /** 0-100, equal-weight check average. */
   score: number;
@@ -82,6 +84,12 @@ function check(
   return { id, group, title, hint, pass: files.length === 0, files };
 }
 
+/**
+ * Statically audit a built site directory against the a11y/SEO/perf checks.
+ *
+ * @param dir - directory of built HTML files to audit.
+ * @returns the audit report with per-group scores and failed checks.
+ */
 export function auditSite(dir: string): AuditReport {
   const root = path.resolve(dir);
   const pages = collectHtml(root);
@@ -172,7 +180,12 @@ export function auditSite(dir: string): AuditReport {
   };
 }
 
-/** One-line-per-check text report (same shape as doctor's output). */
+/**
+ * One-line-per-check text report (same shape as doctor's output).
+ *
+ * @param report - audit report to format.
+ * @returns the multi-line terminal summary.
+ */
 export function renderAuditText(report: AuditReport): string {
   const lines: string[] = [];
   lines.push(

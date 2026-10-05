@@ -30,7 +30,12 @@ function parseRow(line: string): string[] {
     .map((c) => c.trim());
 }
 
-/** Render a subset of CommonMark to HTML (headings, code, lists, tables, quotes, inline). */
+/**
+ * Render a subset of CommonMark to HTML (headings, code, lists, tables, quotes, inline).
+ *
+ * @param md - Markdown source to render.
+ * @returns the rendered HTML.
+ */
 export function markdownToHtml(md: string): string {
   const lines = md.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];

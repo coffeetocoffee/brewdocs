@@ -366,6 +366,7 @@ function findOpenApiFile(root: string): string | undefined {
   return undefined;
 }
 
+/** Built-in OpenAPI adapter: parses JSON/YAML specs into operation symbols. */
 export const openApiAdapter: LanguageAdapter = {
   id: "openapi",
   detect(ctx) {

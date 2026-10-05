@@ -167,12 +167,24 @@ export const THEMES: Record<string, Theme> = {
   },
 };
 
+/** Theme used when none is named (also the fallback for unknown names). */
 export const DEFAULT_THEME = "coffee";
 
+/**
+ * Look up a built-in theme by name, falling back to the default theme.
+ *
+ * @param name - theme name; unknown or omitted names yield the default theme.
+ * @returns the matching theme, or the `coffee` default.
+ */
 export function getTheme(name?: string): Theme {
   return THEMES[name ?? DEFAULT_THEME] ?? THEMES[DEFAULT_THEME];
 }
 
+/**
+ * List every built-in theme.
+ *
+ * @returns the bundled themes in declaration order.
+ */
 export function listThemes(): Theme[] {
   return Object.values(THEMES);
 }

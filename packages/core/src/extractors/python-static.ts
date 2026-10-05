@@ -277,6 +277,12 @@ function walkPyFiles(root: string): { files: string[]; base: string } {
   return { files: files.sort(), base: pkg ? path.join(root, pkg.name) : root };
 }
 
+/**
+ * Does this directory look like a Python package to the static adapter?
+ *
+ * @param root - directory to inspect.
+ * @returns true when packaging files or Python sources are present.
+ */
 export function looksLikePythonPackage(root: string): boolean {
   if (fs.existsSync(path.join(root, "pyproject.toml"))) return true;
   if (fs.existsSync(path.join(root, "setup.py"))) return true;
@@ -292,6 +298,7 @@ export function looksLikePythonPackage(root: string): boolean {
   return false;
 }
 
+/** Default Python adapter: static regex scan, no subprocess (see D-3). */
 export const pythonStaticAdapter: LanguageAdapter = {
   id: "python",
   detect(ctx) {

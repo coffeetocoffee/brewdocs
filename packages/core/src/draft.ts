@@ -38,7 +38,13 @@ const PROGRAM_OPTIONS: ts.CompilerOptions = {
   types: [],
 };
 
-/** Minimal mirror of the entry resolution in `extractors/exports.ts`. */
+/**
+ * Minimal mirror of the entry resolution in `extractors/exports.ts`.
+ *
+ * @param root - package root to resolve the entry file under.
+ * @param pkg - parsed package.json supplying exports/main/module candidates.
+ * @returns the absolute entry file path, or undefined when none exists.
+ */
 export function resolveEntry(root: string, pkg: Record<string, unknown>): string | undefined {
   const candidates: string[] = [];
   const exp = pkg.exports;
@@ -92,7 +98,12 @@ function hasJsDoc(node: ts.Node): boolean {
   return ts.getJSDocCommentsAndTags(node).length > 0;
 }
 
-/** Build the JSDoc skeleton for a symbol. Description line is left empty. */
+/**
+ * Build the JSDoc skeleton for a symbol. Description line is left empty.
+ *
+ * @param sym - symbol whose params, returns, type params and deprecation seed the stub.
+ * @returns the JSDoc block text (no trailing newline).
+ */
 export function jsdocStub(sym: SymbolDoc): string {
   const lines: string[] = ["/**"];
   lines.push(" *");
@@ -121,6 +132,9 @@ export function jsdocStub(sym: SymbolDoc): string {
  * Propose JSDoc drafts for every undocumented exported symbol that physically
  * lives in the package entry file. Re-exports (`export { x } from "./x"`) are
  * skipped because the declaration isn't in this file.
+ *
+ * @param source - source root (and optional name) to extract and scaffold.
+ * @returns the JSDoc insertion proposals for undocumented entry symbols.
  */
 export function buildDrafts(source: { root: string; name?: string }): DraftProposal[] {
   const extracted = extractFromSource(source);
@@ -160,6 +174,9 @@ export function buildDrafts(source: { root: string; name?: string }): DraftPropo
  * Insert the proposed JSDoc blocks into their files. Edits happen per file,
  * from the highest position to the lowest, so earlier positions stay valid.
  * Returns the list of files that were modified.
+ *
+ * @param proposals - JSDoc insertion proposals to apply.
+ * @returns the paths of the files that were modified.
  */
 export function applyDrafts(proposals: DraftProposal[]): string[] {
   const byFile = new Map<string, DraftProposal[]>();

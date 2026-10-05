@@ -310,6 +310,7 @@ function findGraphqlFiles(root: string): string[] {
   }
 }
 
+/** Built-in GraphQL adapter: parses the schema SDL into type/field symbols. */
 export const graphqlAdapter: LanguageAdapter = {
   id: "graphql",
   detect(ctx) {

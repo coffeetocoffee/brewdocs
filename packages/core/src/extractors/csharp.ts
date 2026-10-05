@@ -345,6 +345,7 @@ function looksLikeCSharpProject(root: string): boolean {
   return walkSourceFiles(root, [".cs"], { maxDepth: 5 }).length > 0;
 }
 
+/** Built-in C# adapter: line-based type/member scan (see D-3). */
 export const csharpAdapter: LanguageAdapter = {
   id: "csharp",
   detect(ctx) {

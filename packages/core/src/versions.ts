@@ -16,6 +16,12 @@ function findGitRoot(start: string): string | null {
   }
 }
 
+/**
+ * Read the `version` field from a source root's package.json.
+ *
+ * @param root - directory containing package.json.
+ * @returns the package version, or "dev" when missing or unreadable.
+ */
 export function readPackageVersion(root: string): string {
   try {
     const pkg = JSON.parse(
@@ -35,6 +41,9 @@ export function readPackageVersion(root: string): string {
  * subdirectories), returns the repo's tags plus a "dev" entry for the
  * working tree. Otherwise it returns just the current package version. The
  * function never throws — without git it gracefully degrades.
+ *
+ * @param root - source root (or monorepo subdirectory) to discover versions for.
+ * @returns git tags newest-first plus the working-tree version, or just the package version without git.
  */
 export async function discoverVersions(root: string): Promise<string[]> {
   const pkgVersion = readPackageVersion(root);

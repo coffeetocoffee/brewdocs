@@ -22,6 +22,10 @@ const README_FILES = ["README.md", "readme.md", "Readme.md"];
  * v2.0 layers plugin adapters on top: non-JS sources (Python, Go, …) get
  * their symbols from language adapters, and `onExtract` hooks may post-
  * process the whole result.
+ *
+ * @param source - local source directory (root, name, fetched flag) to extract.
+ * @param plugins - plugins whose adapters and onExtract hooks participate.
+ * @returns the extracted title, README, package info and symbols.
  */
 export function extractFromSource(
   source: Source,

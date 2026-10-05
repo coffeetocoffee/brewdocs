@@ -30,6 +30,10 @@ function mdLink(name: string, links?: Record<string, string>): string {
 /**
  * Render one symbol (and its members) as Markdown. The one true symbol
  * renderer — docs.md and symbols/*.md both go through here.
+ *
+ * @param sym - symbol to render as Markdown.
+ * @param opts - heading level and cross-page link map.
+ * @returns the Markdown text for the symbol and its members.
  */
 export function renderSymbolText(
   sym: SymbolDoc,
@@ -127,7 +131,12 @@ export function renderSymbolText(
   return lines.join("\n");
 }
 
-/** Slug for a per-symbol Markdown file name (no extension). */
+/**
+ * Slug for a per-symbol Markdown file name (no extension).
+ *
+ * @param name - exported symbol name to slug.
+ * @returns the filesystem-safe slug (falls back to "symbol").
+ */
 export function symbolSlug(name: string): string {
   return (
     name
@@ -138,7 +147,13 @@ export function symbolSlug(name: string): string {
   );
 }
 
-/** Frontmatter block for a per-symbol page. */
+/**
+ * Frontmatter block for a per-symbol page.
+ *
+ * @param sym - symbol whose name/kind/deprecation populate the frontmatter.
+ * @param model - render model supplying package name/version.
+ * @returns the YAML frontmatter lines.
+ */
 export function symbolPageFrontmatter(
   sym: SymbolDoc,
   model: RenderModel,

@@ -4,7 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   runMcpServer,
+  handleMcpMessage,
+  handleMcpRequest,
   loadDocModel,
+  parseDocModel,
   validateAgainstSchema,
   checkFreshness,
   searchSymbols,
@@ -13,6 +16,7 @@ import {
   MCP_TOOLS,
   buildDocModel,
   type DocModelArtifact,
+  type McpToolCall,
 } from "@brewdocs/core";
 
 const TINY = path.resolve(__dirname, "../../../examples/tiny");
@@ -210,5 +214,81 @@ describe("v1.2 MCP server — tools over the artifact", () => {
     const dep = deprecatedReplacements(artifact);
     expect(dep.length).toBeGreaterThan(0);
     expect(dep.find((d) => d.symbol === "percolate")?.replacements).toContain("brew");
+  });
+});
+
+describe("v4.5 MCP — one message handler for both transports", () => {
+  function artifactOf(): DocModelArtifact {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mcp5-"));
+    return loadDocModel(buildDocModel({ root: fixtureSource() }, out)).artifact;
+  }
+
+  it("returns null for notifications and a reply for requests", () => {
+    const artifact = artifactOf();
+    const note = handleMcpMessage(
+      artifact,
+      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    );
+    expect(note).toBeNull();
+    const init = handleMcpMessage(
+      artifact,
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    );
+    expect(JSON.parse(init!).result.protocolVersion).toBe("2024-11-05");
+    const bad = handleMcpMessage(artifact, "not json");
+    expect(JSON.parse(bad!).error.code).toBe(-32700);
+  });
+
+  it("reports tool, query, and hit count to the telemetry listener", () => {
+    const artifact = artifactOf();
+    const calls: McpToolCall[] = [];
+    const call = (name: string, args: Record<string, unknown>) =>
+      handleMcpMessage(
+        artifact,
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+        (c) => calls.push(c),
+      );
+
+    call("search_symbols", { query: "brew" });
+    expect(calls.at(-1)).toMatchObject({ tool: "search_symbols", query: "brew" });
+    expect(calls.at(-1)!.hits).toBeGreaterThan(0);
+
+    // A miss is the signal the loop exists to capture: hits 0, still recorded.
+    call("search_symbols", { query: "zzz-not-a-symbol" });
+    expect(calls.at(-1)).toMatchObject({ tool: "search_symbols", query: "zzz-not-a-symbol", hits: 0 });
+
+    // symbol_signature on a missing name answers with an error but is logged.
+    const missing = call("symbol_signature", { name: "no_such_thing" });
+    expect(JSON.parse(missing!).error.code).toBe(-32602);
+    expect(calls.at(-1)).toMatchObject({ tool: "symbol_signature", query: "no_such_thing", hits: 0 });
+  });
+
+  it("loads from disk per request and degrades on a missing artifact", () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mcp6-"));
+    const file = buildDocModel({ root: fixtureSource() }, out);
+    const ok = handleMcpRequest(
+      file,
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    );
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(ok.body).result.tools.map((t: { name: string }) => t.name)).toEqual([
+      ...MCP_TOOLS,
+    ]);
+
+    const missing = handleMcpRequest(
+      path.join(out, "nope.json"),
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    );
+    expect(missing.status).toBe(200);
+    expect(JSON.parse(missing.body).error.code).toBe(-32002);
+  });
+
+  it("parseDocModel validates text before trusting it", () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-mcp7-"));
+    const file = buildDocModel({ root: fixtureSource() }, out);
+    const good = parseDocModel(fs.readFileSync(file, "utf8"));
+    expect(good.schema).toBe("brewdocs/docmodel@1");
+    expect(() => parseDocModel('{"schema":"brewdocs/docmodel@2"}')).toThrow(/schema validation/);
+    expect(() => parseDocModel("not json")).toThrow();
   });
 });

@@ -14,6 +14,10 @@ const KEYWORDS = new Set([
  * Minimal, dependency-free syntax highlighter for JS/TS family code.
  * Returns HTML with <span class="tok-*"> wrappers. Non-matching languages
  * are returned HTML-escaped.
+ *
+ * @param code - source code to highlight.
+ * @param lang - fence language; only the JS/TS family is highlighted.
+ * @returns HTML with token spans, or the escaped code for other languages.
  */
 export function highlightCode(code: string, lang: string): string {
   const family = [

@@ -4,6 +4,9 @@ import { findGitRoot } from "./build.js";
 /**
  * Short-lived helper for the Direction C freshness stamp: the current HEAD
  * sha of the source repo, or undefined outside git / on failure.
+ *
+ * @param root - source directory whose enclosing repo HEAD sha is read.
+ * @returns the current HEAD sha, or undefined outside git or on failure.
  */
 export function gitShaOf(root: string): string | undefined {
   const gitRoot = findGitRoot(root);

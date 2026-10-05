@@ -40,6 +40,10 @@ function stable(value: unknown): string {
  * Fingerprint of everything that shapes the rendered HTML. Function-valued
  * options (slots are already strings, plugins) reduce to their names — a
  * plugin whose output depends on wall-clock time is out of scope here.
+ *
+ * @param model - render model whose content is part of the key.
+ * @param options - render options; only serializable fields and plugin names are keyed.
+ * @returns the hex sha256 fingerprint of the render inputs.
  */
 export function renderFingerprint(model: RenderModel, options: RenderOptions = {}): string {
   const opts = {
@@ -61,6 +65,12 @@ export function renderFingerprint(model: RenderModel, options: RenderOptions = {
   return h.digest("hex");
 }
 
+/**
+ * Path of the render cache file for a source root.
+ *
+ * @param root - source root whose `.brewdocs/render.json` path is computed.
+ * @returns the absolute render cache file path.
+ */
 export function renderCacheFile(root: string): string {
   return path.join(path.resolve(root), ".brewdocs", "render.json");
 }
@@ -100,7 +110,15 @@ function writeRenderCache(root: string, entries: Record<string, CacheEntry>): vo
   }
 }
 
-/** Render via `produce`, unless an identical render is already cached. */
+/**
+ * Render via `produce`, unless an identical render is already cached.
+ *
+ * @param root - source root whose render cache is read/written.
+ * @param fingerprint - cache key identifying the render inputs.
+ * @param enabled - when false, always calls `produce` and skips the cache.
+ * @param produce - callback that performs the actual render.
+ * @returns the cached or freshly produced pages.
+ */
 export function renderCached(
   root: string,
   fingerprint: string,
@@ -117,7 +135,12 @@ export function renderCached(
   return pages;
 }
 
-/** Remove the render cache (used by tests and `brewdocs cache clear`). */
+/**
+ * Remove the render cache (used by tests and `brewdocs cache clear`).
+ *
+ * @param root - source root whose render cache file is deleted.
+ * @returns true when the removal completed without error.
+ */
 export function clearRenderCache(root: string): boolean {
   try {
     fs.rmSync(renderCacheFile(root), { force: true });

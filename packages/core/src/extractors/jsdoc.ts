@@ -67,7 +67,12 @@ export interface JsDocInfo {
   see: string[];
 }
 
-/** Extract JSDoc/TSDoc info from a declaration node. */
+/**
+ * Extract JSDoc/TSDoc info from a declaration node.
+ *
+ * @param node - TypeScript declaration node carrying the JSDoc comments.
+ * @returns the parsed description, params, returns, examples and tags.
+ */
 export function parseJsDoc(node: ts.Node): JsDocInfo {
   const info: JsDocInfo = {
     description: "",

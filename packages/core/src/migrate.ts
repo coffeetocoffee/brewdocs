@@ -20,6 +20,13 @@ export interface MigrateResult {
   notes: string[];
 }
 
+/**
+ * Upgrade `brewdocs.yml` / `brewdocs.json` to the current config format.
+ *
+ * @param root - source root containing the config file to migrate.
+ * @param opts - set `write` to apply the change (default is a dry run).
+ * @returns the migration result, or null when no config file exists.
+ */
 export function migrateConfig(root: string, opts: { write?: boolean } = {}): MigrateResult | null {
   const yml = path.join(root, "brewdocs.yml");
   const json = path.join(root, "brewdocs.json");
@@ -69,7 +76,12 @@ export function migrateConfig(root: string, opts: { write?: boolean } = {}): Mig
   return { ...base, from: 1, changed: true, wrote: Boolean(opts.write) };
 }
 
-/** Human-readable one-line summary for the CLI. */
+/**
+ * Human-readable one-line summary for the CLI.
+ *
+ * @param result - migration result to describe.
+ * @returns a one-line summary (or a "nothing to do" message when unchanged).
+ */
 export function renderMigrateText(result: MigrateResult): string {
   const where = path.basename(result.file);
   if (!result.changed) return `${where} is already at configVersion ${result.to} — nothing to do.`;

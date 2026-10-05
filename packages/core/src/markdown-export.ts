@@ -5,6 +5,7 @@ import { gitShaOf } from "./git.js";
 import { renderSymbolText, symbolSlug, symbolPageFrontmatter } from "./doc-text.js";
 import type { RenderModel, Source } from "./types.js";
 
+/** Options for Markdown/MDX export (multi-page, frontmatter, title). */
 export interface MarkdownOptions {
   /** Output dialect. Both are Markdown; `mdx` adds a YAML frontmatter block. */
   format?: "md" | "mdx";
@@ -56,6 +57,10 @@ function freshnessLine(stamp: FreshnessStamp | undefined): string | null {
  * pipeline (`doc-text.ts`) — the same structured data the HTML renderer
  * uses, emitted as text so it can be dropped into a wiki, README, or
  * static-site generator.
+ *
+ * @param model - render model whose symbols and metadata are exported.
+ * @param opts - output `format` (md/mdx) and optional freshness stamp for the footer.
+ * @returns the rendered Markdown/MDX document.
  */
 export function renderToMarkdown(
   model: RenderModel,
@@ -117,6 +122,10 @@ export interface MarkdownPage {
  * Per-symbol Markdown pages (Direction C) — the same shape as `--multi`
  * HTML: an index page linking to one portable, diffable page per symbol.
  * All symbol content goes through the shared `renderSymbolText` pipeline.
+ *
+ * @param model - render model whose symbols become individual pages.
+ * @param opts - output `format` (md/mdx) and optional freshness stamp.
+ * @returns one index page plus a page per symbol, as path/body records.
  */
 export function renderToMarkdownMulti(
   model: RenderModel,
@@ -165,6 +174,11 @@ export function renderToMarkdownMulti(
  * Build the Markdown/MDX reference for a source into `outDir`, returning the
  * written file path (`docs.md` or `docs.mdx`). When a README file exists on
  * disk it is embedded verbatim for fidelity (the in-model README is HTML).
+ *
+ * @param source - docs source to model and export.
+ * @param outDir - directory the Markdown file is written into.
+ * @param opts - output `format` selecting the `.md` or `.mdx` extension.
+ * @returns the path of the written Markdown/MDX file.
  */
 export function buildMarkdown(
   source: Source,
@@ -196,6 +210,11 @@ export function buildMarkdown(
 /**
  * Build per-symbol Markdown pages into `outDir` (`index.md` plus one
  * `symbols/<slug>.md` per exported symbol). Returns the written paths.
+ *
+ * @param source - docs source to model and export.
+ * @param outDir - directory the Markdown pages are written into.
+ * @param opts - output `format` (md/mdx) for the pages.
+ * @returns the paths of every Markdown file written.
  */
 export function buildMarkdownMulti(
   source: Source,

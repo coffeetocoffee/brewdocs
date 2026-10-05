@@ -211,6 +211,11 @@ export const LOCALE_LABELS: Record<string, string> = {
   id: "Bahasa Indonesia",
 };
 
+/**
+ * List the bundled UI locales with their human labels.
+ *
+ * @returns one `{ code, label }` entry per bundled dictionary, label endonymic.
+ */
 export function listLocales(): { code: string; label: string }[] {
   return Object.keys(DICTIONARIES).map((code) => ({
     code,
@@ -218,14 +223,24 @@ export function listLocales(): { code: string; label: string }[] {
   }));
 }
 
-/** `id-ID`/`ID`/`pt`-style input → a known code, `"en"` fallback. */
+/**
+ * `id-ID`/`ID`/`pt`-style input → a known code, `"en"` fallback.
+ *
+ * @param locale - locale string in any common form, or undefined.
+ * @returns the matching known locale code, or "en" when unknown.
+ */
 export function normalizeLocale(locale: string | undefined): string {
   if (!locale) return "en";
   const base = locale.toLowerCase().split(/[-_]/)[0];
   return base in DICTIONARIES ? base : "en";
 }
 
-/** Full UI bundle for a locale (English fills any gaps). */
+/**
+ * Full UI bundle for a locale (English fills any gaps).
+ *
+ * @param locale - locale string to resolve, or undefined for English.
+ * @returns the UI strings with English fallbacks applied.
+ */
 export function uiStrings(locale: string | undefined): UiStrings {
   const code = normalizeLocale(locale);
   return { ...EN, ...(DICTIONARIES[code] ?? {}) };

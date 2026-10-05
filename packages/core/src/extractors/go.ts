@@ -193,6 +193,7 @@ function looksLikeGoModule(root: string): boolean {
   }
 }
 
+/** Built-in Go adapter: regex-based symbol scan (no AST, see D-3). */
 export const goAdapter: LanguageAdapter = {
   id: "go",
   detect(ctx) {

@@ -110,7 +110,10 @@ export {
 } from "./workspaces.js";
 export {
   runMcpServer,
+  handleMcpMessage,
+  handleMcpRequest,
   loadDocModel,
+  parseDocModel,
   validateAgainstSchema,
   checkFreshness,
   searchSymbols,
@@ -118,6 +121,7 @@ export {
   deprecatedReplacements,
   MCP_TOOLS,
   type McpToolName,
+  type McpToolCall,
 } from "./mcp.js";
 export {
   codeFingerprint,
@@ -136,6 +140,9 @@ export {
 } from "./drift.js";
 export {
   addFederatedRepo,
+  addFederatedRepoFromUrl,
+  docModelUrl,
+  fetchDocModelFromUrl,
   buildFederatedPage,
   listFederatedRepos,
   loadFederation,

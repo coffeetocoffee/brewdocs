@@ -19,6 +19,7 @@ export interface SymbolDriftState {
   docs: string;
 }
 
+/** Recorded baseline of per-symbol code/docs fingerprints at a point in time. */
 export interface DriftSnapshot {
   /** Snapshot format version; bump when the fingerprint shape changes. */
   format: 1;
@@ -28,6 +29,7 @@ export interface DriftSnapshot {
   symbols: SymbolDriftState[];
 }
 
+/** Drift verdict for one symbol: in-sync, code-changed, docs-changed or both. */
 export type DriftStatus =
   | "in-sync"
   | "stale-docs"
@@ -35,12 +37,14 @@ export type DriftStatus =
   | "new-symbol"
   | "removed-symbol";
 
+/** One drifted symbol with its status and the fingerprints involved. */
 export interface DriftEntry {
   name: string;
   kind: SymbolDoc["kind"];
   status: DriftStatus;
 }
 
+/** Full drift report: entries, counts and the baseline label. */
 export interface DriftReport {
   title: string;
   baseline: string;
@@ -93,6 +97,9 @@ function rawSignature(s: SymbolDoc): string {
  * Code-facing fingerprint: anything a consumer's code can observe. Return
  * type lives here (not in the docs fp) so a bare `string` -> `number` change
  * counts as code movement even when the signature text lags.
+ *
+ * @param s - symbol whose code-facing surface is fingerprinted.
+ * @returns a JSON fingerprint of kind, signature, params, return and members.
  */
 export function codeFingerprint(s: SymbolDoc): string {
   return JSON.stringify({
@@ -120,6 +127,9 @@ export function codeFingerprint(s: SymbolDoc): string {
  * symbol/member/param name and empty descriptions are skipped, so "added an
  * undocumented param" reads as docs-unchanged (drift), while "renamed a param
  * and updated its JSDoc" reads as docs-updated.
+ *
+ * @param s - symbol whose human-written docs surface is fingerprinted.
+ * @returns a JSON fingerprint of descriptions, params, returns, examples and tags.
  */
 export function docsFingerprint(s: SymbolDoc): string {
   const descMap = (
@@ -144,7 +154,14 @@ export function docsFingerprint(s: SymbolDoc): string {
   });
 }
 
-/** Build a baseline snapshot from an extraction (sorted for stable diffs). */
+/**
+ * Build a baseline snapshot from an extraction (sorted for stable diffs).
+ *
+ * @param label - human label for the baseline (package version or git ref).
+ * @param symbols - extracted symbols to fingerprint into the snapshot.
+ * @param recordedAt - ISO timestamp recorded in the snapshot (defaults to now).
+ * @returns the drift snapshot with code/docs fingerprints per symbol.
+ */
 export function snapshotOf(
   label: string,
   symbols: SymbolDoc[],
@@ -169,6 +186,10 @@ export function snapshotOf(
  * Compare a baseline snapshot against a fresh extraction. A symbol whose code
  * fingerprint changed while its docs fingerprint stayed identical is stale —
  * the build keeps succeeding but the docs now describe old code.
+ *
+ * @param baseline - previously recorded baseline snapshot to compare against.
+ * @param current - fresh extraction with its title, label and symbols.
+ * @returns the drift report, including the actionable stale-symbol subset.
  */
 export function compareDrift(
   baseline: DriftSnapshot,
@@ -227,11 +248,22 @@ export function compareDrift(
   };
 }
 
-/** Baseline snapshot lives beside the coverage history (commit-friendly). */
+/**
+ * Baseline snapshot lives beside the coverage history (commit-friendly).
+ *
+ * @param root - source root whose `.brewdocs/drift.json` path is computed.
+ * @returns the drift baseline file path.
+ */
 export function driftFilePath(root: string): string {
   return path.join(root, ".brewdocs", "drift.json");
 }
 
+/**
+ * Load the recorded drift baseline.
+ *
+ * @param root - source root whose `.brewdocs/drift.json` is read.
+ * @returns the snapshot when present and format-compatible, otherwise null.
+ */
 export function loadDriftSnapshot(root: string): DriftSnapshot | null {
   try {
     const raw = JSON.parse(fs.readFileSync(driftFilePath(root), "utf8")) as DriftSnapshot;
@@ -244,6 +276,13 @@ export function loadDriftSnapshot(root: string): DriftSnapshot | null {
   return null;
 }
 
+/**
+ * Write a drift baseline snapshot to `<root>/.brewdocs/drift.json`.
+ *
+ * @param root - source root whose `.brewdocs/` receives the baseline.
+ * @param snapshot - snapshot to persist.
+ * @returns the path of the written baseline file.
+ */
 export function saveDriftSnapshot(root: string, snapshot: DriftSnapshot): string {
   const file = driftFilePath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -251,7 +290,12 @@ export function saveDriftSnapshot(root: string, snapshot: DriftSnapshot): string
   return file;
 }
 
-/** Terminal report: stale symbols first (the actionable list), then counts. */
+/**
+ * Terminal report: stale symbols first (the actionable list), then counts.
+ *
+ * @param report - drift report to format.
+ * @returns the multi-line terminal summary.
+ */
 export function renderDriftText(report: DriftReport): string {
   const lines: string[] = [];
   lines.push(

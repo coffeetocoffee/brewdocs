@@ -76,6 +76,9 @@ function walk(dir: string, root: string, entries: string[]): void {
 /**
  * Deterministic fingerprint of every relevant file: relpath + content hash.
  * Paths are part of the digest so renames/moves invalidate correctly.
+ *
+ * @param root - source root to hash.
+ * @returns the hex sha256 fingerprint of the relevant file set.
  */
 export function fingerprintSource(root: string): string {
   const abs = path.resolve(root);
@@ -93,6 +96,12 @@ export function fingerprintSource(root: string): string {
   return h.digest("hex");
 }
 
+/**
+ * Path of the extraction cache file for a source root.
+ *
+ * @param root - source root whose `.brewdocs/extract.json` path is computed.
+ * @returns the absolute extraction cache file path.
+ */
 export function cacheFile(root: string): string {
   return path.join(path.resolve(root), ".brewdocs", "extract.json");
 }
@@ -128,6 +137,7 @@ function writeCache(root: string, fingerprint: string, result: ExtractResult): v
   }
 }
 
+/** Options for the extraction cache (fingerprint inputs and reuse policy). */
 export interface CachedExtractOptions {
   /** Force the cache on/off; defaults to `cache: true` in brewdocs.yml. */
   enabled?: boolean;
@@ -140,6 +150,10 @@ export interface CachedExtractOptions {
  * Cache is keyed on the source root's fingerprint AND the plugin set, so
  * adding/removing a plugin invalidates; `--cache`/`cache: true` opts in and
  * `--no-cache`/`cache: false` opts out (default: off, matching v1 behavior).
+ *
+ * @param source - source to extract.
+ * @param opts - `enabled` forces the cache on/off; `plugins` extend the cache key.
+ * @returns the extraction result, from cache when the fingerprint matches.
  */
 export function extractCached(
   source: Source,
@@ -162,7 +176,12 @@ export function extractCached(
   return fresh;
 }
 
-/** Remove the on-disk cache (used by tests and `brewdocs cache clear`). */
+/**
+ * Remove the on-disk cache (used by tests and `brewdocs cache clear`).
+ *
+ * @param root - source root whose extraction cache file is deleted.
+ * @returns true when the removal completed without error.
+ */
 export function clearCache(root: string): boolean {
   try {
     fs.rmSync(cacheFile(root), { force: true });

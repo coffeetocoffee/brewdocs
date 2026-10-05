@@ -12,6 +12,7 @@ import { recordOrgSite } from "./cloud.js";
 /** A hosted site's visibility — private sites require a token to read. */
 export type Visibility = "public" | "private";
 
+/** Deploy options: visibility, access token, org and draft expiry. */
 export interface DeploySiteOptions {
   /** Org namespace; combined into the subdomain as `<org>--<sub>`. */
   org?: string;
@@ -34,6 +35,10 @@ const GITHUB_RE = /github\.com[/:]([^/]+)\/([^/#?.\s]+)/i;
  * Turn a source name/path into a safe subdomain slug. GitHub URLs collapse to
  * the `repo-user` form (e.g. `github.com/user/repo` -> `repo-user`) so the
  * hosted URL mirrors the source repo, per the roadmap.
+ *
+ * @param source - source descriptor whose `name` or resolved `root` basename seeds the slug.
+ * @param requested - explicit subdomain to slug instead of deriving one from `source`.
+ * @returns the lowercased, DNS-safe subdomain slug (empty when the input yields no alphanumerics).
  */
 export function deriveSubdomain(source: Source, requested?: string): string {
   let base = requested ?? source.name ?? path.basename(path.resolve(source.root));
@@ -55,6 +60,10 @@ export function deriveSubdomain(source: Source, requested?: string): string {
  * Combine an optional org namespace with a subdomain. Org-scoped sites become
  * `<org>--<sub>` so multi-tenant hosting stays in a flat directory layout
  * (e.g. `acme--my-lib.brewdocs.dev`).
+ *
+ * @param org - org namespace to prefix, or undefined for a bare subdomain.
+ * @param sub - site subdomain to slug and append.
+ * @returns the combined `<org>--<sub>` slug, or just the slugged `sub` when no org is given.
  */
 export function combineSubdomain(org: string | undefined, sub: string): string {
   const base = deriveSubdomain({ root: "", name: sub });
@@ -62,6 +71,7 @@ export function combineSubdomain(org: string | undefined, sub: string): string {
   return `${deriveSubdomain({ root: "", name: org })}--${base}`;
 }
 
+/** Outcome of a deploy: subdomain, written files and manifest facts. */
 export interface DeployResult {
   url: string;
   dir: string;
@@ -79,6 +89,11 @@ function sha256(value: string): string {
 /**
  * Static export: build a fully self-contained site (HTML + inline CSS/JS +
  * search index) into `outDir`. Returns the main index.html path.
+ *
+ * @param source - docs source (root, name) to build from.
+ * @param outDir - directory to write the static site into.
+ * @param options - render options controlling theming, versions and multi-page output.
+ * @returns the path of the main index.html written into `outDir`.
  */
 export async function exportSite(
   source: Source,
@@ -93,6 +108,14 @@ export async function exportSite(
  * "Deploy" a site under a subdomain. With no `storage` adapter it writes to a
  * local hosting directory (simulated `*.brewdocs.dev`). Pass an
  * `S3StorageAdapter` to deploy to real object storage instead.
+ *
+ * @param source - docs source to build and deploy.
+ * @param hostingDir - local hosting root that holds the deployed site directory and its manifest.
+ * @param subdomain - subdomain slug the site is published under.
+ * @param options - render options passed through to the builder.
+ * @param storage - optional object-storage adapter; when set the build is uploaded instead of written under `hostingDir`.
+ * @param deployOpts - deploy metadata: org namespace, visibility, access token, and draft/expiry settings.
+ * @returns the deployed site's public URL, output directory, resolved visibility and org.
  */
 export async function deploySite(
   source: Source,
@@ -167,6 +190,11 @@ export async function deploySite(
  * manifest's `draftExpires`; passing `null` revokes the draft (the site
  * stays private but the draft flag and its expiry are cleared).
  * Returns true when the manifest was updated.
+ *
+ * @param hostingDir - local hosting root containing the site directory.
+ * @param subdomain - subdomain of the site whose draft link is being changed.
+ * @param expires - new ISO 8601 expiry, or null to revoke the draft flag entirely.
+ * @returns true when the manifest was found and rewritten, false when missing or unreadable.
  */
 export function setDraftExpiry(
   hostingDir: string,
@@ -194,7 +222,12 @@ export function setDraftExpiry(
   }
 }
 
-/** Has a site's draft link expired? (Non-drafts never expire.) */
+/**
+ * Has a site's draft link expired? (Non-drafts never expire.)
+ *
+ * @param manifest - site manifest fields carrying the draft flag and its expiry.
+ * @returns true when the manifest is a draft with a parseable expiry in the past.
+ */
 export function draftExpired(manifest: {
   draft?: boolean;
   draftExpires?: string;

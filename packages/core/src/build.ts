@@ -126,7 +126,13 @@ function emitDocModelArtifact(
   );
 }
 
-/** Build the render model (no file write). Useful for tests/snapshots. */
+/**
+ * Build the render model (no file write). Useful for tests/snapshots.
+ *
+ * @param source - docs source (root, name) to extract and model.
+ * @param options - render options; plugins/theme/content settings are resolved and attached.
+ * @returns the in-memory render model (title, sections, symbols, content/nav).
+ */
 export function buildModel(
   source: Source,
   options: RenderOptions = {},
@@ -161,6 +167,11 @@ function coverageScore(model: RenderModel): number {
  *   extract -> model -> render (theme) -> write index.html
  *
  * Returns the path to the written HTML file.
+ *
+ * @param source - docs source (root, name) to build.
+ * @param outDir - directory to write the rendered site into.
+ * @param options - render options (theme, plugins, versions, docmodel emission).
+ * @returns the path of the written `outDir/index.html`.
  */
 export function build(
   source: Source,
@@ -201,7 +212,12 @@ export function build(
   return outFile;
 }
 
-/** Walk up from `start` to locate the enclosing git repo root, if any. */
+/**
+ * Walk up from `start` to locate the enclosing git repo root, if any.
+ *
+ * @param start - filesystem path to begin the upward search from.
+ * @returns the nearest ancestor directory containing `.git`, or null when none is found.
+ */
 export function findGitRoot(start: string): string | null {
   let dir = path.resolve(start);
   for (;;) {
@@ -217,6 +233,11 @@ export function findGitRoot(start: string): string | null {
  * Falls back to the working tree when the checkout fails — unless
  * `opts.strict`, which throws instead (used by CI so a bogus empty diff
  * can't pass silently).
+ *
+ * @param source - docs source to extract from (its git repo is located automatically).
+ * @param version - git ref/tag to check out and extract.
+ * @param opts - `strict` throws when the ref cannot be checked out; `plugins` are passed to extraction.
+ * @returns the extracted symbols/metadata for the requested version.
  */
 export async function extractVersion(
   source: Source,
@@ -262,6 +283,11 @@ export async function extractVersion(
 /**
  * Build the render model into multiple HTML files: `index.html` plus one
  * `symbols/<slug>.html` per exported symbol. Returns the written file paths.
+ *
+ * @param source - docs source to build.
+ * @param outDir - directory to write the multi-page site into.
+ * @param options - render options; multi-page mode is forced on.
+ * @returns the paths of every HTML file written.
  */
 export function buildMulti(
   source: Source,
@@ -350,6 +376,12 @@ function removeWorktree(root: string, tmp: string): void {
 /**
  * Build a single specific version (e.g. a git tag) into `outDir/index.html`.
  * Without git it falls back to building the working tree.
+ *
+ * @param source - docs source to build.
+ * @param outDir - directory to write the version's site into.
+ * @param version - git tag/version to check out and build.
+ * @param options - render options threaded into the single-version build.
+ * @returns the path of the written `outDir/index.html`.
  */
 export async function buildVersion(
   source: Source,
@@ -388,6 +420,11 @@ export async function buildVersion(
  * Build every discovered version into `outDir/<version>/index.html` plus a root
  * `outDir/index.html` for the latest version. The version switcher links
  * between them. Without git only the current version is built.
+ *
+ * @param source - docs source to build.
+ * @param outDir - directory to write the versioned site tree into.
+ * @param options - render options threaded into each per-version build.
+ * @returns the root index.html path followed by every per-version, diff and alias file written.
  */
 export async function buildVersions(
   source: Source,
