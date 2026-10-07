@@ -14,18 +14,17 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.5
+## 🔥 Fresh out of the oven — v4.5.1
 
-The loop closes: agents can now query a **deployed** site, and you can see what they asked for.
+Security hardening on the serving side, all three reproduced by execution before being fixed.
 
-| New | What it gives you |
+| Fixed | What changed |
 | --- | --- |
-| 🤖 **MCP over HTTP** | A deployed site answers `POST /mcp?site=<sub>` with the same three tools the stdio server speaks — auth-gated like every other read, private sites included |
-| 🕳️ **`brewdocs gap`** | Every agent query is counted locally (same store as views/builds, no backend). `gap` prints what agents asked for and the docs did **not** name |
-| 🔭 **Federate from a live site** | `federate add <name> <site-url>` fetches the deployed `docmodel.json` over HTTP — no local file needed |
-| 📖 **Dogfooded** | BrewDocs on its own core package: coverage **41% → 90%** (params 331/331, returns 181/181) |
+| 🔒 **Constant-time credentials** | Every token/key/hash comparison now routes through one `safeEqual` helper (`crypto.timingSafeEqual`), instead of `===` |
+| 🛡️ **One request can't kill the server** | A malformed request line, an abandoned POST body, or a vanished file mid-stream used to exit the process. Now: `400`/`500`, and it keeps serving |
+| 🧂 **No pass-the-hash** | A member's stored key hash in `.cloud.json` used to authenticate a private org site on its own. Now it doesn't |
 
-Earlier this line: **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
+Earlier this line: **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
 
 ---
 
