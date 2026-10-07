@@ -25,8 +25,9 @@ ROADMAP.md
 # Vitest JSON reporter scratch (used to count cases when auditing)
 .vtcount.json
 
-# Local-only release notes. Per the release procedure (AGENTS.md), notes go
-# into the GitHub release body via `gh release create --notes-file` and the
-# file itself stays uncommitted. RELEASE_NOTES_v3.7.0.md was committed by
-# mistake before this rule was written down; it is untracked again in v3.8.
+# Historical local-only release notes. As of 2026-10-07 NO new notes file is
+# written (user decision): the GitHub release body is the release prose's only
+# home — see the AGENTS.md release procedure. This rule stays so the existing
+# files on disk remain ignored. RELEASE_NOTES_v3.7.0.md was committed by
+# mistake before the rule was written down; it is untracked again in v3.8.
 RELEASE_NOTES_*.md
