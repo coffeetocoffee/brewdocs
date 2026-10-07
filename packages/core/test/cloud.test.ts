@@ -47,6 +47,19 @@ describe("v2.5 cloud control plane — orgs", () => {
     expect(canAccessOrg(hosting, "acme", "bd_live_abc123")).toBe(false);
   });
 
+  // v4.6 finding #22: the stored hash is an artifact at rest, not a credential.
+  // `canAccessOrg` used `normalizeKeyHash`, which passes a non-`bd_live_`
+  // string through untouched — so presenting the hash back authenticated.
+  it("does not accept a member's stored hash as a credential", () => {
+    const hosting = tmp();
+    createOrg(hosting, "acme");
+    addOrgMember(hosting, "acme", "bd_live_abc123");
+    const storedHash = getOrg(hosting, "acme")!.members[0].keyHash;
+    expect(storedHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(canAccessOrg(hosting, "acme", "bd_live_abc123")).toBe(true);
+    expect(canAccessOrg(hosting, "acme", storedHash)).toBe(false);
+  });
+
   it("tracks org-owned sites and resolves ownership", () => {
     const hosting = tmp();
     createOrg(hosting, "acme");

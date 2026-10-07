@@ -15,6 +15,7 @@ import {
   buildMarkdown,
   handleMcpRequest,
   resolveInput,
+  safeEqual,
   type McpToolCall,
   type RenderOptions,
   type Source,
@@ -427,7 +428,7 @@ function requireSiteAccess(
 ): boolean {
   const tokenHash = manifest?.tokenHash;
   if (!tokenHash) return true;
-  if (adminToken && req.headers["authorization"] === `Bearer ${adminToken}`) {
+  if (adminToken && safeEqual(req.headers["authorization"] ?? "", `Bearer ${adminToken}`)) {
     return true;
   }
   const provided =
@@ -436,7 +437,7 @@ function requireSiteAccess(
     "";
   if (!provided) return false;
   const hash = crypto.createHash("sha256").update(provided).digest("hex");
-  if (hash === tokenHash) return true;
+  if (safeEqual(hash, tokenHash)) return true;
   const org = manifest?.org;
   return Boolean(org) && canAccessOrg(hostingDir, org!, provided);
 }
@@ -621,7 +622,7 @@ function buildRequestHandler(
   ): "ok" | "unauthorized" | "forbidden" => {
     if (!needsAuth) return "ok";
     const header = req.headers["authorization"] ?? "";
-    if (token && header === `Bearer ${token}`) return "ok";
+    if (token && safeEqual(header, `Bearer ${token}`)) return "ok";
     const presented = header.replace(/^Bearer\s+/i, "");
     const record = validateKey(hostingDir, presented);
     if (!record) return "unauthorized";
@@ -653,7 +654,7 @@ function buildRequestHandler(
   const authorizeRead = (req: http.IncomingMessage): boolean => {
     if (!needsAuth) return true;
     const header = req.headers["authorization"] ?? "";
-    if (token && header === `Bearer ${token}`) return true;
+    if (token && safeEqual(header, `Bearer ${token}`)) return true;
     return validateKey(hostingDir, header.replace(/^Bearer\s+/i, "")) !== null;
   };
 
@@ -680,8 +681,25 @@ function buildRequestHandler(
     return false;
   };
 
-  return async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
+  /**
+   * The routing body. Wrapped below in a single guard (finding #21): this is
+   * an async request listener, so any throw inside it rejects a promise with
+   * no attached handler and Node exits the process — one malformed request
+   * from an unauthenticated caller used to be able to kill the server.
+   */
+  const handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    // A request line is caller-controlled and `new URL` throws on some of it
+    // (`//[` is not a URL). 400 here rather than a 500 from the outer guard:
+    // this one is the caller's fault and we know exactly what it is.
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      res
+        .writeHead(400, { "content-type": TYPES[".json"] })
+        .end(JSON.stringify({ error: "bad request" }));
+      return;
+    }
     const host = req.headers.host;
 
     if (req.method === "POST" && isCrossSite(req)) {
@@ -1137,7 +1155,46 @@ function buildRequestHandler(
       }
       res.end(html);
     } else {
-      fs.createReadStream(site.filePath).pipe(res);
+      // finding #21: resolveSite stats the file, but a re-deploy can replace it
+      // between that check and this open. An unhandled 'error' on a stream is
+      // an uncaught exception, so a vanished file must end the response, not
+      // the process.
+      const stream = fs.createReadStream(site.filePath);
+      stream.on("error", () => {
+        if (!res.headersSent) res.writeHead(404);
+        res.destroy();
+      });
+      stream.pipe(res);
+    }
+  };
+
+  /**
+   * finding #21: last-resort guard for the whole route body. An async listener
+   * that throws (a malformed URL, a broken socket during a body read, a bug in
+   * any route) rejects with no handler and takes the process down. Requests
+   * are untrusted input, so the process must survive any single one of them.
+   * A response that already started is left alone — only the connection dies.
+   */
+  return async (req, res) => {
+    try {
+      await handle(req, res);
+    } catch (e) {
+      if (!res.headersSent) {
+        try {
+          res
+            .writeHead(500, { "content-type": TYPES[".json"] })
+            .end(JSON.stringify({ error: "internal error" }));
+        } catch {
+          /* socket already gone — nothing to answer on */
+        }
+      }
+      // A client that walks away mid-request is routine, not an incident.
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== "ECONNRESET" && !(e instanceof Error && e.message === "aborted")) {
+        console.error(
+          `brewdocs: request failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
   };
 }

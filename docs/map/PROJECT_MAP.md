@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-10-05_
+_Generated: 2026-10-07_
 
 ## What this is
 
@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.5.0 | commands + hosting server | 4 files / 3,371 loc | 10 files / 1,588 loc |
-| `@brewdocs/core` | 4.5.0 | pipeline: extract → model → render | 60 files / 15,331 loc | 45 files / 5,651 loc |
+| `@brewdocs/cli` | 4.5.0 | commands + hosting server | 4 files / 3,446 loc | 11 files / 1,768 loc |
+| `@brewdocs/core` | 4.5.0 | pipeline: extract → model → render | 61 files / 15,383 loc | 46 files / 5,712 loc |
 | `@brewdocs/plugin-sdk` | 4.5.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**393 test declarations across 56 files** — parsed from the tree, not typed.
+**404 test declarations across 58 files** — parsed from the tree, not typed.
 
 > 14 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -32,17 +32,6 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
-| `/api/build` | POST | `authorize` | `packages/cli/src/server.ts:694` |
-| `/api/export` | POST | `authorize` | `packages/cli/src/server.ts:764` |
-| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:830` |
-| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:842` |
-| `/mcp` | POST | `authorizeRead` | `packages/cli/src/server.ts:868` |
-| `/api/gap` | GET | `authorizeRead` | `packages/cli/src/server.ts:913` |
-| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:928` |
-| `/api/markdown` | POST | `authorize` | `packages/cli/src/server.ts:946` |
-| `/api/stats` | GET | `authorizeRead` | `packages/cli/src/server.ts:992` |
-| `/` | GET | **none** | `packages/cli/src/server.ts:1040` |
-| `/dashboard` | GET | **none** | `packages/cli/src/server.ts:1056` |
 
 ### Invariants a change must not break
 
@@ -112,6 +101,15 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-22** — The stdio and HTTP MCP transports must answer through one shared message handler; a tool added or changed must behave identically on both.
   - _why:_ Two transports over the same protocol is exactly the shape that lets a fix land in one path and not the other — the same failure mode that let the plugin 'fetched' guard be bypassed three times (INV-20). One handler means the protocol has a single implementation to keep correct.
   - _enforced by:_ scripts/gate.mjs (inv-22:mcp-one-protocol-handler) + packages/core/test/mcp.test.ts (handleMcpMessage is the single dispatcher)
+- **INV-23** — Every comparison against a credential (token, token hash, key hash, domain verification token) must go through safeEqual in core/src/compare.ts — never a bare === — and safeEqual must never throw on a length mismatch.
+  - _why:_ A === on a secret is not guaranteed constant-time, so each compared byte leaks a little timing signal (finding #20). The sites were spread across four modules (server.ts site access, the admin Bearer compares, cloud.ts org membership, keys.ts key lookup, domains.ts verification token), which is the same one-fix-many-copies shape as the escaping bug (INV-4) — so the gate scans every source file for a secret-ish identifier beside ===/!==, not a fixed file list. The wrapper (rather than a raw crypto.timingSafeEqual) is load-bearing: timingSafeEqual throws RangeError on a length mismatch, and a throw in this server exits the process (finding #21), so the naive swap would have traded a timing leak for an unauthenticated crash.
+  - _enforced by:_ scripts/gate.mjs (inv-23:credentials-compared-in-constant-time) + packages/core/test/compare.test.ts (length mismatch, UTF-8 semantics, non-strings) + packages/cli/src/v46.test.ts (wrong-length token over HTTP)
+- **INV-24** — A single request must not be able to kill the process: every request listener is guarded, caller-controlled parsing (the request line, percent-decoding) answers 400, and every file stream handles its own error.
+  - _why:_ An async request listener that throws rejects a promise with no handler attached and Node exits the process; a synchronous listener that throws does the same. Requests are untrusted input, so one malformed request line (GET //[ — new URL() throws) or one client that abandons a POST mid-body (the body read throws aborted) was an unauthenticated denial of service against both the hosting server and the preview server (finding #21, reproduced by execution). An unhandled error on fs.createReadStream(...).pipe(res) is the same class: a file that vanishes between the existence check and the open takes the process with it.
+  - _enforced by:_ scripts/gate.mjs (inv-24:request-cannot-kill-the-process) + packages/cli/src/v46.test.ts (hostile request line, lone percent-escape, aborted body, wrong-length token — each asserts the next request still answers 200)
+- **INV-25** — A stored credential hash must not authenticate: authentication hashes what it is presented, while only operator-side mutations (add/remove member) may accept an already-hashed value.
+  - _why:_ canAccessOrg used normalizeKeyHash, which passes a non-bd_live_ string through untouched, so presenting a member's stored keyHash back as the Bearer token returned 200 (finding #22, reproduced over HTTP). The stored hash is an artifact at rest; if it is also a credential then hashing buys nothing and anyone who can read .cloud.json holds every member key in usable form. validateKey in keys.ts never had the hole (it always hashes, so a hash double-hashes and misses) — the two key stores disagreed about what a credential is, which is why the asymmetry stayed invisible.
+  - _enforced by:_ scripts/gate.mjs (inv-25:stored-hash-is-not-a-credential) + packages/core/test/cloud.test.ts (stored hash rejected, raw key still accepted)
 
 ### Server defaults
 
@@ -225,11 +223,17 @@ v4.5 closes the feedback loop: agents query a deployed site's docmodel over POST
 
 </details>
 
+<details><summary><b>D-11</b> — safeEqual compares bytes, not digests — and length mismatch answers false</summary>
+
+One helper (core/src/compare.ts) is the only comparison a credential may use. Two design choices are deliberate. (1) It compares the UTF-8 bytes of the two strings rather than hashing both sides to a fixed-width digest first. Digesting would also remove the length question, but it changes what the function means: safeEqual(hashOfKey, storedHash) would be true, so a caller that forgot to hash would silently compare digests and pass the wrong thing. Byte comparison keeps === semantics exactly — the one difference being that a length mismatch answers false instead of throwing. (2) It returns false (never throws) on a length mismatch, because crypto.timingSafeEqual throws RangeError and a throw inside this server exits the process (finding #21). The early return on unequal length does leak the length of the secret, which is acceptable here: every credential is a fixed-width hex hash or a bd_live_ key, and it is the same trade the Node docs make for timingSafeEqual itself. Related asymmetry, recorded because it looks like an inconsistency: operator-side mutations (cloud org add-member/remove-member) still accept either a raw key or a pre-hashed value, because there the caller is the operator; authentication never accepts a pre-hashed value (finding #22).
+
+</details>
+
 ## Findings
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**19 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**22 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -252,6 +256,9 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 17 | low | No golden-output test for the renderer | fixed | `inv-18:renderer-golden` |
 | 18 | low | api.test.ts was flaky under load (2 tests at a 30s timeout) | fixed | `npx vitest run packages/cli/src/api.test.ts` |
 | 19 | high | A fetched repo brewdocs.yml could name a plugin, executing arbitrary code at build time (RCE) | fixed | `inv-20:fetched-source-cannot-name-plugins` |
+| 20 | low | Credentials were compared with === (not constant-time) | fixed | `inv-23:credentials-compared-in-constant-time` |
+| 21 | high | One malformed request could kill the process (async handler throw) | fixed | `inv-24:request-cannot-kill-the-process` |
+| 22 | medium | A stored API-key hash authenticated as a credential (pass-the-hash) | fixed | `inv-25:stored-hash-is-not-a-credential` |
 
 ## Working in this repo
 

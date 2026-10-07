@@ -173,6 +173,36 @@
       "detail": "Reproduced by execution on 2026-09-28, not inferred: a synthetic repo whose brewdocs.yml contained plugins: [./pwn.cjs], with the plugin writing a marker file, ran that code during brewdocs build. loadPlugin resolves the specifier with requireFrom(root)(abs) — no signature, no sandbox — and build.ts called loadPlugins(config.plugins, ...) with no check of source.fetched. The guard for this class already existed and was simply not applied: finding #15 / INV-17 made the python adapter refuse a fetched source for exactly this reason. Three further bypasses were found while fixing it, all the same root cause (a Source rebuilt without carrying fetched): the per-version worktree in buildVersions, the extractVersion checkout, and the CLI build command resolveCliSource, which dropped the flag on the main brewdocs build path. All four sites now propagate fetched and resolveSetup drops repo-config plugins for a fetched source. Operator-passed --plugins still load, since that is the caller own choice, and a locally chosen source is unaffected.",
       "checkedBy": "inv-20:fetched-source-cannot-name-plugins",
       "verify": "npx vitest run packages/core/test/plugin-fetched.test.ts"
+    },
+    {
+      "id": 20,
+      "severity": "low",
+      "title": "Credentials were compared with === (not constant-time)",
+      "status": "fixed",
+      "fixedIn": "v4.6.0",
+      "detail": "requireSiteAccess compared the sha256 of a presented token with the stored tokenHash using === (server.ts), and the same shape appeared at every other credential site: the admin-token Bearer compares in authorize/authorizeRead, the site-org membership check in canAccessOrg, the API-key lookup in validateKey/revokeKey/claimSite, and the custom-domain verification token in verifyDomain. String comparison in JS is not guaranteed constant-time, so each byte leaks a little timing signal; with a high-entropy digest the practical exploitability is very low, which is why this is low severity, but the canonical hardening is cheap. All sites now route through one helper, safeEqual (core/src/compare.ts), which wraps crypto.timingSafeEqual. The wrapper exists because timingSafeEqual throws RangeError on a length mismatch — and a throw in this server exits the process (finding #21), so a naive swap would have traded a timing leak for an unauthenticated crash. safeEqual returns false instead, keeps === semantics (byte comparison, not digest comparison, so passing a pre-hashed value never silently becomes valid), and answers false for non-strings. Verified by execution, not inference: the scan that found these sites is now gate check inv-23, and the swap was proven by mutation (reverting any one site turns the gate red).",
+      "checkedBy": "inv-23:credentials-compared-in-constant-time",
+      "verify": "npx vitest run packages/core/test/compare.test.ts"
+    },
+    {
+      "id": 21,
+      "severity": "high",
+      "title": "One malformed request could kill the process (async handler throw)",
+      "status": "fixed",
+      "fixedIn": "v4.6.0",
+      "detail": "Found while fixing #20: the swap to crypto.timingSafeEqual would have thrown RangeError on any wrong-length token, and that throw would have exited the server. Reproduced by execution: an async http request listener that throws rejects a promise with no handler attached, and Node exits the process (verified against the real server with a hostile request line, GET //[ — new URL() throws ERR_INVALID_URL before any route runs). Three distinct surfaces had the same defect class: buildRequestHandler (async, so any throw anywhere in any route kills the process), serveStatic in cli/src/index.ts (a synchronous listener, same outcome on a bad request line or a lone % in decodeURIComponent), and fs.createReadStream(...).pipe(res) on both static paths (a file removed between the existence check and the open emits unhandled error → process exit; verified with a stream to a missing file). Fixed with a single try/catch wrapper around the shared route body plus a 400 for the unparseable request line, a 400 in the preview server, and error handlers on both streams. A client that abandons a POST mid-body (the body read throws aborted) now yields a clean response instead of a crash. Verified by execution: hostile request lines, aborted bodies, and a wrong-length site token all leave the server answering 200 on the next request.",
+      "checkedBy": "inv-24:request-cannot-kill-the-process",
+      "verify": "npx vitest run packages/cli/src/v46.test.ts"
+    },
+    {
+      "id": 22,
+      "severity": "medium",
+      "title": "A stored API-key hash authenticated as a credential (pass-the-hash)",
+      "status": "fixed",
+      "fixedIn": "v4.6.0",
+      "detail": "Found while auditing the comparison sites for #20, and reproduced by execution over HTTP, not inferred: create an org, add a member with a raw bd_live_ key, read the member keyHash out of .cloud.json, then GET a private org site with Authorization: Bearer <that hash> — the server answered 200. Mechanism: canAccessOrg used normalizeKeyHash, which passes a non-bd_live_ string through untouched because that convenience exists for addOrgMember/removeOrgMember (an operator may paste either form). Authentication is different: the stored hash is an artifact at rest, and if presenting it back is sufficient then hashing buys nothing — anyone who can read .cloud.json (a backup, a synced folder, a hosting dir served or copied by mistake) holds every member credential in usable form. validateKey in cli/src/keys.ts never had this hole (it always hashes what it is presented, so the hash double-hashes and misses), which is why the asymmetry went unnoticed: the two key stores disagreed about what a credential is. Fixed by hashing in canAccessOrg (hashKey, not normalizeKeyHash), with the reason written at the call site. addOrgMember/removeOrgMember keep accepting a hash, because there the caller is the operator, not a request. Tests: packages/core/test/cloud.test.ts asserts the stored hash is rejected and the raw key still works.",
+      "checkedBy": "inv-25:stored-hash-is-not-a-credential",
+      "verify": "npx vitest run packages/core/test/cloud.test.ts"
     }
   ]
 }

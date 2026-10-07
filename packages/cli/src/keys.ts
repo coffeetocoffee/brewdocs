@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { safeEqual } from "@brewdocs/core";
 
 export interface ApiKeyRecord {
   /** SHA-256 of the issued key (the raw key is only shown once at creation). */
@@ -62,7 +63,7 @@ export function validateKey(
 ): ApiKeyRecord | null {
   if (!presented) return null;
   const h = hashKey(presented);
-  return loadKeys(hostingDir).find((k) => k.hash === h) ?? null;
+  return loadKeys(hostingDir).find((k) => safeEqual(k.hash, h)) ?? null;
 }
 
 export function listKeys(hostingDir: string): ApiKeyRecord[] {
@@ -73,7 +74,7 @@ export function listKeys(hostingDir: string): ApiKeyRecord[] {
 export function revokeKey(hostingDir: string, keyOrHash: string): boolean {
   const h = keyOrHash.startsWith("bd_live_") ? hashKey(keyOrHash) : keyOrHash;
   const keys = loadKeys(hostingDir);
-  const next = keys.filter((k) => k.hash !== h);
+  const next = keys.filter((k) => !safeEqual(k.hash, h));
   if (next.length === keys.length) return false;
   saveKeys(hostingDir, next);
   return true;
@@ -82,7 +83,7 @@ export function revokeKey(hostingDir: string, keyOrHash: string): boolean {
 /** Record that a key owns a deployed site (used for future per-user management). */
 export function claimSite(hostingDir: string, keyHash: string, subdomain: string): void {
   const keys = loadKeys(hostingDir);
-  const rec = keys.find((k) => k.hash === keyHash);
+  const rec = keys.find((k) => safeEqual(k.hash, keyHash));
   if (rec && !rec.ownedSites.includes(subdomain)) {
     rec.ownedSites.push(subdomain);
     saveKeys(hostingDir, keys);

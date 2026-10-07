@@ -1787,7 +1787,18 @@ export function serveStatic(
   const root = path.resolve(dir);
   const clients = new Set<http.ServerResponse>();
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    // finding #21: the request line is caller-controlled and can throw — `//[`
+    // is not a URL, and a lone `%` is not valid percent-encoding. Without this
+    // guard one malformed request from any local process kills the preview.
+    let url: URL;
+    let rel: string;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+      rel = decodeURIComponent(url.pathname);
+    } catch {
+      res.writeHead(400, { "content-type": "text/plain" }).end("Bad request");
+      return;
+    }
     if (live && url.pathname === "/__brewdocs/live") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -1799,7 +1810,6 @@ export function serveStatic(
       req.on("close", () => clients.delete(res));
       return;
     }
-    let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith("/")) rel += "index.html";
     // Containment must be boundary-aware: a plain startsWith() lets
     // `/../site-secret/x` (or a sibling named `<root>-secret`) escape, since
@@ -1818,7 +1828,14 @@ export function serveStatic(
       return;
     }
     res.writeHead(200, { "content-type": STATIC_TYPES[ext] ?? "application/octet-stream" });
-    fs.createReadStream(filePath).pipe(res);
+    // finding #21: a file removed between the existsSync above and this open
+    // emits 'error' on the stream — unhandled, that is an uncaught exception.
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => {
+      if (!res.headersSent) res.writeHead(404);
+      res.destroy();
+    });
+    stream.pipe(res);
   });
   // Local preview: loopback only, never the whole network.
   server.listen(port, "127.0.0.1");

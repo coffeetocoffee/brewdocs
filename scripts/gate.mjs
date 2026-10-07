@@ -429,6 +429,124 @@ function checkMcpSharedHandler() {
     );
 }
 
+/**
+ * INV-23: every comparison against a credential must go through `safeEqual`
+ * (finding #20). A `===` on a secret is not constant-time, and the credential
+ * sites are spread across four modules — the same "one fix, many copies"
+ * shape as the escaping bug (INV-4), so this scans every source file rather
+ * than a fixed list. The scan is deliberately textual: a secret-ish identifier
+ * on either side of `===`/`!==` is the pattern that shipped, and the fix is
+ * always to route it through safeEqual.
+ */
+function checkCredentialComparison() {
+  const compareSrc = "packages/core/src/compare.ts";
+  if (!fs.existsSync(path.join(ROOT, compareSrc))) {
+    return fail("inv-23:credentials-compared-in-constant-time", `${compareSrc} is missing`);
+  }
+  if (!/export function safeEqual\(/.test(read(compareSrc))) {
+    return fail("inv-23:credentials-compared-in-constant-time", "safeEqual is not exported");
+  }
+  // It must never throw on a length mismatch: crypto.timingSafeEqual does, and
+  // in this server that throw exits the process (finding #21).
+  if (!/length !== right\.length\) return false/.test(read(compareSrc))) {
+    return fail(
+      "inv-23:credentials-compared-in-constant-time",
+      "safeEqual does not guard the length mismatch",
+    );
+  }
+
+  // Leading word boundary only: `operatorToken` has none before "Token".
+  const secretish = /\b(token|secret|credential|apikey|api_key|keyhash|hash|passw)/i;
+  const ident = String.raw`[A-Za-z_$][\w$.]*(?:\[[^\]]*\])?(?:\([^()]*\))?`;
+  const lit = String.raw`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\`(?:[^\`\\]|\\.)*\``;
+  const op = `(?:${ident}|${lit})`;
+  const cmp = new RegExp(`(${op})\\s*(===|!==)\\s*(${op})`, "g");
+  const offenders = [];
+  for (const f of sourceFiles()) {
+    const lines = read(f).split("\n");
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return;
+      cmp.lastIndex = 0;
+      let m;
+      while ((m = cmp.exec(line)) !== null) {
+        const before = line.slice(0, m.index);
+        if (before.includes("//")) continue;
+        if (/\btypeof\s+$/.test(before)) continue;
+        if (/^(undefined|null|true|false)$/.test(m[1]) || /^(undefined|null|true|false)$/.test(m[3])) {
+          continue;
+        }
+        if (secretish.test(m[1]) || secretish.test(m[3])) {
+          offenders.push(`${f}:${i + 1} (${m[1]} ${m[2]} ${m[3]})`);
+        }
+      }
+    });
+  }
+  if (offenders.length === 0) pass("inv-23:credentials-compared-in-constant-time");
+  else
+    fail(
+      "inv-23:credentials-compared-in-constant-time",
+      `credential comparison(s) outside safeEqual: ${offenders.join(", ")}`,
+    );
+}
+
+/**
+ * INV-24: one bad request must not be able to kill the process (finding #21).
+ * An async request listener that throws rejects a promise with no handler
+ * attached, and Node exits; a synchronous throw in a listener does the same;
+ * an unhandled 'error' on a read stream does the same. Requests are untrusted
+ * input, so each of the three server surfaces needs its guard, and the gate
+ * asserts them structurally rather than by running a server.
+ */
+function checkRequestSurvival() {
+  const serverSrc = read("packages/cli/src/server.ts");
+  const cliSrc = read("packages/cli/src/index.ts");
+
+  // The shared handler is wrapped in a try/catch, and the URL parse has its own
+  // 400 (a caller-controlled request line that is not a URL).
+  const wrapped = /try \{\s*\n\s*await handle\(req, res\);\s*\n\s*\} catch/.test(serverSrc);
+  const urlGuarded = /let url: URL;\s*\n\s*try \{\s*\n\s*url = new URL\(req\.url/.test(serverSrc);
+  // The preview server guards both the URL parse and the percent-decode.
+  const previewGuarded = /rel = decodeURIComponent\(url\.pathname\);\s*\n\s*\} catch/.test(cliSrc);
+  // Both static file streams handle 'error' instead of crashing on a file that
+  // vanished between the existence check and the open.
+  const streamGuards =
+    (serverSrc.match(/stream\.on\("error"/g) ?? []).length +
+    (cliSrc.match(/stream\.on\("error"/g) ?? []).length;
+
+  if (wrapped && urlGuarded && previewGuarded && streamGuards >= 2)
+    pass("inv-24:request-cannot-kill-the-process");
+  else
+    fail(
+      "inv-24:request-cannot-kill-the-process",
+      `wrapped=${wrapped}, urlGuarded=${urlGuarded}, previewGuarded=${previewGuarded}, streamGuards=${streamGuards}/2`,
+    );
+}
+
+/**
+ * INV-25: a stored credential hash must not itself authenticate (finding #22).
+ * `canAccessOrg` used `normalizeKeyHash`, which passes a non-`bd_live_` string
+ * through untouched — right for `add-member` (the operator may paste a hash),
+ * wrong for authentication, where it made every readable `.cloud.json` a bag of
+ * usable credentials. The two key stores disagreed: `validateKey` always
+ * hashes, so the hash double-hashes and misses. This asserts the auth path
+ * hashes and the mutation paths keep their convenience.
+ */
+function checkStoredHashNotACredential() {
+  const cloudSrc = read("packages/core/src/cloud.ts");
+  const authUsesHash = /const keyHash = hashKey\(presented\);/.test(cloudSrc);
+  const authDoesNotNormalize = !/const keyHash = normalizeKeyHash\(presented\);/.test(cloudSrc);
+  // add-member / remove-member still accept either form from the operator.
+  const mutationKeeps = /normalizeKeyHash\(keyOrHash\)/.test(cloudSrc);
+  if (authUsesHash && authDoesNotNormalize && mutationKeeps)
+    pass("inv-25:stored-hash-is-not-a-credential");
+  else
+    fail(
+      "inv-25:stored-hash-is-not-a-credential",
+      `authHashes=${authUsesHash}, authAvoidsNormalize=${authDoesNotNormalize}, mutationKeeps=${mutationKeeps}`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -512,6 +630,9 @@ checkPluginFetchedGuard();
 checkRendererGolden();
 checkMcpHttpGuarded();
 checkMcpSharedHandler();
+checkCredentialComparison();
+checkRequestSurvival();
+checkStoredHashNotACredential();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

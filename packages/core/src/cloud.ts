@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safeEqual } from "./compare.js";
 
 /**
  * v2.5 cloud control plane (local emulation, zero dependencies). Persists an
@@ -178,7 +179,7 @@ export function addOrgMember(
   const record = store.orgs[slug(org)];
   if (!record) return false;
   const keyHash = normalizeKeyHash(keyOrHash);
-  if (!record.members.some((m) => m.keyHash === keyHash)) {
+  if (!record.members.some((m) => safeEqual(m.keyHash, keyHash))) {
     record.members.push({
       keyHash,
       label: opts.label,
@@ -208,7 +209,7 @@ export function removeOrgMember(
   if (!record) return false;
   const keyHash = normalizeKeyHash(keyOrHash);
   const before = record.members.length;
-  record.members = record.members.filter((m) => m.keyHash !== keyHash);
+  record.members = record.members.filter((m) => !safeEqual(m.keyHash, keyHash));
   if (record.members.length === before) return false;
   saveCloud(hostingDir, store);
   return true;
@@ -230,8 +231,13 @@ export function canAccessOrg(
   if (!presented) return false;
   const record = loadCloud(hostingDir).orgs[slug(org)];
   if (!record) return false;
-  const keyHash = normalizeKeyHash(presented);
-  return record.members.some((m) => m.keyHash === keyHash);
+  // Deliberately `hashKey`, not `normalizeKeyHash`: the latter passes an
+  // already-hexed value through untouched, which is right for `add-member`
+  // (an operator may paste a hash) but wrong here. A member's stored hash is
+  // an artifact at rest; if presenting it back were enough, the hash would be
+  // the credential and hashing would buy nothing (finding #22).
+  const keyHash = hashKey(presented);
+  return record.members.some((m) => safeEqual(m.keyHash, keyHash));
 }
 
 /**

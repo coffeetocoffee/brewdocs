@@ -132,6 +132,24 @@
       "rule": "The stdio and HTTP MCP transports must answer through one shared message handler; a tool added or changed must behave identically on both.",
       "why": "Two transports over the same protocol is exactly the shape that lets a fix land in one path and not the other — the same failure mode that let the plugin 'fetched' guard be bypassed three times (INV-20). One handler means the protocol has a single implementation to keep correct.",
       "enforcedBy": "scripts/gate.mjs (inv-22:mcp-one-protocol-handler) + packages/core/test/mcp.test.ts (handleMcpMessage is the single dispatcher)"
+    },
+    {
+      "id": "INV-23",
+      "rule": "Every comparison against a credential (token, token hash, key hash, domain verification token) must go through safeEqual in core/src/compare.ts — never a bare === — and safeEqual must never throw on a length mismatch.",
+      "why": "A === on a secret is not guaranteed constant-time, so each compared byte leaks a little timing signal (finding #20). The sites were spread across four modules (server.ts site access, the admin Bearer compares, cloud.ts org membership, keys.ts key lookup, domains.ts verification token), which is the same one-fix-many-copies shape as the escaping bug (INV-4) — so the gate scans every source file for a secret-ish identifier beside ===/!==, not a fixed file list. The wrapper (rather than a raw crypto.timingSafeEqual) is load-bearing: timingSafeEqual throws RangeError on a length mismatch, and a throw in this server exits the process (finding #21), so the naive swap would have traded a timing leak for an unauthenticated crash.",
+      "enforcedBy": "scripts/gate.mjs (inv-23:credentials-compared-in-constant-time) + packages/core/test/compare.test.ts (length mismatch, UTF-8 semantics, non-strings) + packages/cli/src/v46.test.ts (wrong-length token over HTTP)"
+    },
+    {
+      "id": "INV-24",
+      "rule": "A single request must not be able to kill the process: every request listener is guarded, caller-controlled parsing (the request line, percent-decoding) answers 400, and every file stream handles its own error.",
+      "why": "An async request listener that throws rejects a promise with no handler attached and Node exits the process; a synchronous listener that throws does the same. Requests are untrusted input, so one malformed request line (GET //[ — new URL() throws) or one client that abandons a POST mid-body (the body read throws aborted) was an unauthenticated denial of service against both the hosting server and the preview server (finding #21, reproduced by execution). An unhandled error on fs.createReadStream(...).pipe(res) is the same class: a file that vanishes between the existence check and the open takes the process with it.",
+      "enforcedBy": "scripts/gate.mjs (inv-24:request-cannot-kill-the-process) + packages/cli/src/v46.test.ts (hostile request line, lone percent-escape, aborted body, wrong-length token — each asserts the next request still answers 200)"
+    },
+    {
+      "id": "INV-25",
+      "rule": "A stored credential hash must not authenticate: authentication hashes what it is presented, while only operator-side mutations (add/remove member) may accept an already-hashed value.",
+      "why": "canAccessOrg used normalizeKeyHash, which passes a non-bd_live_ string through untouched, so presenting a member's stored keyHash back as the Bearer token returned 200 (finding #22, reproduced over HTTP). The stored hash is an artifact at rest; if it is also a credential then hashing buys nothing and anyone who can read .cloud.json holds every member key in usable form. validateKey in keys.ts never had the hole (it always hashes, so a hash double-hashes and misses) — the two key stores disagreed about what a credential is, which is why the asymmetry stayed invisible.",
+      "enforcedBy": "scripts/gate.mjs (inv-25:stored-hash-is-not-a-credential) + packages/core/test/cloud.test.ts (stored hash rejected, raw key still accepted)"
     }
   ]
 }

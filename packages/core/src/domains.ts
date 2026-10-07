@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safeEqual } from "./compare.js";
 
 /**
  * v2.5 custom domains + TLS (local emulation, zero dependencies). A domain
@@ -175,7 +176,7 @@ export async function verifyDomain(
   } catch {
     return false;
   }
-  const ok = typeof body === "string" && body.trim() === record.token;
+  const ok = typeof body === "string" && safeEqual(body.trim(), record.token);
   if (ok) {
     const store = loadDomains(hostingDir);
     const rec = store.domains[record.domain];
