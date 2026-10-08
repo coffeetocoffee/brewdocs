@@ -101,7 +101,7 @@ function packageStats() {
  * hard-code and get wrong; parsing it removes the whole class of drift.
  *
  * Caveat worth stating in the output: a handful of files declare tests inside
- * a `for` loop over fixtures (fuzz examples, real-world packages), so the
+ * a `for` loop over fixtures (bundled examples, real-world packages), so the
  * number vitest reports at runtime is slightly higher than the number of
  * declarations. We report declarations and say so, rather than printing a
  * runtime figure nobody can reproduce from the source.

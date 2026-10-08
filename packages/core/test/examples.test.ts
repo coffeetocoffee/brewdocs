@@ -17,11 +17,11 @@ function exampleDirs(): string[] {
     );
 }
 
-describe("fuzz: every example builds without throwing", () => {
+describe("examples: every bundled example builds without throwing", () => {
   for (const dir of exampleDirs()) {
     const name = path.basename(dir);
     it(`builds ${name} (single + multi) and produces HTML`, async () => {
-      const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-fuzz-"));
+      const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-examples-"));
       const single = build({ root: dir, name }, path.join(out, "single"));
       const multi = buildMulti({ root: dir, name }, path.join(out, "multi"));
       const html = fs.readFileSync(single, "utf8");
@@ -42,7 +42,7 @@ describe("fuzz: every example builds without throwing", () => {
     "exports a fully self-contained site without throwing",
     { timeout: 120_000, retry: 2 },
     async () => {
-      const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-fuzz-"));
+      const out = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-examples-"));
       const file = await exportSite({ root: path.join(EXAMPLES, "lib"), name: "lib" }, out);
       const html = fs.readFileSync(file, "utf8");
       expect(html).toContain("<!doctype html>");

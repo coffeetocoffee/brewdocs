@@ -655,6 +655,25 @@ function checkKeyStoreFailClosed() {
     );
 }
 
+/**
+ * INV-30: theme CSS text must not close the raw-text <style> element
+ * (finding #27). Vars come from manifests and plugins, and the css blob from
+ * a manifest; all three pass through cssSafe, which neutralizes `<`.
+ */
+function checkStyleChannelBreakout() {
+  const src = read("packages/core/src/render.ts");
+  const helper = /function cssSafe\(/.test(src) && src.includes("\\3c");
+  const varsK = /cssSafe\(k\)/.test(src);
+  const varsV = /cssSafe\(v\)/.test(src);
+  const css = /cssSafe\(theme\.css\)/.test(src);
+  if (helper && varsK && varsV && css) pass("inv-30:style-channel-cannot-break-out");
+  else
+    fail(
+      "inv-30:style-channel-cannot-break-out",
+      `helper=${helper}, varsK=${varsK}, varsV=${varsV}, css=${css}`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -745,6 +764,7 @@ checkManifestFailClosed();
 checkSiteParamContainment();
 checkPrivateAlwaysGated();
 checkKeyStoreFailClosed();
+checkStyleChannelBreakout();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

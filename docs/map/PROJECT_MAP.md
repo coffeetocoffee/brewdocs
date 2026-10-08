@@ -19,12 +19,12 @@ The product's whole job is rendering prose from repositories **you do not own** 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
 | `@brewdocs/cli` | 4.5.3 | commands + hosting server | 4 files / 3,588 loc | 11 files / 1,995 loc |
-| `@brewdocs/core` | 4.5.3 | pipeline: extract → model → render | 61 files / 15,383 loc | 46 files / 5,721 loc |
+| `@brewdocs/core` | 4.5.3 | pipeline: extract → model → render | 61 files / 15,396 loc | 47 files / 5,954 loc |
 | `@brewdocs/plugin-sdk` | 4.5.3 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**410 test declarations across 58 files** — parsed from the tree, not typed.
+**414 test declarations across 59 files** — parsed from the tree, not typed.
 
-> 14 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
+> 15 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `examples.test.ts`, `federation.test.ts`, `harvest.test.ts`, `hostile.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
 ## Trust boundaries
 
@@ -122,6 +122,9 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-29** — An unreadable key store counts as 'auth IS configured', not as 'no auth': needsAuth is true while .keys.json exists but does not parse as an array, and every gated route refuses until it is repaired.
   - _why:_ loadKeys degrades every failure to [] and needsAuth was Boolean(token) || loadKeys(...).length > 0, so a damaged store read as 'no auth configured' and every gated read and write answered anonymously — reproduced with a corrupt store (GET /api/sites -> 200) and with {} (POST /api/export -> 200) (finding #26). This is the authorization twin of the manifest fail-open (#23): a store that cannot be read must refuse, not default to open. loadKeys also no longer hands a non-array document to callers, where {} used to reach .find and throw.
   - _enforced by:_ scripts/gate.mjs (inv-29:unreadable-key-store-refuses) + packages/cli/src/v46.test.ts (corrupt store: /api/sites and /api/build answer 401, and the previously valid key cannot authenticate either)
+- **INV-30** — A theme manifest's vars and css must not be able to terminate the <style> element: '<' is neutralized before interpolation.
+  - _why:_ HTML ends a raw-text <style> element at the literal sequence '</style', and escapeHtml cannot help inside a raw-text element. themeVars and the manifest css string were interpolated raw, so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…' } got a live script in the built page (finding #27, reproduced by execution). cssSafe in render.ts neutralizes '<' into the CSS escape '\3c ', keeping the style element intact.
+  - _enforced by:_ scripts/gate.mjs (inv-30:style-channel-cannot-break-out) + packages/core/test/hostile.test.ts (hostile manifest vars and css produce no live script and style count is 1)
 
 ### Server defaults
 
@@ -251,7 +254,7 @@ The three-state manifest read (INV-26) draws its line between absence and unread
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**26 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**27 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -281,6 +284,7 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 24 | medium | ?site= walked outside the hosting dir on /mcp and /dashboard | fixed | `inv-27:site-param-cannot-leave-hosting` |
 | 25 | high | A private site with no tokenHash served anonymously (private: true config minted no token) | fixed | `inv-28:private-site-always-token-gated` |
 | 26 | high | An unreadable key store turned every gated endpoint public | fixed | `inv-29:unreadable-key-store-refuses` |
+| 27 | medium | A theme manifest could end the <style> element and inject script into the page | fixed | `inv-30:style-channel-cannot-break-out` |
 
 ## Working in this repo
 
@@ -292,6 +296,6 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 
 **Adding a top-level core module** needs no `files` allowlist edit (the allowlist is `dist`, wholesale) — but always `npm pack --dry-run` before a release. A stale allowlist once shipped a 3.0.0 with 19 missing modules.
 
-**Commands.** `npm test` · `npm run typecheck` · `npx vitest run <path>` · `npx vitest run <path> -t "name"` · `npm run brewdocs -- build ./docs --theme ink --out docs-site`. Full suite takes a few minutes; the fuzz suite alone is ~30s.
+**Commands.** `npm test` · `npm run typecheck` · `npx vitest run <path>` · `npx vitest run <path> -t "name"` · `npm run brewdocs -- build ./docs --theme ink --out docs-site`. Full suite takes a few minutes; the examples suite alone is ~30s.
 
 **When you change a trust boundary**, update `docs/map/facts/invariants.json` in the same commit and run `npm run map`. The gate executes each finding's `verify` command, so an entry marked `fixed` that regresses turns the build red instead of going quiet.

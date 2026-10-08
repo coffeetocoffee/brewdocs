@@ -174,6 +174,12 @@
       "rule": "An unreadable key store counts as 'auth IS configured', not as 'no auth': needsAuth is true while .keys.json exists but does not parse as an array, and every gated route refuses until it is repaired.",
       "why": "loadKeys degrades every failure to [] and needsAuth was Boolean(token) || loadKeys(...).length > 0, so a damaged store read as 'no auth configured' and every gated read and write answered anonymously — reproduced with a corrupt store (GET /api/sites -> 200) and with {} (POST /api/export -> 200) (finding #26). This is the authorization twin of the manifest fail-open (#23): a store that cannot be read must refuse, not default to open. loadKeys also no longer hands a non-array document to callers, where {} used to reach .find and throw.",
       "enforcedBy": "scripts/gate.mjs (inv-29:unreadable-key-store-refuses) + packages/cli/src/v46.test.ts (corrupt store: /api/sites and /api/build answer 401, and the previously valid key cannot authenticate either)"
+    },
+    {
+      "id": "INV-30",
+      "rule": "A theme manifest's vars and css must not be able to terminate the <style> element: '<' is neutralized before interpolation.",
+      "why": "HTML ends a raw-text <style> element at the literal sequence '</style', and escapeHtml cannot help inside a raw-text element. themeVars and the manifest css string were interpolated raw, so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…' } got a live script in the built page (finding #27, reproduced by execution). cssSafe in render.ts neutralizes '<' into the CSS escape '\\3c ', keeping the style element intact.",
+      "enforcedBy": "scripts/gate.mjs (inv-30:style-channel-cannot-break-out) + packages/core/test/hostile.test.ts (hostile manifest vars and css produce no live script and style count is 1)"
     }
   ]
 }

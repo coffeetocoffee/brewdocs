@@ -214,12 +214,25 @@ function linkifyHighlighted(code: string, links?: SymbolLinks): string {
   return out;
 }
 
+/**
+ * Neutralize `<` in CSS that a source tree controls (theme manifest vars
+ * and `css:`) before it is embedded in the page's `<style>` element. `<style>`
+ * is a raw-text element: it ends at the first `</style`, so a manifest value like
+ * `"</style><script>…"` ended the element and ran script in the published page
+ * (finding #27). Replacing `<` with `\3c ` (the CSS hex escape for `<`) prevents
+ * the HTML parser from seeing the tag opener while the CSS parser still decodes
+ * the value.
+ */
+function cssSafe(css: string): string {
+  return css.replace(/</g, "\\3c ");
+}
+
 function themeVars(theme: Theme, extra?: { vars?: Record<string, string>; darkVars?: Record<string, string> }): string {
   const light = Object.entries({ ...theme.light, ...(extra?.vars ?? {}) })
-    .map(([k, v]) => `  ${k}: ${v};`)
+    .map(([k, v]) => `  ${cssSafe(k)}: ${cssSafe(v)};`)
     .join("\n");
   const dark = Object.entries({ ...theme.dark, ...(extra?.darkVars ?? {}) })
-    .map(([k, v]) => `  ${k}: ${v};`)
+    .map(([k, v]) => `  ${cssSafe(k)}: ${cssSafe(v)};`)
     .join("\n");
   return `:root, [data-theme="light"] {\n${light}\n}\n[data-theme="dark"] {\n${dark}\n}`;
 }
@@ -640,7 +653,7 @@ function eolBannerHtml(options: RenderOptions, ui: UiStrings): string {
     opts.renderOptions.score !== undefined
       ? `<span class="coverage-chip" title="${escapeHtml(ui.coverageTitle)}">🩺 ${opts.renderOptions.score}% ${escapeHtml(ui.documented)}</span>`
       : "";
-  const extraCss = theme.css ? `\n${theme.css}\n` : "";
+  const extraCss = theme.css ? `\n${cssSafe(theme.css)}\n` : "";
   // v3.0 SEO: the description rides into meta/og tags, not just the lede.
   const seo = opts.description
     ? `<meta name="description" content="${escapeHtml(opts.description)}" />

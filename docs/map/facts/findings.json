@@ -241,6 +241,16 @@
       "fixedIn": "v4.5.3",
       "detail": "Found while auditing the sibling failure mode of #23. loadKeys degrades every failure to [] — invalid JSON, a non-array document, an unreadable file — and needsAuth is Boolean(token) || loadKeys(...).length > 0, so a damaged .keys.json read as 'no auth is configured' and every gated endpoint answered anonymously: reads (/api/sites, /api/registry, /api/search, /api/gap, /api/stats) and writes (/api/build, /api/export, /api/markdown), because authorize() returns ok when needsAuth is false. Reproduced: add a key, corrupt .keys.json, GET /api/sites -> 200; with the store set to {} (valid JSON, not an array) POST /api/export with any key -> 200. saveKeys writes the store with a plain non-atomic writeFileSync, so the trigger is the same partial-write class as #23. Fixed with keysStoreUnreadable(): an existing store that does not read back as an array counts as 'auth IS configured but unverifiable' — needsAuth is true and every gated route refuses (401) until the store is repaired, with a stderr line at server start and an error from `brewdocs keys list` so the operator sees why. loadKeys also stops handing a non-array document to callers ({} used to reach .find and throw).",
       "checkedBy": "inv-29:unreadable-key-store-refuses"
+    },
+    {
+      "id": 27,
+      "severity": "medium",
+      "title": "A theme manifest could end the <style> element and inject script into the page",
+      "status": "fixed",
+      "fixedIn": "v4.5.6",
+      "detail": "Found by execution while writing the hostile-input property test the fuzz rename called for: a theme manifest is repo-controlled config (the same threat model as the slot-partial read, #9), and its vars and css values were interpolated into <style> without escaping '<' — so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…</script>' } (or css: with the same) closed the style element and left a live script in the rendered page (reproduced by execution). The built-in themes are unaffected; the channel is theme manifests, the same repo-controlled config surface as #9. Fixed at the render chokepoint: cssSafe() neutralizes '<' into '\\3c ' (the CSS hex escape) for var keys, var values and the css blob — a '<' has no business in CSS, and it is the only way out of the raw-text element. The property test in hostile.test.ts asserts hostile manifest vars and css produce no injected script and the <style> block is not prematurely closed.",
+      "checkedBy": "inv-30:style-channel-cannot-break-out",
+      "verify": "npx vitest run packages/core/test/hostile.test.ts"
     }
   ]
 }

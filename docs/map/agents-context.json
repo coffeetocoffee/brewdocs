@@ -22,9 +22,9 @@
       "version": "4.5.3",
       "role": "pipeline: extract → model → render",
       "srcFiles": 61,
-      "srcLoc": 15383,
-      "testFiles": 46,
-      "testLoc": 5721
+      "srcLoc": 15396,
+      "testFiles": 47,
+      "testLoc": 5954
     },
     {
       "name": "@brewdocs/plugin-sdk",
@@ -37,8 +37,8 @@
     }
   ],
   "tests": {
-    "files": 58,
-    "total": 410,
+    "files": 59,
+    "total": 414,
     "skipped": 0,
     "loopFiles": [
       "packages/cli/src/mcp-http.test.ts",
@@ -46,9 +46,10 @@
       "packages/core/test/ci.test.ts",
       "packages/core/test/draft.test.ts",
       "packages/core/test/drift.test.ts",
+      "packages/core/test/examples.test.ts",
       "packages/core/test/federation.test.ts",
-      "packages/core/test/fuzz.test.ts",
       "packages/core/test/harvest.test.ts",
+      "packages/core/test/hostile.test.ts",
       "packages/core/test/languages.test.ts",
       "packages/core/test/openapi.test.ts",
       "packages/core/test/prove.test.ts",
@@ -237,6 +238,12 @@
       "rule": "An unreadable key store counts as 'auth IS configured', not as 'no auth': needsAuth is true while .keys.json exists but does not parse as an array, and every gated route refuses until it is repaired.",
       "why": "loadKeys degrades every failure to [] and needsAuth was Boolean(token) || loadKeys(...).length > 0, so a damaged store read as 'no auth configured' and every gated read and write answered anonymously — reproduced with a corrupt store (GET /api/sites -> 200) and with {} (POST /api/export -> 200) (finding #26). This is the authorization twin of the manifest fail-open (#23): a store that cannot be read must refuse, not default to open. loadKeys also no longer hands a non-array document to callers, where {} used to reach .find and throw.",
       "enforcedBy": "scripts/gate.mjs (inv-29:unreadable-key-store-refuses) + packages/cli/src/v46.test.ts (corrupt store: /api/sites and /api/build answer 401, and the previously valid key cannot authenticate either)"
+    },
+    {
+      "id": "INV-30",
+      "rule": "A theme manifest's vars and css must not be able to terminate the <style> element: '<' is neutralized before interpolation.",
+      "why": "HTML ends a raw-text <style> element at the literal sequence '</style', and escapeHtml cannot help inside a raw-text element. themeVars and the manifest css string were interpolated raw, so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…' } got a live script in the built page (finding #27, reproduced by execution). cssSafe in render.ts neutralizes '<' into the CSS escape '\\3c ', keeping the style element intact.",
+      "enforcedBy": "scripts/gate.mjs (inv-30:style-channel-cannot-break-out) + packages/core/test/hostile.test.ts (hostile manifest vars and css produce no live script and style count is 1)"
     }
   ],
   "findings": [
@@ -505,6 +512,17 @@
       "fixedIn": "v4.5.3",
       "detail": "Found while auditing the sibling failure mode of #23. loadKeys degrades every failure to [] — invalid JSON, a non-array document, an unreadable file — and needsAuth is Boolean(token) || loadKeys(...).length > 0, so a damaged .keys.json read as 'no auth is configured' and every gated endpoint answered anonymously: reads (/api/sites, /api/registry, /api/search, /api/gap, /api/stats) and writes (/api/build, /api/export, /api/markdown), because authorize() returns ok when needsAuth is false. Reproduced: add a key, corrupt .keys.json, GET /api/sites -> 200; with the store set to {} (valid JSON, not an array) POST /api/export with any key -> 200. saveKeys writes the store with a plain non-atomic writeFileSync, so the trigger is the same partial-write class as #23. Fixed with keysStoreUnreadable(): an existing store that does not read back as an array counts as 'auth IS configured but unverifiable' — needsAuth is true and every gated route refuses (401) until the store is repaired, with a stderr line at server start and an error from `brewdocs keys list` so the operator sees why. loadKeys also stops handing a non-array document to callers ({} used to reach .find and throw).",
       "checkedBy": "inv-29:unreadable-key-store-refuses",
+      "proven": true
+    },
+    {
+      "id": 27,
+      "severity": "medium",
+      "title": "A theme manifest could end the <style> element and inject script into the page",
+      "status": "fixed",
+      "fixedIn": "v4.5.6",
+      "detail": "Found by execution while writing the hostile-input property test the fuzz rename called for: a theme manifest is repo-controlled config (the same threat model as the slot-partial read, #9), and its vars and css values were interpolated into <style> without escaping '<' — so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…</script>' } (or css: with the same) closed the style element and left a live script in the rendered page (reproduced by execution). The built-in themes are unaffected; the channel is theme manifests, the same repo-controlled config surface as #9. Fixed at the render chokepoint: cssSafe() neutralizes '<' into '\\3c ' (the CSS hex escape) for var keys, var values and the css blob — a '<' has no business in CSS, and it is the only way out of the raw-text element. The property test in hostile.test.ts asserts hostile manifest vars and css produce no injected script and the <style> block is not prematurely closed.",
+      "checkedBy": "inv-30:style-channel-cannot-break-out",
+      "verify": "npx vitest run packages/core/test/hostile.test.ts",
       "proven": true
     }
   ]
