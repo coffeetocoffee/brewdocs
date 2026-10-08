@@ -14,17 +14,18 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.5.1
+## 🔥 Fresh out of the oven — v4.5.3
 
-Security hardening on the serving side, all three reproduced by execution before being fixed.
+Fail-closed hardening on the serving side: a damaged state file now refuses instead of silently opening. All four reproduced by execution before being fixed.
 
 | Fixed | What changed |
 | --- | --- |
-| 🔒 **Constant-time credentials** | Every token/key/hash comparison now routes through one `safeEqual` helper (`crypto.timingSafeEqual`), instead of `===` |
-| 🛡️ **One request can't kill the server** | A malformed request line, an abandoned POST body, or a vanished file mid-stream used to exit the process. Now: `400`/`500`, and it keeps serving |
-| 🧂 **No pass-the-hash** | A member's stored key hash in `.cloud.json` used to authenticate a private org site on its own. Now it doesn't |
+| 🚪 **A damaged manifest can't publish a private site** | A truncated `.brewdocs.json` (crash, full disk, overlapping deploys) read as "no token hash" and served the site anonymously. An unreadable manifest now refuses on every route; a missing one still serves hand-dropped directories as before |
+| 🧭 **`?site=` can't leave the hosting dir** | `/mcp` and `/dashboard` joined the raw `?site=` parameter into a path, so `?site=../sibling` read a directory above the hosting root. The site name now passes the same slug guard routing always used |
+| 🔐 **`private: true` really gates** | The config key set visibility without minting a token (only `--private` did), so the site served anonymously with `token: undefined` printed. Every private deploy now mints a token, and a private manifest without one is refused |
+| 🗝️ **An unreadable key store can't open the server** | A damaged `.keys.json` read as "no auth configured" and every gated read and write answered anonymously. An existing store that doesn't parse now counts as auth configured and refuses until repaired |
 
-Earlier this line: **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
+Earlier this line: **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
 
 ---
 
