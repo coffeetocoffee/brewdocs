@@ -1,6 +1,6 @@
 {
   "name": "@brewdocs/core",
-  "version": "4.5.8",
+  "version": "4.6.0",
   "description": "Core extraction pipeline for BrewDocs.",
   "type": "module",
   "license": "MIT",
