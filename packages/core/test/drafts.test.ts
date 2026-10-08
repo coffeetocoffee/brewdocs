@@ -1,16 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { deploySite, setDraftExpiry, draftExpired } from "@brewdocs/core";
 
 const TINY = path.resolve(__dirname, "../../../examples/tiny");
+let isolatedTiny: string;
+
+beforeAll(() => {
+  // Isolate fixture outside the host git repo so version discovery does not
+  // crawl all 28 git tags of brewdocs and churn worktrees per test.
+  isolatedTiny = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-tiny-fixture-"));
+  fs.cpSync(TINY, isolatedTiny, { recursive: true });
+});
 
 describe("v1.2 private drafts — deploy --draft", () => {
   it("records draft + expiry in the manifest and prints a token URL", async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-draft-"));
     const expires = new Date(Date.now() + 3600_000).toISOString();
-    await deploySite({ root: TINY }, hosting, "preview", undefined, undefined, {
+    await deploySite({ root: isolatedTiny }, hosting, "preview", undefined, undefined, {
       visibility: "private",
       token: "s3cret",
       draft: true,
@@ -29,7 +37,7 @@ describe("v1.2 private drafts — deploy --draft", () => {
   it("rejects --draft without private visibility", async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-draft2-"));
     await expect(
-      deploySite({ root: TINY }, hosting, "oops", undefined, undefined, {
+      deploySite({ root: isolatedTiny }, hosting, "oops", undefined, undefined, {
         draft: true,
       }),
     ).rejects.toThrow(/--draft requires --private/);
@@ -39,7 +47,7 @@ describe("v1.2 private drafts — deploy --draft", () => {
 describe("v1.2 private drafts — expiry / revocation", () => {
   it("extends and revokes via the manifest (keys-style management)", async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-draft3-"));
-    await deploySite({ root: TINY }, hosting, "d", undefined, undefined, {
+    await deploySite({ root: isolatedTiny }, hosting, "d", undefined, undefined, {
       visibility: "private",
       token: "tok",
       draft: true,

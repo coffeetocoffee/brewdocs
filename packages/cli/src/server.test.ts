@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -6,7 +6,13 @@ import { createServer, resolveSite } from "./server.js";
 import { deploySite, deriveSubdomain } from "@brewdocs/core";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
-const tinyRoot = path.join(EXAMPLES, "tiny");
+const rawTiny = path.join(EXAMPLES, "tiny");
+// Isolate fixture outside the host git repo so version discovery does not
+// crawl all 28 git tags of brewdocs and churn worktrees per build request.
+const fixtureTinyDir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-server-fixture-"));
+const tinyRoot = path.join(fixtureTinyDir, "tiny");
+fs.cpSync(rawTiny, tinyRoot, { recursive: true });
+process.env.BREWDOCS_SOURCE_ROOT = fixtureTinyDir;
 
 function tmp(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-host-"));
@@ -85,7 +91,7 @@ describe("Phase 4 — hosting server auth", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const base = `http://127.0.0.1:${port}`;
-    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+    const body = JSON.stringify({ source: tinyRoot });
 
     const noToken = await fetch(`${base}/api/build`, {
       method: "POST",
@@ -171,7 +177,7 @@ describe("Phase 5 — hosted-tier protection", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const base = `http://127.0.0.1:${port}`;
-    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+    const body = JSON.stringify({ source: tinyRoot });
 
     const first = await fetch(`${base}/api/build`, {
       method: "POST",
@@ -203,7 +209,7 @@ describe("Phase 5 — hosted-tier protection", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const base = `http://127.0.0.1:${port}`;
-    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+    const body = JSON.stringify({ source: tinyRoot });
 
     const res = await fetch(`${base}/api/build`, {
       method: "POST",
@@ -224,7 +230,7 @@ describe("Phase 5 — hosted-tier protection", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const base = `http://127.0.0.1:${port}`;
-    const body = JSON.stringify({ source: path.resolve(process.cwd(), "examples/tiny") });
+    const body = JSON.stringify({ source: tinyRoot });
 
     const evilOrigin = await fetch(`${base}/api/build`, {
       method: "POST",

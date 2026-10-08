@@ -138,7 +138,9 @@ function checkEscapeHelpers() {
 /**
  * INV-19: every write endpoint must carry an explicit guard before it can act
  * on caller input. A new POST route that forgets authorize() would otherwise
- * ship as an open write surface; this asserts the guard from the parsed routes.
+ * ship as an open write surface. Write APIs require authorize() (and guardSource
+ * for local paths); the /mcp RPC query route is specifically validated for
+ * read authorization, manifest containment and site token gating.
  */
 function checkWriteEndpointsGuarded() {
   const lines = read("packages/cli/src/server.ts").split("\n");
@@ -150,8 +152,19 @@ function checkWriteEndpointsGuarded() {
     while (end < lines.length && !/url\.pathname === "/.test(lines[end])) end++;
     const block = lines.slice(i, end).join("\n");
     if (!/req\.method === "POST"/.test(block)) continue;
-    if (!/authorize\(|guardSource\(|requireSiteAccess\(/.test(block)) {
-      offenders.push(route[1]);
+    const pathname = route[1];
+    if (pathname === "/mcp") {
+      // MCP is an RPC query transport over POST: must check read auth and site access
+      if (!/authorizeRead\(/.test(block) || !/requireSiteAccess\(/.test(block) || !/readManifest\(/.test(block)) {
+        offenders.push(`${pathname} (missing read/site-access guards)`);
+      }
+    } else {
+      // True mutation/write endpoints must require scope authorization
+      if (!/authorize\(/.test(block)) {
+        offenders.push(`${pathname} (missing authorize scope guard)`);
+      } else if (/parseSource\(/.test(block) && !/guardSource\(/.test(block)) {
+        offenders.push(`${pathname} (missing guardSource path confinement)`);
+      }
     }
   }
   if (offenders.length === 0) pass("inv-19:write-endpoints-guarded");
@@ -177,11 +190,26 @@ function checkBoundaryContainment() {
 
 function checkSubdomainValidation() {
   const src = read("packages/cli/src/server.ts");
-  // The slug guard must exist AND be applied before path resolution.
+  const v46TestSrc = read("packages/cli/src/v46.test.ts");
+  // The slug guard must exist AND be applied across routing and query parameters.
   const hasRe = /SAFE_SUBDOMAIN\s*=/.test(src);
-  const applied = /SAFE_SUBDOMAIN\.test\(sub\)/.test(src);
-  if (hasRe && applied) pass("inv-6:subdomain-slug-guard");
-  else fail("inv-6:subdomain-slug-guard", `regex=${hasRe}, applied=${applied}`);
+  const appliedResolveSite = /SAFE_SUBDOMAIN\.test\(sub\)/.test(src);
+  const appliedReadManifest = /SAFE_SUBDOMAIN\.test\(subdomain\)/.test(src);
+  const appliedStats = /SAFE_SUBDOMAIN\.test\(site\)/.test(src);
+  // Behavioral test checks: ?site= traversal refused on dashboard, stats, and mcp
+  const hasBehavioralTests =
+    v46TestSrc.includes("/dashboard?site=") &&
+    v46TestSrc.includes("/api/stats?site=") &&
+    v46TestSrc.includes("/mcp?site=");
+
+  if (hasRe && appliedResolveSite && appliedReadManifest && appliedStats && hasBehavioralTests) {
+    pass("inv-6:subdomain-slug-guard");
+  } else {
+    fail(
+      "inv-6:subdomain-slug-guard",
+      `regex=${hasRe}, resolveSite=${appliedResolveSite}, readManifest=${appliedReadManifest}, stats=${appliedStats}, tests=${hasBehavioralTests}`,
+    );
+  }
 }
 
 function checkUrlSchemeValidation() {
@@ -352,6 +380,7 @@ function checkPythonFetchedGuard() {
 function checkPluginFetchedGuard() {
   const buildSrc = read("packages/core/src/build.ts");
   const cliSrc = read("packages/cli/src/index.ts");
+  const testSrc = read("packages/core/test/plugin-fetched.test.ts");
 
   // The guard itself: repo-config plugins are dropped when source.fetched...
   const guarded = /if \(source\.fetched && configPlugins\.length > 0\)/.test(buildSrc);
@@ -363,14 +392,17 @@ function checkPluginFetchedGuard() {
   const versioned = (
     buildSrc.match(/root: srcRoot, name: source\.name, fetched: source\.fetched/g) ?? []
   ).length;
+  // Fallback rebuild in buildVersions when tag checkout fails must also carry fetched.
+  const fallbackRebuild = /root,\s*name:\s*source\.name,\s*fetched:\s*source\.fetched/.test(buildSrc);
   const cliPropagates = /fetched: resolved\.source\.fetched/.test(cliSrc);
+  const testCoversFallback = /preserves fetched: true in buildVersions fallback/.test(testSrc);
 
-  if (guarded && warns && versioned >= 3 && cliPropagates)
+  if (guarded && warns && versioned >= 3 && fallbackRebuild && cliPropagates && testCoversFallback)
     pass("inv-20:fetched-source-cannot-name-plugins");
   else
     fail(
       "inv-20:fetched-source-cannot-name-plugins",
-      `guard=${guarded}, warns=${warns}, versionedRebuilds=${versioned}/3, cliPropagates=${cliPropagates}`,
+      `guard=${guarded}, warns=${warns}, versionedRebuilds=${versioned}/3, fallback=${fallbackRebuild}, cliPropagates=${cliPropagates}, testCoversFallback=${testCoversFallback}`,
     );
 }
 
@@ -708,21 +740,59 @@ function checkFindings() {
     else pass(`finding#${f.id}:checked-by-${f.checkedBy}`);
   }
 
+  const vitestFindings = [];
+  const otherFindings = [];
+
   for (const f of fixed) {
     if (!f.verify) continue;
-    // Verify commands are shell strings run verbatim. They are written
-    // quote-free on purpose: going through an argv array plus `shell: true`
-    // mangles nested quotes on Windows, which silently turned a real check
-    // into a false failure the first time this gate ran.
+    const match = /^npx vitest run (.+)$/.exec(f.verify.trim());
+    if (match) {
+      vitestFindings.push({ finding: f, file: match[1].trim() });
+    } else {
+      otherFindings.push(f);
+    }
+  }
+
+  // Batch vitest runs into a single process to eliminate redundant cold boots
+  // and cut gate wall clock from ~12m to <1m.
+  if (vitestFindings.length > 0) {
+    const uniqueFiles = [...new Set(vitestFindings.map((v) => v.file))];
+    const batchedCmd = `npx vitest run ${uniqueFiles.join(" ")}`;
     try {
-      execFileSync(f.verify, { cwd: ROOT, stdio: "pipe", shell: true });
+      execFileSync(batchedCmd, { cwd: ROOT, stdio: "pipe", shell: true, timeout: 300_000 });
+      for (const { finding } of vitestFindings) {
+        pass(`finding#${finding.id}:verify`);
+      }
+    } catch {
+      // If the batch failed, run individually so the specific failing finding is pinpointed.
+      const memo = new Map();
+      for (const { finding, file } of vitestFindings) {
+        if (!memo.has(file)) {
+          try {
+            execFileSync(`npx vitest run ${file}`, { cwd: ROOT, stdio: "pipe", shell: true, timeout: 120_000 });
+            memo.set(file, { ok: true });
+          } catch (e) {
+            const tail = (e.stderr?.toString() || e.stdout?.toString() || "").trim().split("\n").slice(-3).join(" / ");
+            const why = e.code === "ETIMEDOUT" ? "timed out after 120s" : e.signal ? `killed by ${e.signal}` : `exit ${e.status ?? "?"}`;
+            memo.set(file, { ok: false, error: `verify command failed (${why}) — "${finding.title}"${tail ? ` — ${tail}` : ""}` });
+          }
+        }
+        const res = memo.get(file);
+        if (res.ok) pass(`finding#${finding.id}:verify`);
+        else fail(`finding#${finding.id}:verify`, res.error);
+      }
+    }
+  }
+
+  for (const f of otherFindings) {
+    try {
+      execFileSync(f.verify, { cwd: ROOT, stdio: "pipe", shell: true, timeout: 300_000 });
       pass(`finding#${f.id}:verify`);
     } catch (e) {
-      // Distinguish a real failure from a signal kill (timeout/OOM under load),
-      // and surface the tail of the command's output. A bare "may have
-      // regressed" once hid a load-induced timeout behind a false regression.
       const tail = (e.stderr?.toString() || e.stdout?.toString() || "").trim().split("\n").slice(-3).join(" / ");
-      const why = e.signal
+      const why = e.code === "ETIMEDOUT"
+        ? "timed out after 300s"
+        : e.signal
         ? `killed by ${e.signal} — likely a load/timeout flake, not a regression`
         : `exit ${e.status ?? "?"}`;
       fail(

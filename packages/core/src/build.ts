@@ -490,7 +490,7 @@ export async function buildVersions(
         : undefined,
       eol: isEolVersion(o, eolList),
     }));
-    const fresh = freshness({ root: srcRoot, name: source.name });
+    const fresh = freshness({ root: srcRoot, name: source.name, fetched: source.fetched });
     const vOpts: RenderOptions = {
       ...singleOptions,
       versions: links,
@@ -530,7 +530,9 @@ export async function buildVersions(
   }
 
   const latest = versions[0];
-  const rootModel = models.get(latest) ?? buildModel({ root, name: source.name }, options);
+  const rootModel =
+    models.get(latest) ??
+    buildModel({ root, name: source.name, fetched: source.fetched }, options);
   const rootLinks = versions.map((o) => ({
     version: o,
     path: o === latest ? "./index.html" : `./${dirSafe(o)}/index.html`,
@@ -540,7 +542,7 @@ export async function buildVersions(
     eol: isEolVersion(o, eolList),
   }));
   const rootFile = path.join(outDir, "index.html");
-  const rootFresh = freshness({ root, name: source.name });
+  const rootFresh = freshness({ root, name: source.name, fetched: source.fetched });
   const rootOpts: RenderOptions = {
     ...options,
     versions: rootLinks,

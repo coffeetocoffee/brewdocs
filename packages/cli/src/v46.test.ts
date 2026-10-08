@@ -323,7 +323,8 @@ describe("v4.6 — a site's gate survives a damaged manifest (findings #23/#24/#
       try {
         const evil = encodeURIComponent("../outside");
         // /mcp used to build `hostingDir/../outside/docmodel.json` from the raw
-        // parameter and answered 200; /dashboard rendered the outside title.
+        // parameter and answered 200; /dashboard rendered the outside title;
+        // /api/stats read the outside manifest for access check.
         const mcp = await fetch(`${base}/mcp?site=${evil}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -333,6 +334,20 @@ describe("v4.6 — a site's gate survives a damaged manifest (findings #23/#24/#
         const dash = await fetch(`${base}/dashboard?site=${evil}`);
         expect(dash.status).toBe(404);
         expect(await dash.text()).not.toContain("NOT A SITE");
+        const stats = await fetch(`${base}/api/stats?site=${evil}`);
+        expect([400, 404]).toContain(stats.status);
+
+        // Bare dots and multiple traversal steps are refused across all query routes
+        for (const dot of [encodeURIComponent(".."), encodeURIComponent("../../outside")]) {
+          expect([400, 404]).toContain((await fetch(`${base}/dashboard?site=${dot}`)).status);
+          expect([400, 404]).toContain((await fetch(`${base}/api/stats?site=${dot}`)).status);
+          const mcpDot = await fetch(`${base}/mcp?site=${dot}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          });
+          expect([400, 404]).toContain(mcpDot.status);
+        }
       } finally {
         server.close();
       }

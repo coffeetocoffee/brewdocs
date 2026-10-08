@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,10 +11,18 @@ import {
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");
+let isolatedLib: string;
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-deploy-"));
 }
+
+beforeAll(() => {
+  // Isolate fixture outside the host git repository so version discovery
+  // does not crawl all 28 git tags of brewdocs and churn worktrees per test.
+  isolatedLib = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-lib-fixture-"));
+  fs.cpSync(libRoot, isolatedLib, { recursive: true });
+});
 
 describe("Phase 4 — deploy", () => {
   it("derives a safe subdomain from a name or path", () => {
@@ -44,7 +52,7 @@ describe("Phase 4 — deploy", () => {
   // retry keeps a loaded machine from looking like a regression.
   it("exportSite writes a self-contained index.html", { timeout: 60_000, retry: 2 }, async () => {
     const out = tmp();
-    const file = await exportSite({ root: libRoot }, out);
+    const file = await exportSite({ root: isolatedLib }, out);
     expect(fs.existsSync(file)).toBe(true);
     const html = fs.readFileSync(file, "utf8");
     expect(html).toContain("BrewDocs");
@@ -57,7 +65,7 @@ describe("Phase 4 — deploy", () => {
     async () => {
       const hosting = tmp();
       const result = await deploySite(
-        { root: libRoot, name: "lib" },
+        { root: isolatedLib, name: "lib" },
         hosting,
         "mylib",
       );
@@ -77,7 +85,7 @@ describe("Phase 4 — deploy", () => {
     async () => {
       const hosting = tmp();
       const result = await deploySite(
-        { root: libRoot, name: "lib" },
+        { root: isolatedLib, name: "lib" },
         hosting,
         "acme--mylib",
         {},

@@ -27,7 +27,10 @@ function getWithHost(
 }
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
-const tinyRoot = path.join(EXAMPLES, "tiny");
+const rawTiny = path.join(EXAMPLES, "tiny");
+const fixtureTinyDir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-domains-fixture-"));
+const tinyRoot = path.join(fixtureTinyDir, "tiny");
+fs.cpSync(rawTiny, tinyRoot, { recursive: true });
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-cdom-"));

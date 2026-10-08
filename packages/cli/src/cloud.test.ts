@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,6 +8,12 @@ import { addKey } from "./keys.js";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const tinyRoot = path.join(EXAMPLES, "tiny");
+let isolatedTiny: string;
+
+beforeAll(() => {
+  isolatedTiny = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-cloud-tiny-"));
+  fs.cpSync(tinyRoot, isolatedTiny, { recursive: true });
+});
 
 async function start(hosting: string, token?: string) {
   const server = createServer(hosting, undefined, token);
@@ -29,7 +35,7 @@ describe("v2.5 cloud control plane — org-gated private docs", () => {
       const { key: outsiderKey } = addKey(hosting, { scopes: ["build"] });
 
       await deploySite(
-        { root: tinyRoot, name: "acmelib" },
+        { root: isolatedTiny, name: "acmelib" },
         hosting,
         "acme--acmelib",
         {},
@@ -67,7 +73,7 @@ describe("v2.5 cloud control plane — analytics", () => {
     async () => {
       const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-an-"));
       createOrg(hosting, "acme");
-      await deploySite({ root: tinyRoot, name: "web" }, hosting, "web", {}, undefined, {
+      await deploySite({ root: isolatedTiny, name: "web" }, hosting, "web", {}, undefined, {
         org: "acme",
       });
       const { server, base } = await start(hosting, "admin");

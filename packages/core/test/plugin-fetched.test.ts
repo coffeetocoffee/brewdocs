@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { build, loadPlugins } from "@brewdocs/core";
+import { build, buildVersions, loadPlugins } from "@brewdocs/core";
 
 /**
  * Finding #19 / INV-20: a plugin is arbitrary code (require/import, no
@@ -121,5 +121,24 @@ describe("v4.4 fetched sources cannot name their own plugins (finding #19)", () 
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("preserves fetched: true in buildVersions fallback when latest tag checkout fails", async () => {
+    const { root, marker } = repoWithPlugin();
+    fs.writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "test-lib", version: "1.0.0" }),
+    );
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["tag", "v2.0.0"], { cwd: root, stdio: "ignore" });
+
+    await buildVersions({ root, fetched: true }, outDir());
+
+    expect(fs.existsSync(marker)).toBe(false);
   });
 });

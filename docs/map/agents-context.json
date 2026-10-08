@@ -13,18 +13,18 @@
       "version": "4.5.8",
       "role": "commands + hosting server",
       "srcFiles": 4,
-      "srcLoc": 3745,
+      "srcLoc": 3751,
       "testFiles": 11,
-      "testLoc": 2073
+      "testLoc": 2104
     },
     {
       "name": "@brewdocs/core",
       "version": "4.5.8",
       "role": "pipeline: extract → model → render",
       "srcFiles": 61,
-      "srcLoc": 15412,
+      "srcLoc": 15414,
       "testFiles": 47,
-      "testLoc": 6001
+      "testLoc": 6036
     },
     {
       "name": "@brewdocs/plugin-sdk",
@@ -38,7 +38,7 @@
   ],
   "tests": {
     "files": 59,
-    "total": 419,
+    "total": 420,
     "skipped": 0,
     "loopFiles": [
       "packages/cli/src/mcp-http.test.ts",
@@ -175,7 +175,7 @@
     },
     {
       "id": "INV-19",
-      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
+      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource) before it acts on caller input; /mcp is verified for read authorization and site access.",
       "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
       "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
     },

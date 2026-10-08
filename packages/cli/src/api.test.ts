@@ -11,24 +11,25 @@ const libRoot = path.join(EXAMPLES, "lib");
 
 let server: ReturnType<typeof createServer>;
 let hostingDir: string;
+let fixtureLib: string;
 
 beforeAll(async () => {
   hostingDir = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-api-"));
-  server = createServer(hostingDir);
+  // Isolate fixture outside the host git repo so version discovery does not
+  // crawl all 28 git tags of brewdocs and churn worktrees per request.
+  fixtureLib = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-api-lib-"));
+  fs.cpSync(libRoot, fixtureLib, { recursive: true });
+  server = createServer(hostingDir, undefined, undefined, { sourceRoot: os.tmpdir() });
   await new Promise<void>((resolve) => server.listen(PORT, () => resolve()));
 });
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   fs.rmSync(hostingDir, { recursive: true, force: true });
+  fs.rmSync(fixtureLib, { recursive: true, force: true });
 });
 
 describe("Phase 5 — API endpoints", () => {
-  // Brewing runs a full TS extraction per request, so under a loaded suite
-  // these two ran 31-34s against the old 30s budget and failed intermittently.
-  // A test that fails on machine load teaches people to re-run instead of read.
-  // 60s alone is still not enough when a full `verify` runs the gate's own
-  // server test alongside this file, so add retry as well.
   it(
     "POST /api/build brews a site from a local path and returns a URL",
     { timeout: 60_000, retry: 2 },
@@ -36,7 +37,7 @@ describe("Phase 5 — API endpoints", () => {
       const res = await fetch(`${BASE}/api/build`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: libRoot }),
+        body: JSON.stringify({ source: fixtureLib, name: "lib" }),
       });
       expect(res.status).toBe(200);
       const json = (await res.json()) as { url: string; subdomain: string };
@@ -65,7 +66,7 @@ describe("Phase 5 — API endpoints", () => {
       const res = await fetch(`${BASE}/api/export`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: libRoot }),
+        body: JSON.stringify({ source: fixtureLib }),
       });
       expect(res.status).toBe(200);
       expect(res.headers.get("content-disposition")).toContain(".html");

@@ -111,7 +111,7 @@
     },
     {
       "id": "INV-19",
-      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.",
+      "rule": "Every write endpoint (POST) must carry an explicit guard (authorize / guardSource) before it acts on caller input; /mcp is verified for read authorization and site access.",
       "why": "The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.",
       "enforcedBy": "scripts/gate.mjs (inv-19:write-endpoints-guarded)"
     },

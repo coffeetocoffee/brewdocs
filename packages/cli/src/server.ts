@@ -1249,6 +1249,12 @@ function buildRequestHandler(
       }
       const site = url.searchParams.get("site");
       if (site) {
+        if (!SAFE_SUBDOMAIN.test(site)) {
+          res
+            .writeHead(400, { "content-type": TYPES[".json"] })
+            .end(JSON.stringify({ error: "invalid site name" }));
+          return;
+        }
         const read = readManifest(hostingDir, site);
         // finding #23: an unreadable manifest means the site's visibility is
         // unknowable, so the stats must not answer as if it were public.

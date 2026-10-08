@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.5.8 | commands + hosting server | 4 files / 3,745 loc | 11 files / 2,073 loc |
-| `@brewdocs/core` | 4.5.8 | pipeline: extract → model → render | 61 files / 15,412 loc | 47 files / 6,001 loc |
+| `@brewdocs/cli` | 4.5.8 | commands + hosting server | 4 files / 3,751 loc | 11 files / 2,104 loc |
+| `@brewdocs/core` | 4.5.8 | pipeline: extract → model → render | 61 files / 15,414 loc | 47 files / 6,036 loc |
 | `@brewdocs/plugin-sdk` | 4.5.8 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**419 test declarations across 59 files** — parsed from the tree, not typed.
+**420 test declarations across 59 files** — parsed from the tree, not typed.
 
 > 15 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `examples.test.ts`, `federation.test.ts`, `harvest.test.ts`, `hostile.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -89,7 +89,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-18** — The renderer must have a golden-output snapshot test over a full page, including hostile inputs.
   - _why:_ A renderer that emits its own CSS/JS had no output test, which is how the attribute-injection XSS (#3) survived hundreds of green unit tests that only checked substrings.
   - _enforced by:_ scripts/gate.mjs (inv-18:renderer-golden)
-- **INV-19** — Every write endpoint (POST) must carry an explicit guard (authorize / guardSource / requireSiteAccess) before it acts on caller input.
+- **INV-19** — Every write endpoint (POST) must carry an explicit guard (authorize / guardSource) before it acts on caller input; /mcp is verified for read authorization and site access.
   - _why:_ The build/export/markdown APIs are the RCE and file-disclosure surface. A new POST route added without a guard would ship open; the gate asserts the guard from the routes it parses out of server.ts.
   - _enforced by:_ scripts/gate.mjs (inv-19:write-endpoints-guarded)
 - **INV-20** — A fetched (npm/git) source must not be able to name its own plugins: plugins listed in the source's brewdocs.yml are ignored unless the source was chosen locally. Plugins the operator passed explicitly (--plugins) still load.
