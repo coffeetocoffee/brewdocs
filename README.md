@@ -14,16 +14,16 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.5.6
+## 🔥 Fresh out of the oven — v4.5.8
 
-Adversarial property tests and style-channel hardening:
+Unified script-block escaping and analytics store hardening:
 
 | Changed | What changed |
 | --- | --- |
-| 🛡️ **Theme manifest can't break out of `<style>`** | A repo-controlled theme manifest's `vars` or `css` containing `</style><script>` could terminate the raw-text element and inject script. `<` is now neutralized via CSS escaping (`\3c `) at the render chokepoint before interpolation (finding #27) |
-| 🧪 **Real adversarial property tests** | Replaced the misnamed `fuzz.test.ts` smoke test with `examples.test.ts`, and added `hostile.test.ts` with a fixed adversarial corpus plus 400 seeded inputs asserting structural invariants across `markdownToHtml` and `renderToHtml` |
+| 🛡️ **Unified `<script>` escaping (INV-4)** | Added `escapeScriptJson` to neutralize `<` to `\u003c` across all embedded JSON blocks. Fixes federation search page script-breakout and tokenizer double-escaped state risks from remote unvetted docmodels |
+| 📊 **Hardened analytics store persistence** | Swapped synchronous per-request file rewrites for debounced persistence (flush on close/exit), atomic temp-file replacement, and bounded key-space eviction prioritizing actionable query misses |
 
-Earlier this line: **v4.5.3** fail-closed manifests, `?site=` containment, private tokens, unreadable key stores · **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation · **v4.1** render cache, live reload · **v4.0** TypeScript depth.
+Earlier this line: **v4.5.6** theme-manifest `<style>` escaping + adversarial property suite · **v4.5.3** fail-closed manifests, `?site=` containment, private tokens, unreadable key stores · **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping · **v4.2** config validation · **v4.1** render cache, live reload · **v4.0** TypeScript depth.
 
 ---
 
