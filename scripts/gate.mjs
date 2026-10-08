@@ -547,6 +547,114 @@ function checkStoredHashNotACredential() {
     );
 }
 
+/**
+ * INV-26: a site manifest that exists but cannot be read must fail CLOSED
+ * (finding #23). `readManifest` answers three states; absence stays benign
+ * (D-12), but `unreadable` must refuse everywhere — a truncated manifest used
+ * to read as "no tokenHash", and `requireSiteAccess` reads an absent tokenHash
+ * as public, so a damaged file silently published a private site.
+ */
+function checkManifestFailClosed() {
+  const src = read("packages/cli/src/server.ts");
+  const threeState =
+    /state: "ok"/.test(src) &&
+    /state: "missing"/.test(src) &&
+    /state: "unreadable"/.test(src);
+  // Only ENOENT may degrade to "missing": a permissions or I/O error is not
+  // the benign case and must not open the site either.
+  const enoentOnly = /code === "ENOENT"\) return \{ state: "missing" \}/.test(src);
+  // Both parse failures — invalid JSON and a non-object document — must land
+  // in `unreadable`. Asserting the returns, not the string's existence: a
+  // catch that answers "ok" with an empty manifest would still contain the
+  // word "unreadable" in the type union and pass a shallower check.
+  const parseFailClosed = /catch \{\s*\n\s*return unreadable\("invalid JSON"\);/.test(src);
+  const nonObjectFailClosed = /return unreadable\("not a JSON object"\);/.test(src);
+  // The site serve path, /mcp, /dashboard and /api/stats each refuse.
+  const refusals = (src.match(/if \(read\.state === "unreadable"\)/g) ?? []).length;
+  // /api/sites must not advertise an unreadable site as public.
+  const listedAsPrivate = /read\.state === "unreadable" \? "private"/.test(src);
+  if (threeState && enoentOnly && parseFailClosed && nonObjectFailClosed && refusals >= 4 && listedAsPrivate)
+    pass("inv-26:damaged-manifest-fails-closed");
+  else
+    fail(
+      "inv-26:damaged-manifest-fails-closed",
+      `threeState=${threeState}, enoentOnly=${enoentOnly}, parseFailClosed=${parseFailClosed}, nonObjectFailClosed=${nonObjectFailClosed}, refusals=${refusals}/4, listedAsPrivate=${listedAsPrivate}`,
+    );
+}
+
+/**
+ * INV-27: the subdomain taken from `?site=` must be validated before any
+ * filesystem access (finding #24). /s/ and Host routing validate in
+ * resolveSite; the query-param routes all read the manifest first, so
+ * `readManifest` is the chokepoint — and /mcp must build its docmodel path
+ * only after that read, never from the raw parameter.
+ */
+function checkSiteParamContainment() {
+  const src = read("packages/cli/src/server.ts");
+  // The chokepoint itself: a non-slug name answers "missing", never a path.
+  const slugGate =
+    /if \(!SAFE_SUBDOMAIN\.test\(subdomain\)\) return \{ state: "missing" \};/.test(src);
+
+  const lines = src.split("\n");
+  const start = lines.findIndex((l) => /url\.pathname === "\/mcp"/.test(l));
+  if (start < 0) return fail("inv-27:site-param-cannot-leave-hosting", "no /mcp route");
+  let end = start + 1;
+  while (end < lines.length && !/url\.pathname === "/.test(lines[end])) end++;
+  const block = lines.slice(start, end).join("\n");
+  const readsFirst =
+    block.indexOf("readManifest(") >= 0 &&
+    block.indexOf("readManifest(") < block.indexOf("docmodel.json");
+  const refusesMissing = /state === "missing"[\s\S]{0,300}?404/.test(block);
+
+  if (slugGate && readsFirst && refusesMissing)
+    pass("inv-27:site-param-cannot-leave-hosting");
+  else
+    fail(
+      "inv-27:site-param-cannot-leave-hosting",
+      `slugGate=${slugGate}, mcpReadsManifestFirst=${readsFirst}, refusesMissing=${refusesMissing}`,
+    );
+}
+
+/**
+ * INV-28: a private site is always token-gated (finding #25). Two halves, and
+ * both are needed: the CLI must mint a token for every private deploy (the
+ * `private: true` config path used to mint none), and the server must refuse a
+ * private manifest that has no tokenHash instead of reading "no hash" as
+ * public — the backstop for hand-edited or pre-fix manifests.
+ */
+function checkPrivateAlwaysGated() {
+  const serverSrc = read("packages/cli/src/server.ts");
+  const cliSrc = read("packages/cli/src/index.ts");
+  const refuses = /!tokenHash && manifest\?\.visibility !== "private"/.test(serverSrc);
+  const mints = /visibility === "private"[\s\S]{0,80}?crypto\.randomBytes/.test(cliSrc);
+  if (refuses && mints) pass("inv-28:private-site-always-token-gated");
+  else
+    fail(
+      "inv-28:private-site-always-token-gated",
+      `serverRefusesHashlessPrivate=${refuses}, cliMintsForEveryPrivate=${mints}`,
+    );
+}
+
+/**
+ * INV-29: an unreadable key store must count as "auth IS configured"
+ * (finding #26). `loadKeys` answers [] for every failure, and `needsAuth` is
+ * `Boolean(token) || loadKeys(...).length > 0` — so a damaged .keys.json read
+ * as "no keys configured" and every gated route answered anonymously.
+ */
+function checkKeyStoreFailClosed() {
+  const keysSrc = read("packages/cli/src/keys.ts");
+  const serverSrc = read("packages/cli/src/server.ts");
+  const helper = /export function keysStoreUnreadable/.test(keysSrc);
+  const helperChecksArray = /!Array\.isArray\(JSON\.parse/.test(keysSrc);
+  const wired = /needsAuth = Boolean\(token\) \|\| keysUnreadable \|\|/.test(serverSrc);
+  if (helper && helperChecksArray && wired) pass("inv-29:unreadable-key-store-refuses");
+  else
+    fail(
+      "inv-29:unreadable-key-store-refuses",
+      `helper=${helper}, checksArray=${helperChecksArray}, wiredIntoNeedsAuth=${wired}`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -633,6 +741,10 @@ checkMcpSharedHandler();
 checkCredentialComparison();
 checkRequestSurvival();
 checkStoredHashNotACredential();
+checkManifestFailClosed();
+checkSiteParamContainment();
+checkPrivateAlwaysGated();
+checkKeyStoreFailClosed();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

@@ -58,6 +58,27 @@ describe("deploy subdomain safety", () => {
   });
 });
 
+// v4.6 finding #25: a private site is only gated if a token hash was stored.
+// `private: true` in config used to set visibility without minting a token,
+// so the manifest said "private" with nothing to check and the site served
+// anonymously. Every private deploy must record a tokenHash.
+describe("private deploys always mint an access token", () => {
+  it("mints a tokenHash for `private: true` in config, not only for --private", async () => {
+    const src = path.resolve(__dirname, "../../../examples/tiny");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-privcfg-"));
+    const srcCopy = path.join(root, "app");
+    fs.cpSync(src, srcCopy, { recursive: true });
+    fs.writeFileSync(path.join(srcCopy, "brewdocs.yml"), "private: true\n", "utf8");
+    const hosting = path.join(root, "hosting");
+    await run(["deploy", srcCopy, "--name", "tiny", "--out", hosting]);
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(hosting, "tiny", ".brewdocs.json"), "utf8"),
+    ) as { visibility: string; tokenHash?: string };
+    expect(manifest.visibility).toBe("private");
+    expect(manifest.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
 // v3.5 security: `serve` binds loopback by default; anything else is treated
 // as network-exposed and triggers the auth guard.
 describe("serve host safety", () => {

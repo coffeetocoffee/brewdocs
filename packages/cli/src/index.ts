@@ -94,7 +94,7 @@ import {
   type SymbolDoc,
 } from "@brewdocs/core";
 import { createServer, createSecureServer, readGapReport } from "./server.js";
-import { addKey, listKeys, revokeKey, ALL_SCOPES, type ApiKeyRecord } from "./keys.js";
+import { addKey, keysStoreUnreadable, listKeys, revokeKey, ALL_SCOPES, type ApiKeyRecord } from "./keys.js";
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
@@ -1125,10 +1125,14 @@ dark: false
       ? new Date(Date.now() + draftHours * 3600_000).toISOString()
       : undefined;
     // --private without a value auto-generates a token; with a value, use it.
+    // Every private deploy mints one, including `private: true` from config:
+    // a manifest that says "private" with no tokenHash to check is a site the
+    // server cannot gate, and it used to be printed as "token: undefined"
+    // while serving anonymously (finding #25).
     const token =
       privateFlag && privateValue && !privateValue.startsWith("-")
         ? privateValue
-        : privateFlag || draftFlag
+        : visibility === "private"
           ? crypto.randomBytes(16).toString("hex")
           : undefined;
     const baseSub =
@@ -1264,6 +1268,14 @@ dark: false
       console.log(`🔑 ${key}`);
       console.log(`   scopes: ${scopes.join(", ")}  (stored in ${hosting}/.keys.json)`);
     } else if (sub === "list") {
+      // finding #26: an unreadable store must say so — "No API keys" is a lie
+      // when the file exists and failed to parse, and the server is refusing
+      // every request because of it.
+      if (keysStoreUnreadable(hosting)) {
+        throw new Error(
+          `${hosting}/.keys.json exists but is not readable as a key list — repair or restore it (the server refuses all gated routes until then)`,
+        );
+      }
       const keys = listKeys(hosting);
       if (!keys.length) {
         console.log(`No API keys in ${hosting}/.keys.json`);

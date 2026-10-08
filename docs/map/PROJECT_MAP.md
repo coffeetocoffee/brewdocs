@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-10-07_
+_Generated: 2026-10-08_
 
 ## What this is
 
@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.5.1 | commands + hosting server | 4 files / 3,446 loc | 11 files / 1,768 loc |
+| `@brewdocs/cli` | 4.5.1 | commands + hosting server | 4 files / 3,588 loc | 11 files / 1,995 loc |
 | `@brewdocs/core` | 4.5.1 | pipeline: extract → model → render | 61 files / 15,383 loc | 46 files / 5,712 loc |
 | `@brewdocs/plugin-sdk` | 4.5.1 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**404 test declarations across 58 files** — parsed from the tree, not typed.
+**410 test declarations across 58 files** — parsed from the tree, not typed.
 
 > 14 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `federation.test.ts`, `fuzz.test.ts`, `harvest.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -110,6 +110,18 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-25** — A stored credential hash must not authenticate: authentication hashes what it is presented, while only operator-side mutations (add/remove member) may accept an already-hashed value.
   - _why:_ canAccessOrg used normalizeKeyHash, which passes a non-bd_live_ string through untouched, so presenting a member's stored keyHash back as the Bearer token returned 200 (finding #22, reproduced over HTTP). The stored hash is an artifact at rest; if it is also a credential then hashing buys nothing and anyone who can read .cloud.json holds every member key in usable form. validateKey in keys.ts never had the hole (it always hashes, so a hash double-hashes and misses) — the two key stores disagreed about what a credential is, which is why the asymmetry stayed invisible.
   - _enforced by:_ scripts/gate.mjs (inv-25:stored-hash-is-not-a-credential) + packages/core/test/cloud.test.ts (stored hash rejected, raw key still accepted)
+- **INV-26** — A site manifest that exists but cannot be read must fail closed: only ENOENT is 'missing' (benign), every other read or parse failure is 'unreadable' and every consumer refuses.
+  - _why:_ deploySite and setDraftExpiry rewrite .brewdocs.json with a plain non-atomic writeFileSync, so a crash or a full disk leaves a truncated file; readManifest used to answer undefined for every failure and requireSiteAccess reads an absent tokenHash as public, so a damaged manifest silently published a private site (finding #23, reproduced: 401 intact, 200 truncated, same anonymous request). The states are deliberately distinct: a MISSING manifest stays benign (a hand-dropped directory serves as public, D-12) because whoever can delete the manifest can equally rewrite its visibility — absence is not the weakness, an unreadable file is, because the file's real contents are unknown rather than 'public'.
+  - _enforced by:_ scripts/gate.mjs (inv-26:damaged-manifest-fails-closed) + packages/cli/src/v46.test.ts (truncated manifest refused on the site route, /mcp, /dashboard and /api/stats; listed as private in /api/sites; repairing the file restores service)
+- **INV-27** — A site name taken from ?site= must pass the same slug guard as routing (SAFE_SUBDOMAIN) before any filesystem access; readManifest is the chokepoint and /mcp builds its docmodel path only after the manifest read succeeds.
+  - _why:_ resolveSite validated /s/ and Host routing but the query-param routes (/mcp, /dashboard, /api/stats) passed the raw parameter to path.join, so ?site=../sibling read a directory above the hosting root — 200 on /mcp with its docmodel and the outside title rendered by /dashboard (finding #24, reproduced). The two routing forms and the three query-param forms must agree about what a site name is; validating inside readManifest makes that structural instead of five copies of the same check.
+  - _enforced by:_ scripts/gate.mjs (inv-27:site-param-cannot-leave-hosting) + packages/cli/src/v46.test.ts (?site=../outside answers 404 on /mcp and /dashboard, and the outside title never renders)
+- **INV-28** — A private site is always token-gated: every private deploy records a tokenHash, and a private manifest without one is refused rather than read as public.
+  - _why:_ requireSiteAccess treated an absent tokenHash as 'nothing to check' — but private: true in brewdocs.yml set visibility without minting a token (only the --private/--draft flags minted), so the documented config path produced a private site that served anonymously (finding #25, reproduced by execution; the CLI even printed 'token: undefined'). Both halves are needed: the CLI mint keeps new deploys correct, and the server refusal is the backstop for hand-edited and pre-fix manifests, which would otherwise stay open forever.
+  - _enforced by:_ scripts/gate.mjs (inv-28:private-site-always-token-gated) + packages/cli/src/v46.test.ts (hashless private manifest refused on /s/, /dashboard and /mcp) + packages/cli/src/cli-commands.test.ts (private: true in config records a tokenHash)
+- **INV-29** — An unreadable key store counts as 'auth IS configured', not as 'no auth': needsAuth is true while .keys.json exists but does not parse as an array, and every gated route refuses until it is repaired.
+  - _why:_ loadKeys degrades every failure to [] and needsAuth was Boolean(token) || loadKeys(...).length > 0, so a damaged store read as 'no auth configured' and every gated read and write answered anonymously — reproduced with a corrupt store (GET /api/sites -> 200) and with {} (POST /api/export -> 200) (finding #26). This is the authorization twin of the manifest fail-open (#23): a store that cannot be read must refuse, not default to open. loadKeys also no longer hands a non-array document to callers, where {} used to reach .find and throw.
+  - _enforced by:_ scripts/gate.mjs (inv-29:unreadable-key-store-refuses) + packages/cli/src/v46.test.ts (corrupt store: /api/sites and /api/build answer 401, and the previously valid key cannot authenticate either)
 
 ### Server defaults
 
@@ -229,11 +241,17 @@ One helper (core/src/compare.ts) is the only comparison a credential may use. Tw
 
 </details>
 
+<details><summary><b>D-12</b> — A missing manifest stays benign; an unreadable one refuses</summary>
+
+The three-state manifest read (INV-26) draws its line between absence and unreadability on purpose. A site directory with NO .brewdocs.json keeps serving as a public site — that is how hand-dropped directories have always worked, and whoever can delete the manifest can equally rewrite its visibility field, so refusing on absence would buy nothing and break a supported workflow. A manifest that EXISTS but cannot be read or parsed is a different state: the file's real contents are unknown, not 'public', and the most likely cause is the partial-write class the deploy path creates (plain non-atomic writeFileSync in deploySite and setDraftExpiry). That state refuses (500) everywhere and is surfaced on stderr and in /api/sites. The same rule is applied to the key store (INV-29): absence of .keys.json means no keys configured, but an existing store that does not parse means auth IS configured and cannot be verified, so every gated route refuses rather than opening. One asymmetry worth knowing: the CLI could in principle make the writes atomic (write-temp-then-rename), which would shrink the window that creates these states — that is a possible future hardening, not a substitute for failing closed, because the states are reachable by other means (disk corruption, hand-edits, restores) and the read side must not be the only thing standing between a damaged file and an open site.
+
+</details>
+
 ## Findings
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**22 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**26 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -259,6 +277,10 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 20 | low | Credentials were compared with === (not constant-time) | fixed | `inv-23:credentials-compared-in-constant-time` |
 | 21 | high | One malformed request could kill the process (async handler throw) | fixed | `inv-24:request-cannot-kill-the-process` |
 | 22 | medium | A stored API-key hash authenticated as a credential (pass-the-hash) | fixed | `inv-25:stored-hash-is-not-a-credential` |
+| 23 | medium | A damaged site manifest silently published a private site | fixed | `inv-26:damaged-manifest-fails-closed` |
+| 24 | medium | ?site= walked outside the hosting dir on /mcp and /dashboard | fixed | `inv-27:site-param-cannot-leave-hosting` |
+| 25 | high | A private site with no tokenHash served anonymously (private: true config minted no token) | fixed | `inv-28:private-site-always-token-gated` |
+| 26 | high | An unreadable key store turned every gated endpoint public | fixed | `inv-29:unreadable-key-store-refuses` |
 
 ## Working in this repo
 

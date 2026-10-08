@@ -23,7 +23,7 @@ import {
   type Visibility,
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
-import { ALL_SCOPES, loadKeys, validateKey } from "./keys.js";
+import { ALL_SCOPES, keysStoreUnreadable, loadKeys, validateKey } from "./keys.js";
 import {
   aggregateOrgStats,
   canAccessOrg,
@@ -402,16 +402,58 @@ function subdomainFor(resolved: Source, requested?: string, org?: string): strin
   return combineSubdomain(org, deriveSubdomain({ root: resolved.root, name: base }));
 }
 
-function readManifest(
-  hostingDir: string,
-  subdomain: string,
-): SiteManifest | undefined {
+/**
+ * Three-state site-manifest read. The states are load-bearing:
+ *
+ *   ok         — parsed; `visibility`, `tokenHash` and `draft` can be trusted.
+ *   missing    — no manifest file. A hand-dropped directory is served as a
+ *                public site on purpose (resolveSite gates on index.html).
+ *                Whoever can delete this file can equally rewrite
+ *                `visibility`, so absence is not a distinct weakness (D-12).
+ *   unreadable — the file exists but could not be read or parsed. Callers must
+ *                REFUSE, never fall through to "public": `requireSiteAccess`
+ *                reads an absent `tokenHash` as public, and deploy writes the
+ *                manifest with a non-atomic writeFileSync, so a crash or a
+ *                full disk leaves a truncated file that used to silently
+ *                publish a private site (finding #23).
+ *
+ * A non-slug subdomain answers `missing` — the same refusal routing gives
+ * (resolveSite). The `?site=` routes pass caller-controlled strings here, and
+ * this check is the chokepoint that keeps `../x` inside the hosting dir
+ * (finding #24).
+ */
+type ManifestRead =
+  | { state: "ok"; manifest: SiteManifest }
+  | { state: "missing" }
+  | { state: "unreadable"; detail: string };
+
+function readManifest(hostingDir: string, subdomain: string): ManifestRead {
+  if (!SAFE_SUBDOMAIN.test(subdomain)) return { state: "missing" };
+  const file = path.join(hostingDir, subdomain, ".brewdocs.json");
+  const unreadable = (detail: string): ManifestRead => {
+    // The operator-facing half of finding #23: before this, a damaged manifest
+    // was indistinguishable from a missing one, so the operator saw only
+    // "site not found" while the site's real state was unknowable.
+    console.error(`brewdocs: unreadable site manifest: ${file} (${detail})`);
+    return { state: "unreadable", detail };
+  };
+  let raw: string;
   try {
-    return JSON.parse(
-      readFileSync(path.join(hostingDir, subdomain, ".brewdocs.json"), "utf8"),
-    ) as SiteManifest;
+    raw = readFileSync(file, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    // Absent is the one benign case; a permissions or I/O error is not.
+    if (code === "ENOENT") return { state: "missing" };
+    return unreadable(code ?? String(e));
+  }
+  try {
+    const manifest = JSON.parse(raw) as SiteManifest;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      return unreadable("not a JSON object");
+    }
+    return { state: "ok", manifest };
   } catch {
-    return undefined;
+    return unreadable("invalid JSON");
   }
 }
 
@@ -419,6 +461,11 @@ function readManifest(
  * Does the request prove access to a private site (or hold the admin token)?
  * v2.5: members of the site's org (any valid member key as the Bearer token)
  * can read that org's private docs — the org is the sharing group.
+ *
+ * A manifest that says `private` but carries no tokenHash is refused rather
+ * than opened: deploy mints a token for every private site, so that state
+ * means a hand-edited or truncated manifest, and answering "no hash, so
+ * public" would publish the site its own manifest calls private (finding #25).
  */
 function requireSiteAccess(
   req: http.IncomingMessage,
@@ -426,18 +473,20 @@ function requireSiteAccess(
   adminToken: string | undefined,
   hostingDir: string,
 ): boolean {
-  const tokenHash = manifest?.tokenHash;
-  if (!tokenHash) return true;
   if (adminToken && safeEqual(req.headers["authorization"] ?? "", `Bearer ${adminToken}`)) {
     return true;
   }
+  const tokenHash = manifest?.tokenHash;
+  if (!tokenHash && manifest?.visibility !== "private") return true;
   const provided =
     req.headers["authorization"]?.replace(/^Bearer\s+/i, "") ??
     new URL(req.url ?? "/", "http://localhost").searchParams.get("token") ??
     "";
   if (!provided) return false;
-  const hash = crypto.createHash("sha256").update(provided).digest("hex");
-  if (safeEqual(hash, tokenHash)) return true;
+  if (tokenHash) {
+    const hash = crypto.createHash("sha256").update(provided).digest("hex");
+    if (safeEqual(hash, tokenHash)) return true;
+  }
   const org = manifest?.org;
   return Boolean(org) && canAccessOrg(hostingDir, org!, provided);
 }
@@ -524,13 +573,17 @@ function listSites(
       .readdirSync(hostingDir)
       .filter((d) => fs.existsSync(path.join(hostingDir, d, "index.html")))
       .map((d) => {
-        const manifest = readManifest(hostingDir, d);
+        const read = readManifest(hostingDir, d);
+        const manifest = read.state === "ok" ? read.manifest : undefined;
         return {
           subdomain: d,
           url: `https://${d}.brewdocs.dev`,
           title: manifest?.title,
           org: manifest?.org,
-          visibility: manifest?.visibility ?? "public",
+          // An unreadable manifest must not be advertised as public; the site
+          // it describes will refuse to serve until the file is repaired.
+          visibility:
+            read.state === "unreadable" ? "private" : manifest?.visibility ?? "public",
         };
       });
   } catch {
@@ -578,8 +631,20 @@ function buildRequestHandler(
     numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
   );
   const stats = new StatsStore(path.join(hostingDir, ".analytics.json"));
-  // Require credentials only once *some* auth is configured (admin token or keys).
-  const needsAuth = Boolean(token) || loadKeys(hostingDir).length > 0;
+  // Require credentials only once *some* auth is configured (admin token or
+  // keys). finding #26: a key store that exists but is unreadable must count as
+  // "auth IS configured" — `loadKeys` answers [] for a damaged file, and
+  // reading that as "no auth" would open every gated endpoint at the exact
+  // moment the operator's key store broke.
+  const keysUnreadable = keysStoreUnreadable(hostingDir);
+  if (keysUnreadable) {
+    // Make the refusal legible: every gated route answers 401 until the store
+    // is repaired, and without this line that looks like a broken credential.
+    console.error(
+      `brewdocs: key store unreadable (${path.join(hostingDir, ".keys.json")}) — treating auth as configured and refusing until it parses`,
+    );
+  }
+  const needsAuth = Boolean(token) || keysUnreadable || loadKeys(hostingDir).length > 0;
 
   // v3.5 security: where the build API may read local sources from. Defaults to
   // the server's own working directory so a bare `brewdocs serve` can still
@@ -895,13 +960,24 @@ function buildRequestHandler(
         res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
-      const manifest = readManifest(hostingDir, siteName);
-      if (!manifest) {
+      const read = readManifest(hostingDir, siteName);
+      // finding #23: a damaged manifest must refuse, not answer "not found"
+      // and not fall through to public. finding #24: readManifest's slug
+      // check makes `?site=../x` answer missing here, so the docmodel path
+      // below can never leave the hosting dir.
+      if (read.state === "unreadable") {
+        res
+          .writeHead(500, { "content-type": TYPES[".json"] })
+          .end(JSON.stringify({ error: "site manifest unreadable" }));
+        return;
+      }
+      if (read.state === "missing") {
         res
           .writeHead(404, { "content-type": TYPES[".json"] })
           .end(JSON.stringify({ error: "site not found" }));
         return;
       }
+      const manifest = read.manifest;
       if (
         manifest.visibility === "private" &&
         !requireSiteAccess(req, manifest, token, hostingDir)
@@ -1024,7 +1100,18 @@ function buildRequestHandler(
       }
       const site = url.searchParams.get("site");
       if (site) {
-        const manifest = readManifest(hostingDir, site);
+        const read = readManifest(hostingDir, site);
+        // finding #23: an unreadable manifest means the site's visibility is
+        // unknowable, so the stats must not answer as if it were public.
+        // finding #24: a non-slug site answers missing here (readManifest),
+        // and a missing site keeps its historical empty-stats answer.
+        if (read.state === "unreadable") {
+          res
+            .writeHead(500, { "content-type": TYPES[".json"] })
+            .end(JSON.stringify({ error: "site manifest unreadable" }));
+          return;
+        }
+        const manifest = read.state === "ok" ? read.manifest : undefined;
         if (
           manifest?.visibility === "private" &&
           !requireSiteAccess(req, manifest, token, hostingDir)
@@ -1077,11 +1164,21 @@ function buildRequestHandler(
         res.writeHead(400, { "content-type": TYPES[".txt"] }).end("missing ?site=");
         return;
       }
-      const manifest = readManifest(hostingDir, site);
-      if (!manifest) {
+      const read = readManifest(hostingDir, site);
+      // finding #23: damaged manifest refuses. finding #24: a non-slug site
+      // (`../x`) answers missing, so the dashboard can never render another
+      // directory's manifest title.
+      if (read.state === "unreadable") {
+        res
+          .writeHead(500, { "content-type": TYPES[".txt"] })
+          .end("site manifest unreadable");
+        return;
+      }
+      if (read.state === "missing") {
         res.writeHead(404, { "content-type": TYPES[".txt"] }).end("site not found");
         return;
       }
+      const manifest = read.manifest;
       if (
         manifest.visibility === "private" &&
         draftExpired(manifest)
@@ -1113,7 +1210,19 @@ function buildRequestHandler(
       return;
     }
 
-    const manifest = readManifest(hostingDir, site.subdomain);
+    const read = readManifest(hostingDir, site.subdomain);
+    // finding #23: a damaged manifest refuses instead of serving the site as
+    // public. A MISSING manifest keeps serving (hand-dropped directory, D-12):
+    // whoever can delete this file can equally rewrite its visibility, so
+    // absence is not the weakness — an unreadable file is, because it means
+    // the file's real contents are unknown, not that they say "public".
+    if (read.state === "unreadable") {
+      res
+        .writeHead(500, { "content-type": TYPES[".txt"] })
+        .end("site manifest unreadable — repair or redeploy this site");
+      return;
+    }
+    const manifest = read.state === "ok" ? read.manifest : undefined;
     // v1.2 private drafts: an expired draft link is revoked for everyone
     // (admin token included) — re-deploy or extend to restore access.
     if (manifest?.draft && draftExpired(manifest)) {

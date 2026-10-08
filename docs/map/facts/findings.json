@@ -179,7 +179,7 @@
       "severity": "low",
       "title": "Credentials were compared with === (not constant-time)",
       "status": "fixed",
-      "fixedIn": "v4.6.0",
+      "fixedIn": "v4.5.1",
       "detail": "requireSiteAccess compared the sha256 of a presented token with the stored tokenHash using === (server.ts), and the same shape appeared at every other credential site: the admin-token Bearer compares in authorize/authorizeRead, the site-org membership check in canAccessOrg, the API-key lookup in validateKey/revokeKey/claimSite, and the custom-domain verification token in verifyDomain. String comparison in JS is not guaranteed constant-time, so each byte leaks a little timing signal; with a high-entropy digest the practical exploitability is very low, which is why this is low severity, but the canonical hardening is cheap. All sites now route through one helper, safeEqual (core/src/compare.ts), which wraps crypto.timingSafeEqual. The wrapper exists because timingSafeEqual throws RangeError on a length mismatch — and a throw in this server exits the process (finding #21), so a naive swap would have traded a timing leak for an unauthenticated crash. safeEqual returns false instead, keeps === semantics (byte comparison, not digest comparison, so passing a pre-hashed value never silently becomes valid), and answers false for non-strings. Verified by execution, not inference: the scan that found these sites is now gate check inv-23, and the swap was proven by mutation (reverting any one site turns the gate red).",
       "checkedBy": "inv-23:credentials-compared-in-constant-time",
       "verify": "npx vitest run packages/core/test/compare.test.ts"
@@ -189,7 +189,7 @@
       "severity": "high",
       "title": "One malformed request could kill the process (async handler throw)",
       "status": "fixed",
-      "fixedIn": "v4.6.0",
+      "fixedIn": "v4.5.1",
       "detail": "Found while fixing #20: the swap to crypto.timingSafeEqual would have thrown RangeError on any wrong-length token, and that throw would have exited the server. Reproduced by execution: an async http request listener that throws rejects a promise with no handler attached, and Node exits the process (verified against the real server with a hostile request line, GET //[ — new URL() throws ERR_INVALID_URL before any route runs). Three distinct surfaces had the same defect class: buildRequestHandler (async, so any throw anywhere in any route kills the process), serveStatic in cli/src/index.ts (a synchronous listener, same outcome on a bad request line or a lone % in decodeURIComponent), and fs.createReadStream(...).pipe(res) on both static paths (a file removed between the existence check and the open emits unhandled error → process exit; verified with a stream to a missing file). Fixed with a single try/catch wrapper around the shared route body plus a 400 for the unparseable request line, a 400 in the preview server, and error handlers on both streams. A client that abandons a POST mid-body (the body read throws aborted) now yields a clean response instead of a crash. Verified by execution: hostile request lines, aborted bodies, and a wrong-length site token all leave the server answering 200 on the next request.",
       "checkedBy": "inv-24:request-cannot-kill-the-process",
       "verify": "npx vitest run packages/cli/src/v46.test.ts"
@@ -199,10 +199,48 @@
       "severity": "medium",
       "title": "A stored API-key hash authenticated as a credential (pass-the-hash)",
       "status": "fixed",
-      "fixedIn": "v4.6.0",
+      "fixedIn": "v4.5.1",
       "detail": "Found while auditing the comparison sites for #20, and reproduced by execution over HTTP, not inferred: create an org, add a member with a raw bd_live_ key, read the member keyHash out of .cloud.json, then GET a private org site with Authorization: Bearer <that hash> — the server answered 200. Mechanism: canAccessOrg used normalizeKeyHash, which passes a non-bd_live_ string through untouched because that convenience exists for addOrgMember/removeOrgMember (an operator may paste either form). Authentication is different: the stored hash is an artifact at rest, and if presenting it back is sufficient then hashing buys nothing — anyone who can read .cloud.json (a backup, a synced folder, a hosting dir served or copied by mistake) holds every member credential in usable form. validateKey in cli/src/keys.ts never had this hole (it always hashes what it is presented, so the hash double-hashes and misses), which is why the asymmetry went unnoticed: the two key stores disagreed about what a credential is. Fixed by hashing in canAccessOrg (hashKey, not normalizeKeyHash), with the reason written at the call site. addOrgMember/removeOrgMember keep accepting a hash, because there the caller is the operator, not a request. Tests: packages/core/test/cloud.test.ts asserts the stored hash is rejected and the raw key still works.",
       "checkedBy": "inv-25:stored-hash-is-not-a-credential",
       "verify": "npx vitest run packages/core/test/cloud.test.ts"
+    },
+    {
+      "id": 23,
+      "severity": "medium",
+      "title": "A damaged site manifest silently published a private site",
+      "status": "fixed",
+      "fixedIn": "v4.5.3",
+      "detail": "Found by auditing an external handout claim that readManifest swallowing all errors was diagnostic friction; reproduced by execution it is an authorization fail-open. deploySite writes .brewdocs.json with a plain non-atomic writeFileSync (deploy.ts; setDraftExpiry rewrites the same file the same way), so a crash, a full disk, or two overlapping deploys leaves a truncated file. readManifest answered undefined for every failure and requireSiteAccess reads an absent tokenHash as public — so against the intact manifest the same anonymous GET answered 401, and after truncating the file it answered 200 with the page (reproduced against a real server; the same state also silently defeated draft expiry and the private dashboard/stats/mcp gates). Fixed by making readManifest three-state: ok / missing / unreadable, where only ENOENT is missing and a parse failure, a non-object document, or any other read error is unreadable; every consumer (site serve, /mcp, /dashboard, /api/stats) refuses with 500 on unreadable, and /api/sites lists such a site as private rather than public. A missing manifest stays benign on purpose (D-12). The refusal is announced on stderr and the state is visible in /api/sites, because the original complaint — a damaged file being indistinguishable from a missing one — was a real diagnostic defect too.",
+      "checkedBy": "inv-26:damaged-manifest-fails-closed",
+      "verify": "npx vitest run packages/cli/src/v46.test.ts"
+    },
+    {
+      "id": 24,
+      "severity": "medium",
+      "title": "?site= walked outside the hosting dir on /mcp and /dashboard",
+      "status": "fixed",
+      "fixedIn": "v4.5.3",
+      "detail": "The ?site= query parameter on /mcp, /dashboard and /api/stats was passed to readManifest and then to path.join unvalidated, so ?site=../sibling resolved above the hosting dir — the same boundary resolveSite already enforces for /s/ and Host routing (findings #4, #5), missing on the query-param routes. Reproduced with a second site directory outside the hosting dir: POST /mcp?site=../sibling answered 200 with its docmodel (tools/list), GET /dashboard?site=../sibling rendered its manifest title, and /api/stats read its manifest for the private gate. Private targets were still 401 (the manifest read found the real tokenHash), so the leak was the metadata and docmodels of directories outside the hosting root. Fixed at the chokepoint: readManifest validates the subdomain with SAFE_SUBDOMAIN — the same slug guard resolveSite applies — and answers missing for anything else, and the /mcp route now reads the manifest before it constructs the docmodel path, so that path is only ever built for a validated slug.",
+      "checkedBy": "inv-27:site-param-cannot-leave-hosting"
+    },
+    {
+      "id": 25,
+      "severity": "high",
+      "title": "A private site with no tokenHash served anonymously (private: true config minted no token)",
+      "status": "fixed",
+      "fixedIn": "v4.5.3",
+      "detail": "Found while reproducing #23: a manifest that says visibility: private with no tokenHash served anonymously, because requireSiteAccess read an absent tokenHash as 'nothing to check, so public'. deploySite only records a tokenHash when a token is passed, and the CLI minted one only for the --private/--draft flags — private: true in brewdocs.yml (a documented config key) set visibility without minting, so the documented config path produced a private site the server could not gate, and the CLI printed 'Private site. Access with token: undefined'. Reproduced by execution: deploy with config private:true -> manifest has no tokenHash -> anonymous GET /s/<site>/ answered 200. Fixed in both halves. CLI: a token is minted whenever visibility resolves to private, not only for the flag. Server: requireSiteAccess refuses a private manifest with no tokenHash instead of reading it as public (the backstop for hand-edited or pre-fix manifests); the admin token and org members still pass, everyone else gets 401 until the site is redeployed.",
+      "checkedBy": "inv-28:private-site-always-token-gated",
+      "verify": "npx vitest run packages/cli/src/cli-commands.test.ts"
+    },
+    {
+      "id": 26,
+      "severity": "high",
+      "title": "An unreadable key store turned every gated endpoint public",
+      "status": "fixed",
+      "fixedIn": "v4.5.3",
+      "detail": "Found while auditing the sibling failure mode of #23. loadKeys degrades every failure to [] — invalid JSON, a non-array document, an unreadable file — and needsAuth is Boolean(token) || loadKeys(...).length > 0, so a damaged .keys.json read as 'no auth is configured' and every gated endpoint answered anonymously: reads (/api/sites, /api/registry, /api/search, /api/gap, /api/stats) and writes (/api/build, /api/export, /api/markdown), because authorize() returns ok when needsAuth is false. Reproduced: add a key, corrupt .keys.json, GET /api/sites -> 200; with the store set to {} (valid JSON, not an array) POST /api/export with any key -> 200. saveKeys writes the store with a plain non-atomic writeFileSync, so the trigger is the same partial-write class as #23. Fixed with keysStoreUnreadable(): an existing store that does not read back as an array counts as 'auth IS configured but unverifiable' — needsAuth is true and every gated route refuses (401) until the store is repaired, with a stderr line at server start and an error from `brewdocs keys list` so the operator sees why. loadKeys also stops handing a non-array document to callers ({} used to reach .find and throw).",
+      "checkedBy": "inv-29:unreadable-key-store-refuses"
     }
   ]
 }

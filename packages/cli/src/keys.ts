@@ -21,9 +21,30 @@ function fileFor(hostingDir: string): string {
 
 export function loadKeys(hostingDir: string): ApiKeyRecord[] {
   try {
-    return JSON.parse(fs.readFileSync(fileFor(hostingDir), "utf8")) as ApiKeyRecord[];
+    const parsed: unknown = JSON.parse(fs.readFileSync(fileFor(hostingDir), "utf8"));
+    // A store that parses but is not an array (a hand-edit, a partial write)
+    // must read as empty rather than as a live object whose `.find` throws.
+    return Array.isArray(parsed) ? (parsed as ApiKeyRecord[]) : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * finding #26: true when the key store exists but does not read back as an
+ * array. `loadKeys` degrades to `[]` for every failure, which makes a damaged
+ * store indistinguishable from "no keys configured" — and the server reads an
+ * empty store as "auth is not configured", silently opening every endpoint the
+ * operator had locked down. An authorization decision must treat this state as
+ * "auth IS configured but unverifiable" and refuse.
+ */
+export function keysStoreUnreadable(hostingDir: string): boolean {
+  const file = fileFor(hostingDir);
+  if (!fs.existsSync(file)) return false;
+  try {
+    return !Array.isArray(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return true;
   }
 }
 
