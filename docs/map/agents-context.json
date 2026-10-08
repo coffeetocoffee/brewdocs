@@ -10,7 +10,7 @@
   "stats": [
     {
       "name": "@brewdocs/cli",
-      "version": "4.5.3",
+      "version": "4.5.6",
       "role": "commands + hosting server",
       "srcFiles": 4,
       "srcLoc": 3588,
@@ -19,7 +19,7 @@
     },
     {
       "name": "@brewdocs/core",
-      "version": "4.5.3",
+      "version": "4.5.6",
       "role": "pipeline: extract → model → render",
       "srcFiles": 61,
       "srcLoc": 15396,
@@ -28,7 +28,7 @@
     },
     {
       "name": "@brewdocs/plugin-sdk",
-      "version": "4.5.3",
+      "version": "4.5.6",
       "role": "adapter/hook contracts",
       "srcFiles": 1,
       "srcLoc": 57,

@@ -14,18 +14,16 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.5.3
+## 🔥 Fresh out of the oven — v4.5.6
 
-Fail-closed hardening on the serving side: a damaged state file now refuses instead of silently opening. All four reproduced by execution before being fixed.
+Adversarial property tests and style-channel hardening:
 
-| Fixed | What changed |
+| Changed | What changed |
 | --- | --- |
-| 🚪 **A damaged manifest can't publish a private site** | A truncated `.brewdocs.json` (crash, full disk, overlapping deploys) read as "no token hash" and served the site anonymously. An unreadable manifest now refuses on every route; a missing one still serves hand-dropped directories as before |
-| 🧭 **`?site=` can't leave the hosting dir** | `/mcp` and `/dashboard` joined the raw `?site=` parameter into a path, so `?site=../sibling` read a directory above the hosting root. The site name now passes the same slug guard routing always used |
-| 🔐 **`private: true` really gates** | The config key set visibility without minting a token (only `--private` did), so the site served anonymously with `token: undefined` printed. Every private deploy now mints a token, and a private manifest without one is refused |
-| 🗝️ **An unreadable key store can't open the server** | A damaged `.keys.json` read as "no auth configured" and every gated read and write answered anonymously. An existing store that doesn't parse now counts as auth configured and refuses until repaired |
+| 🛡️ **Theme manifest can't break out of `<style>`** | A repo-controlled theme manifest's `vars` or `css` containing `</style><script>` could terminate the raw-text element and inject script. `<` is now neutralized via CSS escaping (`\3c `) at the render chokepoint before interpolation (finding #27) |
+| 🧪 **Real adversarial property tests** | Replaced the misnamed `fuzz.test.ts` smoke test with `examples.test.ts`, and added `hostile.test.ts` with a fixed adversarial corpus plus 400 seeded inputs asserting structural invariants across `markdownToHtml` and `renderToHtml` |
 
-Earlier this line: **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation (unknown keys/parse errors warn, never crash) · **v4.1** render cache, live reload, static Python default, deploy artifacts · **v4.0** TypeScript depth (enums, namespaces, decorators, subpath exports).
+Earlier this line: **v4.5.3** fail-closed manifests, `?site=` containment, private tokens, unreadable key stores · **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping + all-files security scan · **v4.2** config validation · **v4.1** render cache, live reload · **v4.0** TypeScript depth.
 
 ---
 
