@@ -13,18 +13,18 @@
       "version": "4.5.6",
       "role": "commands + hosting server",
       "srcFiles": 4,
-      "srcLoc": 3588,
+      "srcLoc": 3745,
       "testFiles": 11,
-      "testLoc": 1995
+      "testLoc": 2073
     },
     {
       "name": "@brewdocs/core",
       "version": "4.5.6",
       "role": "pipeline: extract → model → render",
       "srcFiles": 61,
-      "srcLoc": 15396,
+      "srcLoc": 15412,
       "testFiles": 47,
-      "testLoc": 5954
+      "testLoc": 6001
     },
     {
       "name": "@brewdocs/plugin-sdk",
@@ -38,7 +38,7 @@
   ],
   "tests": {
     "files": 59,
-    "total": 414,
+    "total": 419,
     "skipped": 0,
     "loopFiles": [
       "packages/cli/src/mcp-http.test.ts",

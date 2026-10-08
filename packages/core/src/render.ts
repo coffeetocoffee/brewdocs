@@ -1,7 +1,7 @@
 import type { ContentPage, PackageInfo, RenderModel, SymbolDoc } from "./types.js";
 import { markdownToHtml } from "./markdown.js";
 import { highlightCode } from "./highlight.js";
-import { escapeHtml } from "./escape.js";
+import { escapeHtml, escapeScriptJson } from "./escape.js";
 import { getTheme, type Theme } from "./themes.js";
 import { buildSearchIndex } from "./search.js";
 import { themeFromRef, type Slots } from "./theme-manifest.js";
@@ -133,10 +133,7 @@ const searchIndexCache = new WeakMap<RenderModel, string>();
 function searchIndexJson(model: RenderModel, multiPage: boolean): string {
   const cached = searchIndexCache.get(model);
   if (cached) return cached;
-  const json = JSON.stringify(buildSearchIndex(model, multiPage)).replace(
-    /</g,
-    "\\u003c",
-  );
+  const json = escapeScriptJson(JSON.stringify(buildSearchIndex(model, multiPage)));
   searchIndexCache.set(model, json);
   return json;
 }

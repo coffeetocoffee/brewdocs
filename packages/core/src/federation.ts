@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadDocModel, parseDocModel } from "./mcp.js";
 import type { DocModelArtifact } from "./docmodel.js";
-import { escapeHtml } from "./escape.js";
+import { escapeHtml, escapeScriptJson } from "./escape.js";
 
 /**
  * v3.5 cross-repo federated search (local control-plane, same spirit as
@@ -389,21 +389,23 @@ export function searchFederation(
 export function buildFederatedPage(storeDir: string, outDir: string): string {
   const store = loadFederation(storeDir);
   const symbolCount = store.repos.reduce((n, r) => n + r.symbols.length, 0);
-  // JSON in a <script> tag: close-tag sequences must not terminate the block.
-  const indexJson = JSON.stringify(
-    store.repos.map((r) => ({
-      repo: r.name,
-      slug: r.slug,
-      url: r.url,
-      symbols: r.symbols.map((s) => ({
-        n: s.name,
-        k: s.kind,
-        s: s.signature,
-        d: s.description,
-        u: s.url,
+  // JSON in a <script> tag: escape '<' to prevent script-breakout or comment-state hijacking (INV-4).
+  const indexJson = escapeScriptJson(
+    JSON.stringify(
+      store.repos.map((r) => ({
+        repo: r.name,
+        slug: r.slug,
+        url: r.url,
+        symbols: r.symbols.map((s) => ({
+          n: s.name,
+          k: s.kind,
+          s: s.signature,
+          d: s.description,
+          u: s.url,
+        })),
       })),
-    })),
-  ).replace(/<\//g, "<\\/");
+    ),
+  );
   const repoList = store.repos
     .map(
       (r) =>

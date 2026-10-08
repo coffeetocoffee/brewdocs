@@ -31,3 +31,20 @@ export function safeUrl(raw: string): string | undefined {
   const probe = trimmed.replace(/[\u0000-\u001f\u007f]/g, "").toLowerCase();
   return /^(javascript|vbscript|data):/.test(probe) ? undefined : trimmed;
 }
+
+/**
+ * Neutralize JSON for safe interpolation inside an HTML `<script>` block.
+ *
+ * In WHATWG HTML tokenizer rules, inside a `<script>` element, `<!--` triggers
+ * the "script data escaped" state and `<script` enters the "script data double
+ * escaped" state where `</script>` does NOT close the element. Escaping every
+ * `<` as `\u003c` prevents the HTML parser from seeing comments, open tags,
+ * or end tags. When client code calls `JSON.parse()`, `\u003c` decodes back to
+ * `<` transparently with no semantic loss.
+ *
+ * @param json - serialized JSON string to embed inside a script tag.
+ * @returns the JSON string with every `<` replaced with `\u003c`.
+ */
+export function escapeScriptJson(json: string): string {
+  return json.replace(/</g, "\\u003c");
+}

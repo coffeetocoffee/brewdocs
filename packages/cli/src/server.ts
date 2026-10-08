@@ -95,30 +95,146 @@ export interface GapEntry {
   misses: number;
 }
 
+const MAX_QUERIES_PER_SITE = 250;
+const MAX_QUERY_LEN = 256;
+const MAX_PATHS_PER_SITE = 250;
+const MAX_PATH_LEN = 256;
+const FLUSH_DEBOUNCE_MS = 2000;
+
 /** Per-site pageview/build/tool-call counters, persisted next to the hosting dir. */
-class StatsStore {
+export class StatsStore {
+  private static instances = new Map<string, StatsStore>();
   private data = new Map<string, SiteStats>();
-  constructor(private file: string) {
-    this.load();
+  private dirty = false;
+  private saveTimer: NodeJS.Timeout | null = null;
+  private file: string;
+  private lastMtimeMs = 0;
+
+  static for(file: string): StatsStore {
+    const norm = path.resolve(file);
+    let inst = StatsStore.instances.get(norm);
+    if (!inst) {
+      inst = new StatsStore(norm);
+    } else {
+      inst.reloadIfNeeded();
+    }
+    return inst;
   }
+
+  static __clearInstancesForTest(): void {
+    for (const inst of StatsStore.instances.values()) {
+      inst.flush();
+    }
+    StatsStore.instances.clear();
+  }
+
+  constructor(file: string) {
+    this.file = path.resolve(file);
+    StatsStore.instances.set(this.file, this);
+    this.load();
+    if (typeof process !== "undefined" && typeof process.once === "function") {
+      process.once("beforeExit", () => this.flush());
+    }
+  }
+
   private load(): void {
+    if (!fs.existsSync(this.file)) return;
     try {
+      const stat = fs.statSync(this.file);
+      this.lastMtimeMs = stat.mtimeMs;
       const raw = JSON.parse(readFileSync(this.file, "utf8")) as Record<
         string,
         SiteStats
       >;
-      for (const [k, v] of Object.entries(raw)) this.data.set(k, v);
-    } catch {
-      /* fresh store */
+      if (raw && typeof raw === "object") {
+        for (const [k, v] of Object.entries(raw)) this.data.set(k, v);
+      }
+    } catch (err) {
+      console.error(
+        `[brewdocs] analytics store unreadable (${this.file}) — starting with fresh store:`,
+        err,
+      );
     }
   }
-  private save(): void {
+
+  private reloadIfNeeded(): void {
+    if (this.dirty || !fs.existsSync(this.file)) return;
     try {
-      fs.writeFileSync(this.file, JSON.stringify(Object.fromEntries(this.data)), "utf8");
+      const stat = fs.statSync(this.file);
+      if (stat.mtimeMs > this.lastMtimeMs) {
+        this.load();
+      }
     } catch {
-      /* best-effort */
+      /* ignore stat error */
     }
   }
+
+  private scheduleSave(): void {
+    this.dirty = true;
+    if (!this.saveTimer) {
+      this.saveTimer = setTimeout(() => {
+        this.saveTimer = null;
+        if (this.dirty) {
+          this.flush();
+        }
+      }, FLUSH_DEBOUNCE_MS);
+      this.saveTimer.unref?.();
+    }
+  }
+
+  private save(): void {
+    this.scheduleSave();
+  }
+
+  flush(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.writeToDisk();
+  }
+
+  private writeToDisk(): void {
+    const dir = path.dirname(this.file);
+    const tmp = path.join(
+      dir,
+      `.analytics.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+    );
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.data)), "utf8");
+      try {
+        fs.renameSync(tmp, this.file);
+      } catch (renameErr: any) {
+        if (renameErr && (renameErr.code === "EPERM" || renameErr.code === "EEXIST" || renameErr.code === "EBUSY")) {
+          try {
+            if (fs.existsSync(this.file)) fs.unlinkSync(this.file);
+            fs.renameSync(tmp, this.file);
+          } catch {
+            fs.copyFileSync(tmp, this.file);
+            fs.unlinkSync(tmp);
+          }
+        } else {
+          throw renameErr;
+        }
+      }
+      try {
+        this.lastMtimeMs = fs.statSync(this.file).mtimeMs;
+      } catch {
+        /* best-effort */
+      }
+    } catch (err) {
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {
+        /* best-effort cleanup */
+      }
+      console.error(`[brewdocs] failed to persist analytics to ${this.file}:`, err);
+    }
+  }
+
   recordBuild(sub: string): void {
     const s = this.data.get(sub) ?? { views: 0, builds: 0 };
     s.builds++;
@@ -126,17 +242,24 @@ class StatsStore {
     this.data.set(sub, s);
     this.save();
   }
+
   recordView(sub: string, page?: string): void {
     const s = this.data.get(sub) ?? { views: 0, builds: 0 };
     s.views++;
     s.lastViewed = new Date().toISOString();
     if (page) {
       s.paths ??= {};
-      s.paths[page] = (s.paths[page] ?? 0) + 1;
+      const cleanPath = page.length > MAX_PATH_LEN ? page.slice(0, MAX_PATH_LEN) : page;
+      if (!s.paths[cleanPath] && Object.keys(s.paths).length >= MAX_PATHS_PER_SITE) {
+        const sorted = Object.entries(s.paths).sort((a, b) => b[1] - a[1]);
+        s.paths = Object.fromEntries(sorted.slice(0, Math.floor(MAX_PATHS_PER_SITE * 0.8)));
+      }
+      s.paths[cleanPath] = (s.paths[cleanPath] ?? 0) + 1;
     }
     this.data.set(sub, s);
     this.save();
   }
+
   /**
    * v4.5: record one MCP `tools/call`. `call.hits === 0` is a miss — the agent
    * asked for something the docs could not name. This is the only write path
@@ -146,15 +269,36 @@ class StatsStore {
     const s = this.data.get(sub) ?? { views: 0, builds: 0 };
     s.toolCalls = (s.toolCalls ?? 0) + 1;
     s.queries ??= {};
-    const key = `${call.tool}\u0000${call.query}`;
-    const row = s.queries[key] ?? {
-      tool: call.tool,
-      query: call.query,
-      calls: 0,
-      misses: 0,
-      lastHits: 0,
-      lastAt: "",
-    };
+
+    const cleanQuery =
+      typeof call.query === "string" && call.query.length > MAX_QUERY_LEN
+        ? call.query.slice(0, MAX_QUERY_LEN)
+        : String(call.query ?? "");
+    const tool = String(call.tool ?? "");
+    const key = `${tool}\u0000${cleanQuery}`;
+
+    let row = s.queries[key];
+    if (!row) {
+      if (Object.keys(s.queries).length >= MAX_QUERIES_PER_SITE) {
+        // Prune: keep top-N by misses (what gapReport ranks on anyway) and calls
+        const sorted = Object.values(s.queries).sort(
+          (a, b) => b.misses - a.misses || b.calls - a.calls || (b.lastAt > a.lastAt ? 1 : -1),
+        );
+        const keep = sorted.slice(0, Math.floor(MAX_QUERIES_PER_SITE * 0.8));
+        s.queries = {};
+        for (const r of keep) {
+          s.queries[`${r.tool}\u0000${r.query}`] = r;
+        }
+      }
+      row = {
+        tool,
+        query: cleanQuery,
+        calls: 0,
+        misses: 0,
+        lastHits: 0,
+        lastAt: "",
+      };
+    }
     row.calls++;
     if (call.hits === 0) row.misses++;
     row.lastHits = call.hits;
@@ -163,6 +307,7 @@ class StatsStore {
     this.data.set(sub, s);
     this.save();
   }
+
   /**
    * Queries that returned nothing, ranked by miss count. With no `site`, rolls
    * up every site. This is what `brewdocs gap` prints: the documentation gap
@@ -188,6 +333,7 @@ class StatsStore {
       .sort((a, b) => b.misses - a.misses || a.query.localeCompare(b.query))
       .slice(0, limit);
   }
+
   /** Top-viewed paths for a site (dashboard + org rollup). */
   topPaths(sub: string, limit = 8): Array<{ path: string; views: number }> {
     const paths = this.data.get(sub)?.paths ?? {};
@@ -196,6 +342,7 @@ class StatsStore {
       .slice(0, limit)
       .map(([p, views]) => ({ path: p, views }));
   }
+
   get(sub?: string): SiteStats | Record<string, SiteStats> {
     if (sub) return this.data.get(sub) ?? { views: 0, builds: 0 };
     return Object.fromEntries(this.data);
@@ -211,7 +358,9 @@ export function readGapReport(
   site?: string,
   limit = 20,
 ): GapEntry[] {
-  return new StatsStore(path.join(hostingDir, ".analytics.json")).gapReport(site, limit);
+  const store = StatsStore.for(path.join(hostingDir, ".analytics.json"));
+  store.flush();
+  return store.gapReport(site, limit);
 }
 
 export interface ServeOptions {
@@ -630,7 +779,7 @@ function buildRequestHandler(
     numOption(protection?.maxConcurrentBuilds, process.env.BREWDOCS_MAX_BUILDS, 2),
     numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
   );
-  const stats = new StatsStore(path.join(hostingDir, ".analytics.json"));
+  const stats = StatsStore.for(path.join(hostingDir, ".analytics.json"));
   // Require credentials only once *some* auth is configured (admin token or
   // keys). finding #26: a key store that exists but is unreadable must count as
   // "auth IS configured" — `loadKeys` answers [] for a damaged file, and
@@ -1314,7 +1463,11 @@ export function createServer(
   token?: string,
   protection?: ProtectionOptions,
 ): http.Server {
-  return http.createServer(buildRequestHandler(hostingDir, storage, token, protection));
+  const server = http.createServer(buildRequestHandler(hostingDir, storage, token, protection));
+  server.on("close", () => {
+    StatsStore.for(path.join(hostingDir, ".analytics.json")).flush();
+  });
+  return server;
 }
 
 export interface TlsOptions {
@@ -1336,10 +1489,14 @@ export function createSecureServer(
   protection: ProtectionOptions | undefined,
   tls: TlsOptions,
 ): https.Server {
-  return https.createServer(
+  const server = https.createServer(
     { cert: tls.cert, key: tls.key },
     buildRequestHandler(hostingDir, storage, token, protection),
   );
+  server.on("close", () => {
+    StatsStore.for(path.join(hostingDir, ".analytics.json")).flush();
+  });
+  return server;
 }
 
 /** Append a tiny self-updating views chip to a served page (public sites only). */

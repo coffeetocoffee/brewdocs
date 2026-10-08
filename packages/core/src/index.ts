@@ -177,7 +177,7 @@ export {
   CURRENT_CONFIG_VERSION,
 } from "./config.js";
 export { migrateConfig, renderMigrateText, type MigrateResult } from "./migrate.js";
-export { escapeHtml, safeUrl } from "./escape.js";
+export { escapeHtml, safeUrl, escapeScriptJson } from "./escape.js";
 export { safeEqual } from "./compare.js";
 export {
   type BrewDocsPlugin,

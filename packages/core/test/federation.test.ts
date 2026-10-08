@@ -173,6 +173,34 @@ describe("v3.5 federation — page", () => {
     const html = fs.readFileSync(buildFederatedPage(tmpDir(), tmpDir()), "utf8");
     expect(html).toContain("federate add");
   });
+
+  it("neutralizes hostile script and comment sequences in the embedded fed-index script block (INV-4)", () => {
+    const store = tmpDir();
+    addFederatedRepo(
+      store,
+      "hostile-lib",
+      builtRepo("hostile-lib", [
+        {
+          name: "pwn",
+          desc: '</script><script>alert("xss")</script><!--<script>',
+          sig: "export function pwn(): void",
+        },
+      ]),
+    );
+    const out = tmpDir();
+    const file = buildFederatedPage(store, out);
+    const html = fs.readFileSync(file, "utf8");
+    const scriptMatch = /<script id="fed-index" type="application\/json">([\s\S]*?)<\/script>/.exec(html);
+    expect(scriptMatch).not.toBeNull();
+    const jsonContent = scriptMatch![1];
+    // Must not contain any unescaped '<' that could break out or confuse tokenizers
+    expect(jsonContent).not.toContain("<");
+    expect(jsonContent).toContain("\\u003c/script>");
+    expect(jsonContent).toContain("\\u003c!--\\u003cscript>");
+    // Client-side JSON.parse must recover original data
+    const parsed = JSON.parse(jsonContent);
+    expect(parsed[0].symbols[0].d).toBe('</script><script>alert("xss")</script><!--<script>');
+  });
 });
 
 describe("v4.5 federation — index a deployed site over HTTP", () => {

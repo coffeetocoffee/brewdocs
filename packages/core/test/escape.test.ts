@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, safeUrl } from "@brewdocs/core";
+import { escapeHtml, safeUrl, escapeScriptJson } from "@brewdocs/core";
 
 describe("escapeHtml (single source, INV-4)", () => {
   it("escapes &, <, > and both quote characters", () => {
@@ -27,5 +27,24 @@ describe("safeUrl (INV-7)", () => {
   it("keeps ordinary URLs and returns them trimmed", () => {
     expect(safeUrl("  https://example.com/a  ")).toBe("https://example.com/a");
     expect(safeUrl("/relative/path")).toBe("/relative/path");
+  });
+});
+
+describe("escapeScriptJson (single source, INV-4)", () => {
+  it("escapes all < to \\u003c so script tags and comment states cannot be opened or closed", () => {
+    const raw = JSON.stringify({
+      closeTag: "</script><script>alert(1)</script>",
+      commentState: "<!--<script>",
+    });
+    const escaped = escapeScriptJson(raw);
+    expect(escaped).not.toContain("<");
+    expect(escaped).toContain("\\u003c/script>");
+    expect(escaped).toContain("\\u003cscript>");
+    expect(escaped).toContain("\\u003c!--\\u003cscript>");
+    // Round-trips cleanly through JSON.parse
+    expect(JSON.parse(escaped)).toEqual({
+      closeTag: "</script><script>alert(1)</script>",
+      commentState: "<!--<script>",
+    });
   });
 });

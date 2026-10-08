@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createServer, readGapReport } from "./server.js";
+import { createServer, readGapReport, StatsStore } from "./server.js";
 import { deploySite } from "@brewdocs/core";
 
 let tmpDirs: string[] = [];
@@ -14,6 +14,7 @@ function tmpDir(): string {
 }
 
 afterEach(() => {
+  StatsStore.__clearInstancesForTest();
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
   tmpDirs = [];
 });
@@ -185,4 +186,81 @@ describe("v4.5 MCP over HTTP — POST /mcp", () => {
       }
     },
   );
+});
+
+describe("StatsStore hardening", () => {
+  it("caps query key space, truncates long queries, and prioritizes misses upon eviction", () => {
+    const file = path.join(tmpDir(), ".analytics.json");
+    const store = new StatsStore(file);
+
+    // Record 20 queries with misses
+    for (let i = 0; i < 20; i++) {
+      store.recordToolCall("cafe", { tool: "search_symbols", query: `miss-${i}`, hits: 0 });
+    }
+
+    // Record 280 queries with hits (total queries recorded = 300 > cap of 250)
+    for (let i = 0; i < 280; i++) {
+      store.recordToolCall("cafe", { tool: "search_symbols", query: `hit-${i}`, hits: 1 });
+    }
+
+    // Record a 1000-character query
+    const longQuery = "q".repeat(1000);
+    store.recordToolCall("cafe", { tool: "search_symbols", query: longQuery, hits: 0 });
+
+    const stats = store.get("cafe") as any;
+    const queryKeys = Object.keys(stats.queries || {});
+
+    // Must be strictly capped at 250
+    expect(queryKeys.length).toBeLessThanOrEqual(250);
+
+    // The long query was truncated to 256 characters
+    const truncatedKey = `search_symbols\u0000${"q".repeat(256)}`;
+    expect(stats.queries[truncatedKey]).toBeDefined();
+
+    // The misses must have been prioritized during eviction
+    const gap = store.gapReport("cafe", 50);
+    expect(gap.length).toBeGreaterThanOrEqual(20);
+    for (let i = 0; i < 20; i++) {
+      expect(gap.some((g) => g.query === `miss-${i}`)).toBe(true);
+    }
+  });
+
+  it("debounces writes to disk and flushes atomically", () => {
+    const file = path.join(tmpDir(), ".analytics.json");
+    const store = new StatsStore(file);
+
+    store.recordView("cafe", "/home");
+    // Should not write synchronously
+    expect(fs.existsSync(file)).toBe(false);
+
+    // Explicit flush writes atomically
+    store.flush();
+    expect(fs.existsSync(file)).toBe(true);
+    const content = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(content.cafe.views).toBe(1);
+  });
+
+  it("caps path keys and prioritizes most-viewed paths", () => {
+    const file = path.join(tmpDir(), ".analytics.json");
+    const store = new StatsStore(file);
+
+    // Frequent page
+    for (let i = 0; i < 50; i++) {
+      store.recordView("cafe", "/popular");
+    }
+
+    // 300 unique infrequent pages
+    for (let i = 0; i < 300; i++) {
+      store.recordView("cafe", `/page-${i}`);
+    }
+
+    const stats = store.get("cafe") as any;
+    const paths = Object.keys(stats.paths || {});
+    expect(paths.length).toBeLessThanOrEqual(250);
+
+    // /popular was retained and is top path
+    const top = store.topPaths("cafe", 5);
+    expect(top[0].path).toBe("/popular");
+    expect(top[0].views).toBe(50);
+  });
 });
