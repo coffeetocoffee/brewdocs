@@ -18,11 +18,11 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.7.0 | commands + hosting server | 5 files / 3,904 loc | 12 files / 2,385 loc |
-| `@brewdocs/core` | 4.7.0 | pipeline: extract → model → render | 61 files / 15,414 loc | 47 files / 6,040 loc |
-| `@brewdocs/plugin-sdk` | 4.7.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
+| `@brewdocs/cli` | 4.8.0 | commands + hosting server | 5 files / 3,969 loc | 13 files / 2,604 loc |
+| `@brewdocs/core` | 4.8.0 | pipeline: extract → model → render | 61 files / 15,548 loc | 48 files / 6,492 loc |
+| `@brewdocs/plugin-sdk` | 4.8.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**430 test declarations across 60 files** — parsed from the tree, not typed.
+**457 test declarations across 62 files** — parsed from the tree, not typed.
 
 > 16 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `v47.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `examples.test.ts`, `federation.test.ts`, `harvest.test.ts`, `hostile.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
@@ -32,17 +32,17 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
-| `/api/build` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1070` |
-| `/api/export` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1133` |
-| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:1192` |
-| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:1204` |
-| `/mcp` | POST | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1230` |
-| `/api/gap` | GET | `authorizeRead` | `packages/cli/src/server.ts:1286` |
-| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:1301` |
-| `/api/markdown` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1319` |
-| `/api/stats` | GET | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1361` |
-| `/` | GET | **none** | `packages/cli/src/server.ts:1426` |
-| `/dashboard` | GET | `requireSiteAccess` | `packages/cli/src/server.ts:1442` |
+| `/api/build` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1095` |
+| `/api/export` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1158` |
+| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:1217` |
+| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:1229` |
+| `/mcp` | POST | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1255` |
+| `/api/gap` | GET | `authorizeRead` | `packages/cli/src/server.ts:1311` |
+| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:1326` |
+| `/api/markdown` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1344` |
+| `/api/stats` | GET | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1386` |
+| `/` | GET | **none** | `packages/cli/src/server.ts:1451` |
+| `/dashboard` | GET | `requireSiteAccess` | `packages/cli/src/server.ts:1467` |
 
 ### Invariants a change must not break
 
@@ -145,6 +145,12 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-33** — No test may bind every interface: every `.listen(` in a *.test.ts must name 127.0.0.1, and the shared listenLocal helper (packages/cli/src/test-util.ts) is the sanctioned way to start a test server.
   - _why:_ Production fixed the bare `server.listen(port)` bind in v3.5 (INV-1) — it silently exposed the unauthenticated build API to the LAN — but nine test call sites (`server.listen(0, r)`) reintroduced the same bind: on Node a missing host binds `::`, every interface. While `npm test` ran on a shared or untrusted network, that API (an `npm install` of a caller-supplied name) was reachable, which is INV-1's exact threat model re-created by the tests that exist to verify INV-1 (finding #30).
   - _enforced by:_ scripts/gate.mjs (inv-33:tests-bind-loopback) + packages/cli/src/v47.test.ts (listenLocal binds 127.0.0.1)
+- **INV-34** — A theme manifest must be chosen by the operator, not by the source tree: a bare built-in name never resolves to a repo-supplied file, and a fetched (npm/git) source may not name its own theme through either the theme or themeFile config key. Only --theme (the operator reference) may select a manifest on a fetched source.
+  - _why:_ A manifest carries raw slot HTML (slots.head, slots.footer) and a css blob, all interpolated verbatim, so it is the same trust position as a plugin — and D-9 already states the rule (anything the SOURCE tree controls is untrusted input) after INV-20 cut the plugin channel. The theme channel was not cut, and it had a wider door: --theme ink is the documented invocation (README quick-start, this repo own Pages workflow), so a repo shipping themes/ink.yml hijacked the built-in and injected script into a page the operator then published. The CSS half was closed in v4.5.6 (INV-30) but the slots half is not escapable by design, so the fix is provenance, not encoding. Reproduced by execution for all three vectors (--theme ink, repo brewdocs.yml theme: ink, and fetched source naming a custom theme). A fourth vector was found by testing the fix itself: checking the SHAPE of the reference let a fetched repo write 	heme: ./themes/evil.yml in its own config and load the manifest anyway, so the guard is on who supplied the reference (options.theme vs config.theme), not on what it looks like.
+  - _enforced by:_ scripts/gate.mjs (inv-34:theme-manifest-provenance) + packages/core/test/theme-provenance.test.ts + packages/core/test/hostile.test.ts (built-in shadow) + packages/core/test/render.golden.test.ts (themed page snapshot)
+- **INV-35** — An authorization decision must be evaluated when it is used, not frozen at construction: needsAuth is read per request, so a key added to (or revoked from) a running server takes effect immediately.
+  - _why:_ needsAuth was a const computed once inside buildRequestHandler, which runs once at server construction, while validateKey re-read the store per request — so the gate that decides WHETHER to consult the key store was frozen at boot. A key issued against a running server did not turn auth on: /api/sites kept answering 200 anonymously and POST /api/build (an npm install of a caller-supplied name, INV-1 threat model) stayed open. The startup banner tells operators to run rewdocs keys add to lock a network instance down, so the advertised path silently did nothing until restart. The domains store is already re-read per request for exactly this reason, so the pattern existed in the same file (finding #33).
+  - _enforced by:_ scripts/gate.mjs (inv-35:auth-decision-is-live) + packages/cli/src/v471.test.ts (key added/revoked against a live server; reads and writes both close)
 
 ### Server defaults
 
@@ -177,6 +183,7 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **i18n covers UI chrome only.** README, guides and symbol docs stay as authored; 6 bundled locales over an EN fallback.
 - **Playground runs examples client-side via `new Function`.** Intentional for a self-contained HTML page; sandboxing multi-language execution is out of scope.
 - **YAML support is a documented subset.** The config reader handles scalars, inline lists, block sequences and nested string maps (s3/aliases/redirects). Anchors, multi-doc and exotic YAML degrade to skip with a warning. The OpenAPI extractor has its own, fuller, reader — but only for specs.
+- **A theme is chosen by the operator, not the repo.** A manifest supplies raw slot HTML and css, so a fetched (npm/git) source cannot name its own theme and a repo file cannot shadow a built-in name; pass an explicit path (--theme ./themes/brand.yml) to use a repo-supplied one deliberately (INV-34/D-14). This is the same line D-9 draws for plugins.
 
 ## Decisions worth knowing
 
@@ -276,11 +283,17 @@ readBody answers 413 for a body over 1 MiB, but the order of operations is load-
 
 </details>
 
+<details><summary><b>D-14</b> — A theme manifest is operator-chosen code, on the same line as a plugin</summary>
+
+A manifest is not styling data: its slots are raw HTML and its css is emitted verbatim, so it can run script in the page the operator publishes. That makes it the same kind of thing as a plugin — markup/code the source tree supplies — and D-9 already settled who may choose one of those. So the rule is provenance, not escaping: a locally chosen repo may ship a theme (that is the feature, exactly as a local repo may name a plugin), a fetched repo may not, and the operator can always select one by explicit path because that is the operator decision rather than the repo one. Two consequences worth knowing. (1) A bare built-in name is reserved: --theme ink means the bundled ink, never a repo file that happens to sit at themes/ink.yml, because --theme ink is the documented invocation and a hijack there reaches every user who follows the README. A custom theme therefore needs a different name or an explicit path. (2) Escaping was the wrong tool for the slots half even though it was the right tool for the css half (INV-30): raw HTML in a footer partial is the feature, so there is nothing to encode — the only question that has an answer is who is allowed to choose the manifest. Related: the built-in shadow guard is why isBuiltinTheme does a hasOwnProperty check rather than a THEMES[name] lookup, since a lookup falls back to the default theme and would answer true for any name at all.
+
+</details>
+
 ## Findings
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**31 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**33 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -315,6 +328,8 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 29 | medium | BREWDOCS_RATE_LIMIT= (set but empty) silently disabled the server | fixed | `inv-32:env-numeric-options-validated` |
 | 30 | medium | The test suite bound every interface while serving the unauthenticated build API | fixed | `inv-33:tests-bind-loopback` |
 | 31 | low | The trust-boundary table in the generated map rendered empty from v4.5.1 through v4.6 | fixed | `map:trust-table-populated` |
+| 32 | high | A repo-shipped theme manifest injected script into the published page (slots channel, and a built-in name could be hijacked) | fixed | `inv-34:theme-manifest-provenance` |
+| 33 | medium | Adding an API key to a running server did not enable auth (needsAuth was frozen at construction) | fixed | `inv-35:auth-decision-is-live` |
 
 ## Working in this repo
 

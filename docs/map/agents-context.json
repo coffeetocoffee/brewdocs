@@ -10,25 +10,25 @@
   "stats": [
     {
       "name": "@brewdocs/cli",
-      "version": "4.7.0",
+      "version": "4.8.0",
       "role": "commands + hosting server",
       "srcFiles": 5,
-      "srcLoc": 3904,
-      "testFiles": 12,
-      "testLoc": 2385
+      "srcLoc": 3969,
+      "testFiles": 13,
+      "testLoc": 2604
     },
     {
       "name": "@brewdocs/core",
-      "version": "4.7.0",
+      "version": "4.8.0",
       "role": "pipeline: extract → model → render",
       "srcFiles": 61,
-      "srcLoc": 15414,
-      "testFiles": 47,
-      "testLoc": 6040
+      "srcLoc": 15548,
+      "testFiles": 48,
+      "testLoc": 6492
     },
     {
       "name": "@brewdocs/plugin-sdk",
-      "version": "4.7.0",
+      "version": "4.8.0",
       "role": "adapter/hook contracts",
       "srcFiles": 1,
       "srcLoc": 57,
@@ -37,8 +37,8 @@
     }
   ],
   "tests": {
-    "files": 60,
-    "total": 430,
+    "files": 62,
+    "total": 457,
     "skipped": 0,
     "loopFiles": [
       "packages/cli/src/mcp-http.test.ts",
@@ -73,7 +73,7 @@
         "sourceRoot"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1070
+      "line": 1095
     },
     {
       "path": "/api/export",
@@ -83,7 +83,7 @@
         "sourceRoot"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1133
+      "line": 1158
     },
     {
       "path": "/api/sites",
@@ -92,7 +92,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1192
+      "line": 1217
     },
     {
       "path": "/api/registry",
@@ -101,7 +101,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1204
+      "line": 1229
     },
     {
       "path": "/mcp",
@@ -111,7 +111,7 @@
         "requireSiteAccess"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1230
+      "line": 1255
     },
     {
       "path": "/api/gap",
@@ -120,7 +120,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1286
+      "line": 1311
     },
     {
       "path": "/api/search",
@@ -129,7 +129,7 @@
         "authorizeRead"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1301
+      "line": 1326
     },
     {
       "path": "/api/markdown",
@@ -139,7 +139,7 @@
         "sourceRoot"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1319
+      "line": 1344
     },
     {
       "path": "/api/stats",
@@ -149,14 +149,14 @@
         "requireSiteAccess"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1361
+      "line": 1386
     },
     {
       "path": "/",
       "method": "GET",
       "guards": [],
       "file": "packages/cli/src/server.ts",
-      "line": 1426
+      "line": 1451
     },
     {
       "path": "/dashboard",
@@ -165,7 +165,7 @@
         "requireSiteAccess"
       ],
       "file": "packages/cli/src/server.ts",
-      "line": 1442
+      "line": 1467
     }
   ],
   "invariants": [
@@ -366,6 +366,18 @@
       "rule": "No test may bind every interface: every `.listen(` in a *.test.ts must name 127.0.0.1, and the shared listenLocal helper (packages/cli/src/test-util.ts) is the sanctioned way to start a test server.",
       "why": "Production fixed the bare `server.listen(port)` bind in v3.5 (INV-1) — it silently exposed the unauthenticated build API to the LAN — but nine test call sites (`server.listen(0, r)`) reintroduced the same bind: on Node a missing host binds `::`, every interface. While `npm test` ran on a shared or untrusted network, that API (an `npm install` of a caller-supplied name) was reachable, which is INV-1's exact threat model re-created by the tests that exist to verify INV-1 (finding #30).",
       "enforcedBy": "scripts/gate.mjs (inv-33:tests-bind-loopback) + packages/cli/src/v47.test.ts (listenLocal binds 127.0.0.1)"
+    },
+    {
+      "id": "INV-34",
+      "rule": "A theme manifest must be chosen by the operator, not by the source tree: a bare built-in name never resolves to a repo-supplied file, and a fetched (npm/git) source may not name its own theme through either the theme or themeFile config key. Only --theme (the operator reference) may select a manifest on a fetched source.",
+      "why": "A manifest carries raw slot HTML (slots.head, slots.footer) and a css blob, all interpolated verbatim, so it is the same trust position as a plugin — and D-9 already states the rule (anything the SOURCE tree controls is untrusted input) after INV-20 cut the plugin channel. The theme channel was not cut, and it had a wider door: --theme ink is the documented invocation (README quick-start, this repo own Pages workflow), so a repo shipping themes/ink.yml hijacked the built-in and injected script into a page the operator then published. The CSS half was closed in v4.5.6 (INV-30) but the slots half is not escapable by design, so the fix is provenance, not encoding. Reproduced by execution for all three vectors (--theme ink, repo brewdocs.yml theme: ink, and fetched source naming a custom theme). A fourth vector was found by testing the fix itself: checking the SHAPE of the reference let a fetched repo write \theme: ./themes/evil.yml in its own config and load the manifest anyway, so the guard is on who supplied the reference (options.theme vs config.theme), not on what it looks like.",
+      "enforcedBy": "scripts/gate.mjs (inv-34:theme-manifest-provenance) + packages/core/test/theme-provenance.test.ts + packages/core/test/hostile.test.ts (built-in shadow) + packages/core/test/render.golden.test.ts (themed page snapshot)"
+    },
+    {
+      "id": "INV-35",
+      "rule": "An authorization decision must be evaluated when it is used, not frozen at construction: needsAuth is read per request, so a key added to (or revoked from) a running server takes effect immediately.",
+      "why": "needsAuth was a const computed once inside buildRequestHandler, which runs once at server construction, while validateKey re-read the store per request — so the gate that decides WHETHER to consult the key store was frozen at boot. A key issued against a running server did not turn auth on: /api/sites kept answering 200 anonymously and POST /api/build (an npm install of a caller-supplied name, INV-1 threat model) stayed open. The startup banner tells operators to run \brewdocs keys add to lock a network instance down, so the advertised path silently did nothing until restart. The domains store is already re-read per request for exactly this reason, so the pattern existed in the same file (finding #33).",
+      "enforcedBy": "scripts/gate.mjs (inv-35:auth-decision-is-live) + packages/cli/src/v471.test.ts (key added/revoked against a live server; reads and writes both close)"
     }
   ],
   "findings": [
@@ -424,7 +436,7 @@
       "title": "emitRedirects wrote outside outDir via a `from: \"../x\"` key",
       "status": "fixed",
       "fixedIn": "v3.9.0",
-      "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevented overwriting but not creating outside the output tree. emitAliasPages was checked at the same time: its alias name goes through dirSafe, which maps separators to `_`, so it could not traverse â€” but the write target is now confirmed inside outDir anyway.",
+      "detail": "Reachable from any repo's brewdocs.yml (`redirects:`). The `skip: file exists` guard prevented overwriting but not creating outside the output tree. emitAliasPages was checked at the same time: its alias name goes through dirSafe, which maps separators to `_`, so it could not traverse — but the write target is now confirmed inside outDir anyway.",
       "checkedBy": "inv-8:output-dir-containment",
       "verify": "npx vitest run packages/core/test/aliases.test.ts",
       "proven": true
@@ -688,6 +700,28 @@
       "fixedIn": "v4.7.0",
       "detail": "scripts/map.mjs located the routes by scanning for `return async (req, res)` — the pre-v4.5.1 shape. Finding #21's fix moved the routes into `const handle = async (req, res) => { … }` (wrapped in the single try/catch guard), and the wrapper with the old shape now sits AFTER the routes, so the scan started past every route and the table silently rendered zero rows from v4.5.1 through v4.6. map:check could not catch it: the generator matched its own empty output, which is the blind spot a drift check has by construction — it proves the committed file equals the generated one, never that the generated one is non-empty. Found while adding the v4.7 route rows. Fixed the scan to match the handle signature (type annotations included) and to read guards from the route test to the next route test instead of a fixed 12-line window (the window had also stopped seeing guardSource in /api/build once the body read moved into a helper). Added gate check map:trust-table-populated so an empty table fails the build.",
       "checkedBy": "map:trust-table-populated",
+      "proven": true
+    },
+    {
+      "id": 32,
+      "severity": "high",
+      "title": "A repo-shipped theme manifest injected script into the published page (slots channel, and a built-in name could be hijacked)",
+      "status": "fixed",
+      "fixedIn": "v4.8",
+      "detail": "A theme manifest is repo-controlled config that carries raw HTML (slots.head/header/mainBefore/mainAfter/footer) plus a css blob, and the renderer interpolates all of it verbatim. Two live vectors, both reproduced by execution against v4.7.0. (A) loadThemeManifest searched <root>/themes/<ref>.yml BEFORE falling back to the built-in registry, so a repo shipping themes/ink.yml replaced the built-in ink: \brewdocs build <third-party-repo> --theme ink — the README quick-start and this repo own Pages workflow — emitted a live <script>. The repo did not even need the flag: \theme: ink in its own brewdocs.yml plus themes/ink.yml was enough. (B) A fetched (npm/git) source naming a custom theme in its brewdocs.yml got that manifest loaded, so the theme channel bypassed the plugin guard that already refuses exactly that (finding #19/INV-20) — verified by building the same repo with fetched: true, where the plugin was dropped and warned about but the theme was honoured. The slots half is not escapable by design (raw HTML is the feature), so the fix is provenance: a bare built-in name never resolves to a repo file, a fetched source may not name its own theme (neither the theme nor themeFile config key), and only --theme (the operator own reference) may select a manifest on a fetched source. The first version of the fix tested the SHAPE of the reference and was bypassed: a fetched repo whose brewdocs.yml said \theme: ./themes/evil.yml supplied a path-shaped string and got its manifest loaded anyway (caught by execution, not by reading). The rule had to be about WHO supplied the reference, not what it looks like — options.theme wins, config.theme is dropped when fetched. The css/vars half of this channel was already closed by finding #27 (INV-30), which is why the report that found this read the style channel as safe; INV-30 proves only that half and gave false comfort about the channel as a whole. Why the tests missed it: render.golden.test.ts called renderToHtml(HOSTILE) with NO options, so theme.css was undefined and the entire manifest-fed emission path was never snapshotted, and plugin-sdk v2.test.ts asserted theme.css reaches the theme, never that a repo may not supply it.",
+      "checkedBy": "inv-34:theme-manifest-provenance",
+      "verify": "npx vitest run packages/core/test/theme-provenance.test.ts",
+      "proven": true
+    },
+    {
+      "id": 33,
+      "severity": "medium",
+      "title": "Adding an API key to a running server did not enable auth (needsAuth was frozen at construction)",
+      "status": "fixed",
+      "fixedIn": "v4.8",
+      "detail": "needsAuth = Boolean(token) || loadKeys(hostingDir).length > 0 was evaluated once inside buildRequestHandler, which runs once at server construction, and authorize/authorizeRead closed over it. validateKey re-read .keys.json per request, but the gate deciding WHETHER to consult it was frozen at boot, so a key issued while the server was running did not turn auth on. Reproduced by execution against v4.7.0: before any key GET /api/sites -> 200; a key issued against the live server; still 200 anonymously (401 expected), and POST /api/build — an npm install of a caller-supplied name, INV-1 threat model — also answered 200. The startup banner tells operators to run \brewdocs keys add to lock a network instance down, so the advertised path silently did nothing until restart; the contrast with the domains store, deliberately re-read per request because domains can be added while the server runs, is what made this a bug rather than a design choice. Fixed by evaluating per request (keyStoreState/keysConfigured, one small JSON read) with a one-time stderr announcement when a running server first starts enforcing, so the new refusals are not mistaken for a broken credential. Revoking the last key returns the instance to its unauthenticated posture, which is what a restart would do — the property is that the live server and a fresh one agree at every instant.",
+      "checkedBy": "inv-35:auth-decision-is-live",
+      "verify": "npx vitest run packages/cli/src/v471.test.ts",
       "proven": true
     }
   ]
