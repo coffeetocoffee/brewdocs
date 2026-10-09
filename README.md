@@ -14,16 +14,16 @@ npx @brewdocs/cli build ./my-project --out dist
 
 ---
 
-## 🔥 Fresh out of the oven — v4.5.8
+## 🔥 Fresh out of the oven — v4.8
 
-Unified script-block escaping and analytics store hardening:
+Trust-boundary hardening for the two channels that were still open:
 
 | Changed | What changed |
 | --- | --- |
-| 🛡️ **Unified `<script>` escaping (INV-4)** | Added `escapeScriptJson` to neutralize `<` to `\u003c` across all embedded JSON blocks. Fixes federation search page script-breakout and tokenizer double-escaped state risks from remote unvetted docmodels |
-| 📊 **Hardened analytics store persistence** | Swapped synchronous per-request file rewrites for debounced persistence (flush on close/exit), atomic temp-file replacement, and bounded key-space eviction prioritizing actionable query misses |
+| 🎨 **A theme is chosen by the operator, not the repo (INV-34)** | A theme manifest carries raw slot HTML, so a repo shipping `themes/ink.yml` could hijack a built-in name — `--theme ink` is this README's own invocation — and a fetched (npm/git) source could name its own theme, bypassing the plugin guard. A bare built-in name never resolves to a repo file now, a fetched source cannot name its own theme, and `--theme ./themes/brand.yml` is the explicit operator path |
+| 🔐 **Auth takes effect on a running server (INV-35)** | `brewdocs keys add` against a live server now turns auth on immediately — reads and writes, including the build API — instead of silently doing nothing until a restart, which is what the startup banner told operators to rely on |
 
-Earlier this line: **v4.5.6** theme-manifest `<style>` escaping + adversarial property suite · **v4.5.3** fail-closed manifests, `?site=` containment, private tokens, unreadable key stores · **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping · **v4.2** config validation · **v4.1** render cache, live reload · **v4.0** TypeScript depth.
+Earlier this line: **v4.7** 1 MiB POST cap + validated env options + loopback test binds · **v4.6** hardened gate assertions + fixture isolation · **v4.5.8** unified `<script>` escaping + analytics store hardening · **v4.5.6** theme-manifest `<style>` escaping + adversarial property suite · **v4.5.3** fail-closed manifests, `?site=` containment, private tokens, unreadable key stores · **v4.5.1** constant-time credentials + request-survival + no pass-the-hash · **v4.5** MCP over HTTP + `brewdocs gap` + federate from a live site · **v4.4** registry integrity + config migration · **v4.3** single-source escaping · **v4.2** config validation · **v4.1** render cache, live reload · **v4.0** TypeScript depth.
 
 ---
 
@@ -135,6 +135,14 @@ vars:
 slots:
   footer: partials/brand-footer.html
 ```
+
+> **Themes are operator-chosen.** A manifest carries raw HTML (its `slots`) and
+> emitted CSS, so a repo you don't own never gets to supply one: a bare built-in
+> name (`--theme ink`) always means the bundled theme, a fetched npm/git source
+> cannot name its own theme in `brewdocs.yml`, and a repo file cannot shadow a
+> built-in name. To use a theme that lives inside the repo, name it explicitly —
+> `brewdocs build <repo> --theme ./themes/brand.yml`. Locally chosen repos keep
+> the full feature; this only closes the "build a repo you don't own" path.
 
 ```yaml
 # nav.yml — sidebar for your guides

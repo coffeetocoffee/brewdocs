@@ -181,6 +181,22 @@ export function getTheme(name?: string): Theme {
 }
 
 /**
+ * Is this name one of the bundled themes?
+ *
+ * A bare built-in name must never resolve to a repo-supplied manifest
+ * (finding #32): `--theme ink` is the documented invocation, so a repo that
+ * ships `themes/ink.yml` could otherwise hijack it and inject markup through
+ * the manifest's raw slots. Use a different name (or an explicit path) for a
+ * custom theme.
+ *
+ * @param name - theme name to test.
+ * @returns true when the name is a bundled theme.
+ */
+export function isBuiltinTheme(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(THEMES, name);
+}
+
+/**
  * List every built-in theme.
  *
  * @returns the bundled themes in declaration order.

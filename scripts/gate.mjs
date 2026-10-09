@@ -669,22 +669,35 @@ function checkPrivateAlwaysGated() {
 
 /**
  * INV-29: an unreadable key store must count as "auth IS configured"
- * (finding #26). `loadKeys` answers [] for every failure, and `needsAuth` is
- * `Boolean(token) || loadKeys(...).length > 0` — so a damaged .keys.json read
- * as "no keys configured" and every gated route answered anonymously.
+ * (finding #26). `loadKeys` answers [] for every failure, so a damaged
+ * .keys.json would otherwise read as "no keys configured" and every gated
+ * route would answer anonymously.
+ *
+ * v4.8: the state is now read per request (finding #33 / INV-35), so the
+ * assertions are on keyStoreState's three-way distinction and on
+ * keysConfigured treating `unreadable` as configured — not on the old
+ * `needsAuth = ... || keysUnreadable || ...` one-liner, which no longer exists.
  */
 function checkKeyStoreFailClosed() {
   const keysSrc = read("packages/cli/src/keys.ts");
-  const serverSrc = read("packages/cli/src/server.ts");
   const helper = /export function keysStoreUnreadable/.test(keysSrc);
-  const helperChecksArray = /!Array\.isArray\(JSON\.parse/.test(keysSrc);
-  const wired = /needsAuth = Boolean\(token\) \|\| keysUnreadable \|\|/.test(serverSrc);
-  if (helper && helperChecksArray && wired) pass("inv-29:unreadable-key-store-refuses");
-  else
+  const stateHelper = /export function keyStoreState\(/.test(keysSrc);
+  // A store that parses but is not an array is unreadable, not empty.
+  const checksArray = /if \(!Array\.isArray\(parsed\)\) return "unreadable";/.test(keysSrc);
+  // Unreadable counts as configured: the whole point of the finding.
+  const unreadableIsConfigured =
+    /return state === "configured" \|\| state === "unreadable";/.test(keysSrc);
+  // And the guard actually consults it per request (INV-35 pins the liveness).
+  const wired = /const configured = keysConfigured\(hostingDir\);/.test(read("packages/cli/src/server.ts"));
+  if (helper && stateHelper && checksArray && unreadableIsConfigured && wired) {
+    pass("inv-29:unreadable-key-store-refuses");
+  } else {
     fail(
       "inv-29:unreadable-key-store-refuses",
-      `helper=${helper}, checksArray=${helperChecksArray}, wiredIntoNeedsAuth=${wired}`,
+      `helper=${helper}, stateHelper=${stateHelper}, checksArray=${checksArray}, ` +
+        `unreadableIsConfigured=${unreadableIsConfigured}, wired=${wired}`,
     );
+  }
 }
 
 /**
@@ -793,6 +806,100 @@ function checkTestsBindLoopback() {
       "inv-33:tests-bind-loopback",
       `listen() without 127.0.0.1: ${offenders.join(", ") || "none"}; helperBinds=${helperBinds}`,
     );
+}
+
+/**
+ * INV-34: a theme manifest is a code-and-markup channel, so only the operator
+ * may choose it (finding #32). Two halves, both load-bearing:
+ *   1. a bare built-in name must never resolve to a repo file, or a repo
+ *      shipping themes/ink.yml hijacks `--theme ink` — the documented
+ *      invocation (README quick-start, this repo's own Pages workflow);
+ *   2. a fetched (npm/git) source must not name its own theme, the same rule
+ *      INV-20 already applies to plugins.
+ * The guard is provenance, not escaping: manifest slots are raw HTML on
+ * purpose, so asserting an escape call would be the wrong shape.
+ */
+function checkThemeProvenance() {
+  const src = read("packages/core/src/theme-manifest.ts");
+  const themesSrc = read("packages/core/src/themes.ts");
+  // The built-in registry must expose a membership test (not a lookup, which
+  // falls back to the default and would answer true for anything).
+  const hasBuiltinCheck = /export function isBuiltinTheme\(/.test(themesSrc);
+  const usesOwnProperty = /hasOwnProperty\.call\(THEMES/.test(themesSrc);
+  // Both guards, in the resolution chokepoint.
+  const builtinGuard = /if \(isBuiltinTheme\(ref\) && !isExplicitThemePath\(ref\)\) return null;/.test(src);
+  const fetchedGuard = /if \(opts\.fetched && !isExplicitThemePath\(ref\)\)/.test(src);
+  // The escape hatch: an explicit path is the operator's decision (D-9).
+  const explicitPath = /function isExplicitThemePath\(/.test(src);
+  // `themeFile` is the repo's own config key, so a fetched source may not use it.
+  const repoThemeFile = /const repoThemeFile = opts\.fetched \? undefined : config\.themeFile;/.test(src);
+  // build.ts must drop the repo's OWN theme key on a fetched source. Testing the
+  // reference's *shape* instead let a repo write `theme: ./themes/evil.yml` in
+  // its own config and get its manifest loaded — a bypass caught by execution.
+  const buildSrc = read("packages/core/src/build.ts");
+  const repoThemeDropped = /const repoTheme = source\.fetched \? undefined : config\.theme;/.test(buildSrc);
+  const operatorWins = /const themeRef = options\.theme \?\? repoTheme;/.test(buildSrc);
+  // The renderer re-resolves the theme per page, so the flag must ride along —
+  // dropping it here is the same propagation bug that bit the plugin guard.
+  const renderPasses = /opts\.renderOptions\.fetched/.test(read("packages/core/src/render.ts"));
+  const buildStamps = /fetched: source\.fetched,/.test(buildSrc);
+  const buildResolves = /loadThemeManifest\(themeRef, root, \{ fetched: source\.fetched \}\)/.test(buildSrc);
+  if (
+    hasBuiltinCheck &&
+    usesOwnProperty &&
+    builtinGuard &&
+    fetchedGuard &&
+    explicitPath &&
+    repoThemeFile &&
+    repoThemeDropped &&
+    operatorWins &&
+    renderPasses &&
+    buildStamps &&
+    buildResolves
+  ) {
+    pass("inv-34:theme-manifest-provenance");
+  } else {
+    fail(
+      "inv-34:theme-manifest-provenance",
+      `isBuiltinTheme=${hasBuiltinCheck}, ownProperty=${usesOwnProperty}, builtinGuard=${builtinGuard}, ` +
+        `fetchedGuard=${fetchedGuard}, explicitPath=${explicitPath}, repoThemeFile=${repoThemeFile}, ` +
+        `repoThemeDropped=${repoThemeDropped}, operatorWins=${operatorWins}, ` +
+        `renderPasses=${renderPasses}, buildStamps=${buildStamps}, buildResolves=${buildResolves}`,
+    );
+  }
+}
+
+/**
+ * INV-35: an authorization decision must be evaluated when it is used, not
+ * frozen at construction (finding #33). `needsAuth` was a const computed once
+ * in buildRequestHandler, so a key issued against a running server did not
+ * turn auth on — while the startup banner tells operators to run
+ * `brewdocs keys add` to lock a network instance down. Both guards must read
+ * the live state; the domains store is re-read per request for this same
+ * reason, so the codebase already had the pattern.
+ */
+function checkAuthIsLive() {
+  const serverSrc = read("packages/cli/src/server.ts");
+  const keysSrc = read("packages/cli/src/keys.ts");
+  // The per-request reader and its two consumers.
+  const reader = /const needsAuthNow = \(\): boolean =>/.test(serverSrc);
+  const writeGuard = /if \(!needsAuthNow\(\)\) return "ok";/.test(serverSrc);
+  const readGuard = /if \(!needsAuthNow\(\)\) return true;/.test(serverSrc);
+  // A frozen const is exactly what regressed; its return must turn this red.
+  const frozen = /const needsAuth = Boolean\(token\)/.test(serverSrc);
+  // The state helper must distinguish unreadable from empty (INV-29's rule).
+  const stateHelper = /export function keyStoreState\(/.test(keysSrc);
+  const unreadableIsConfigured =
+    /return state === "configured" \|\| state === "unreadable";/.test(keysSrc);
+  if (reader && writeGuard && readGuard && !frozen && stateHelper && unreadableIsConfigured) {
+    pass("inv-35:auth-decision-is-live");
+  } else {
+    fail(
+      "inv-35:auth-decision-is-live",
+      `reader=${reader}, writeGuard=${writeGuard}, readGuard=${readGuard}, ` +
+        `frozenConst=${frozen}, stateHelper=${stateHelper}, unreadableIsConfigured=${unreadableIsConfigured}`,
+    );
+  }
 }
 
 /** Every *.test.ts under packages/ (test files only — util files are fine). */
@@ -967,6 +1074,8 @@ checkStyleChannelBreakout();
 checkPostBodyCapped();
 checkNumericEnvValidated();
 checkTestsBindLoopback();
+checkThemeProvenance();
+checkAuthIsLive();
 checkTrustTablePopulated();
 checkFindings();
 

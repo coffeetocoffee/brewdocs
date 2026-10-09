@@ -126,6 +126,13 @@ the live server deploy new brews straight to object storage instead of the local
 > and `/api/export` endpoints require `Authorization: Bearer <token>`. Set it
 > before exposing `brewdocs serve` to the network.
 >
+> You can also lock a *running* server down without restarting it: `brewdocs
+> keys add` is re-read per request, so the moment a key exists the gated reads
+> and every write endpoint (including the build API) start refusing anonymous
+> callers. Revoking the last key returns the instance to its unauthenticated
+> posture. The transition is announced on stderr, so a sudden 401 is never a
+> mystery.
+>
 > By default those endpoints are also protected from abuse: a per-IP rate
 > limiter (env `BREWDOCS_RATE_LIMIT`, `BREWDOCS_RATE_WINDOW_MS`; defaults 10
 > req / 60s) and a bounded build job queue (env `BREWDOCS_MAX_BUILDS`,

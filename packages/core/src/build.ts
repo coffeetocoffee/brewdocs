@@ -31,7 +31,14 @@ import type { ExtractResult, RenderModel, Source } from "./types.js";
  * RenderOptions.
  */
 function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
-  if (options.plugins && options.slots && options.root) return options;
+  // `fetched` is stamped from the source on every path, including this early
+  // return: pageShell re-resolves the theme, and a hop that dropped the flag
+  // would silently re-open the theme channel (finding #32) — the same
+  // propagation mistake that let the plugin guard be bypassed three times
+  // (finding #19).
+  if (options.plugins && options.slots && options.root) {
+    return { ...options, fetched: source.fetched };
+  }
   const root = path.resolve(source.root);
   const config = loadConfig(root);
   // v3.0: plugin names that aren't paths/npm-resolvable fall back to the
@@ -60,8 +67,23 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
     ...(options.plugins ?? []),
     ...loadPlugins(repoPlugins, root, registryDir),
   ];
-  const themeRef = options.theme ?? config.theme;
-  const manifest = themeRef ? loadThemeManifest(themeRef, root) : null;
+  // Finding #32: a theme manifest carries raw slot HTML and css, so it is the
+  // same trust position as a plugin (finding #19) — and the guard is the same
+  // one: a fetched source may not supply its own theme.
+  //
+  // The check is on WHO supplied the reference, not on its shape. A fetched
+  // repo writing `theme: ./themes/evil.yml` in its own brewdocs.yml names an
+  // explicit path too, so testing the shape would let it through (that bypass
+  // was caught by execution, not by reading). Only `options.theme` — the
+  // operator's --theme — may select a manifest on a fetched source.
+  const repoTheme = source.fetched ? undefined : config.theme;
+  if (source.fetched && config.theme) {
+    console.warn(
+      `[brewdocs] ignoring theme "${config.theme}" named in this source's brewdocs.yml — a fetched source cannot choose its own theme (pass --theme to use one deliberately)`,
+    );
+  }
+  const themeRef = options.theme ?? repoTheme;
+  const manifest = themeRef ? loadThemeManifest(themeRef, root, { fetched: source.fetched }) : null;
   const slots: Slots = options.slots ?? (() => {
     const merged: Slots = { ...manifestSlots(manifest ?? undefined) };
     for (const p of plugins) if (p.theme?.slots) Object.assign(merged, p.theme.slots);
@@ -81,6 +103,9 @@ function resolveSetup(source: Source, options: RenderOptions): RenderOptions {
     plugins,
     slots,
     root,
+    // Finding #32: pageShell re-resolves the theme per page, so the flag has
+    // to ride along or the render half would re-open the channel build.ts closed.
+    fetched: source.fetched,
   };
 }
 
@@ -436,8 +461,10 @@ export async function buildVersions(
   const config = loadConfig(path.resolve(source.root));
   const eolList = config.eol;
   // Per-version builds run in throwaway worktrees; the extraction cache
-  // belongs to the working tree only.
-  const singleOptions = { ...options, cache: false };
+  // belongs to the working tree only. `fetched` rides along for the same
+  // reason as the plugin guard (finding #19): the renderer re-resolves the
+  // theme per page, and a worktree is still the fetched repo's tree.
+  const singleOptions = { ...options, cache: false, fetched: source.fetched };
 
   if (versions.length <= 1) {
     return [
@@ -551,6 +578,7 @@ export async function buildVersions(
     locale: options.locale ?? config.locale,
     score: coverageScore(rootModel),
     freshness: rootFresh,
+    fetched: source.fetched,
   };
   const [rootPage] = renderCached(root, renderFingerprint(rootModel, rootOpts), renderCacheEnabled, () => [
     { path: "index.html", html: renderToHtml(rootModel, rootOpts) },

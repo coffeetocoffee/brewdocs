@@ -23,7 +23,7 @@ import {
   type Visibility,
 } from "@brewdocs/core";
 import { readFileSync } from "node:fs";
-import { ALL_SCOPES, keysStoreUnreadable, loadKeys, validateKey } from "./keys.js";
+import { ALL_SCOPES, keysConfigured, keysStoreUnreadable, validateKey } from "./keys.js";
 import {
   aggregateOrgStats,
   canAccessOrg,
@@ -924,20 +924,41 @@ function buildRequestHandler(
     }),
   );
   const stats = StatsStore.for(path.join(hostingDir, ".analytics.json"));
-  // Require credentials only once *some* auth is configured (admin token or
+  // Require credentials once *some* auth is configured (admin token or
   // keys). finding #26: a key store that exists but is unreadable must count as
   // "auth IS configured" — `loadKeys` answers [] for a damaged file, and
   // reading that as "no auth" would open every gated endpoint at the exact
   // moment the operator's key store broke.
-  const keysUnreadable = keysStoreUnreadable(hostingDir);
-  if (keysUnreadable) {
+  //
+  // finding #33: this is a function, not a value. Evaluated once at
+  // construction it froze the decision for the process lifetime, so a key
+  // issued while the server was running did not turn auth on — even though the
+  // startup banner tells operators to run `brewdocs keys add` to lock a network
+  // instance down. Re-read per request (a small JSON file), matching the
+  // domains store, which is re-read per request for the same reason.
+  // `authAnnounced` starts true when auth was already on at boot, so the
+  // transition is announced exactly once, when a running server first refuses.
+  let authAnnounced = Boolean(token) || keysConfigured(hostingDir);
+  const needsAuthNow = (): boolean => {
+    if (token) return true;
+    const configured = keysConfigured(hostingDir);
+    if (configured && !authAnnounced) {
+      // Make the state legible: a running server that starts refusing because
+      // a key appeared (or the store broke) otherwise looks like a bug.
+      authAnnounced = true;
+      console.error(
+        `brewdocs: auth is now enforced (${path.join(hostingDir, ".keys.json")}) — requests without a valid key or token will be refused`,
+      );
+    }
+    return configured;
+  };
+  if (keysStoreUnreadable(hostingDir)) {
     // Make the refusal legible: every gated route answers 401 until the store
     // is repaired, and without this line that looks like a broken credential.
     console.error(
       `brewdocs: key store unreadable (${path.join(hostingDir, ".keys.json")}) — treating auth as configured and refusing until it parses`,
     );
   }
-  const needsAuth = Boolean(token) || keysUnreadable || loadKeys(hostingDir).length > 0;
 
   // v3.5 security: where the build API may read local sources from. Defaults to
   // the server's own working directory so a bare `brewdocs serve` can still
@@ -978,7 +999,7 @@ function buildRequestHandler(
     req: http.IncomingMessage,
     scope: string,
   ): "ok" | "unauthorized" | "forbidden" => {
-    if (!needsAuth) return "ok";
+    if (!needsAuthNow()) return "ok";
     const header = req.headers["authorization"] ?? "";
     if (token && safeEqual(header, `Bearer ${token}`)) return "ok";
     const presented = header.replace(/^Bearer\s+/i, "");
@@ -1005,12 +1026,16 @@ function buildRequestHandler(
 
   /**
    * v3.9 finding #11: read endpoints expose deployment, registry and federation
-   * metadata. needsAuth is driven by the token OR configured keys, so when any
-   * auth is configured these must not answer anonymously. With no auth at all
-   * they stay open for local use (the drop-in UI reads them).
+   * metadata. Auth is driven by the token OR configured keys, so when any auth
+   * is configured these must not answer anonymously. With no auth at all they
+   * stay open for local use (the drop-in UI reads them).
+   *
+   * finding #33: re-evaluated per request, so a key issued against a running
+   * server takes effect immediately (and the startup banner's advice — "run
+   * `brewdocs keys add`" — is finally true).
    */
   const authorizeRead = (req: http.IncomingMessage): boolean => {
-    if (!needsAuth) return true;
+    if (!needsAuthNow()) return true;
     const header = req.headers["authorization"] ?? "";
     if (token && safeEqual(header, `Bearer ${token}`)) return true;
     return validateKey(hostingDir, header.replace(/^Bearer\s+/i, "")) !== null;
@@ -1224,7 +1249,7 @@ function buildRequestHandler(
     // against a deployed site's docmodel.json. A deployed site already serves
     // that artifact (the static path below); this adds the tool-shaped layer an
     // agent needs, so an agent can query a live site instead of a local file.
-    // Guarded like the other reads: needsAuth gates it when auth is configured,
+    // Guarded like the other reads: auth gates it when auth is configured,
     // and a private site additionally requires its access token. The cross-site
     // POST check above applies too.
     if (url.pathname === "/mcp" && req.method === "POST") {

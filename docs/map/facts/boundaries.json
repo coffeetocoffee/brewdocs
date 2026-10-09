@@ -8,6 +8,7 @@
     "**No AST parsers for non-JS languages.** Adapters are heuristics (D-3). Go is a regex parser; Python shells out to an embedded AST helper and degrades with a warning when `python` is absent.",
     "**i18n covers UI chrome only.** README, guides and symbol docs stay as authored; 6 bundled locales over an EN fallback.",
     "**Playground runs examples client-side via `new Function`.** Intentional for a self-contained HTML page; sandboxing multi-language execution is out of scope.",
-    "**YAML support is a documented subset.** The config reader handles scalars, inline lists, block sequences and nested string maps (s3/aliases/redirects). Anchors, multi-doc and exotic YAML degrade to skip with a warning. The OpenAPI extractor has its own, fuller, reader — but only for specs."
+    "**YAML support is a documented subset.** The config reader handles scalars, inline lists, block sequences and nested string maps (s3/aliases/redirects). Anchors, multi-doc and exotic YAML degrade to skip with a warning. The OpenAPI extractor has its own, fuller, reader — but only for specs.",
+    "**A theme is chosen by the operator, not the repo.** A manifest supplies raw slot HTML and css, so a fetched (npm/git) source cannot name its own theme and a repo file cannot shadow a built-in name; pass an explicit path (--theme ./themes/brand.yml) to use a repo-supplied one deliberately (INV-34/D-14). This is the same line D-9 draws for plugins."
   ]
 }

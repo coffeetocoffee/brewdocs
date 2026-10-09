@@ -169,7 +169,7 @@ export {
   harvestExamples,
   type HarvestProposal,
 } from "./harvest.js";
-export { THEMES, DEFAULT_THEME, getTheme, listThemes } from "./themes.js";
+export { THEMES, DEFAULT_THEME, getTheme, isBuiltinTheme, listThemes } from "./themes.js";
 export {
   loadConfig,
   __resetConfigWarnings,
@@ -222,6 +222,7 @@ export {
   manifestSlots,
   applyManifest,
   themeFromRef,
+  __resetThemeWarnings,
   type Slots,
   type SlotName,
 } from "./theme-manifest.js";

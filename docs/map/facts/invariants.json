@@ -198,6 +198,18 @@
       "rule": "No test may bind every interface: every `.listen(` in a *.test.ts must name 127.0.0.1, and the shared listenLocal helper (packages/cli/src/test-util.ts) is the sanctioned way to start a test server.",
       "why": "Production fixed the bare `server.listen(port)` bind in v3.5 (INV-1) — it silently exposed the unauthenticated build API to the LAN — but nine test call sites (`server.listen(0, r)`) reintroduced the same bind: on Node a missing host binds `::`, every interface. While `npm test` ran on a shared or untrusted network, that API (an `npm install` of a caller-supplied name) was reachable, which is INV-1's exact threat model re-created by the tests that exist to verify INV-1 (finding #30).",
       "enforcedBy": "scripts/gate.mjs (inv-33:tests-bind-loopback) + packages/cli/src/v47.test.ts (listenLocal binds 127.0.0.1)"
+    },
+    {
+      "id": "INV-34",
+      "rule": "A theme manifest must be chosen by the operator, not by the source tree: a bare built-in name never resolves to a repo-supplied file, and a fetched (npm/git) source may not name its own theme through either the theme or themeFile config key. Only --theme (the operator reference) may select a manifest on a fetched source.",
+      "why": "A manifest carries raw slot HTML (slots.head, slots.footer) and a css blob, all interpolated verbatim, so it is the same trust position as a plugin — and D-9 already states the rule (anything the SOURCE tree controls is untrusted input) after INV-20 cut the plugin channel. The theme channel was not cut, and it had a wider door: --theme ink is the documented invocation (README quick-start, this repo own Pages workflow), so a repo shipping themes/ink.yml hijacked the built-in and injected script into a page the operator then published. The CSS half was closed in v4.5.6 (INV-30) but the slots half is not escapable by design, so the fix is provenance, not encoding. Reproduced by execution for all three vectors (--theme ink, repo brewdocs.yml theme: ink, and fetched source naming a custom theme). A fourth vector was found by testing the fix itself: checking the SHAPE of the reference let a fetched repo write \theme: ./themes/evil.yml in its own config and load the manifest anyway, so the guard is on who supplied the reference (options.theme vs config.theme), not on what it looks like.",
+      "enforcedBy": "scripts/gate.mjs (inv-34:theme-manifest-provenance) + packages/core/test/theme-provenance.test.ts + packages/core/test/hostile.test.ts (built-in shadow) + packages/core/test/render.golden.test.ts (themed page snapshot)"
+    },
+    {
+      "id": "INV-35",
+      "rule": "An authorization decision must be evaluated when it is used, not frozen at construction: needsAuth is read per request, so a key added to (or revoked from) a running server takes effect immediately.",
+      "why": "needsAuth was a const computed once inside buildRequestHandler, which runs once at server construction, while validateKey re-read the store per request — so the gate that decides WHETHER to consult the key store was frozen at boot. A key issued against a running server did not turn auth on: /api/sites kept answering 200 anonymously and POST /api/build (an npm install of a caller-supplied name, INV-1 threat model) stayed open. The startup banner tells operators to run \brewdocs keys add to lock a network instance down, so the advertised path silently did nothing until restart. The domains store is already re-read per request for exactly this reason, so the pattern existed in the same file (finding #33).",
+      "enforcedBy": "scripts/gate.mjs (inv-35:auth-decision-is-live) + packages/cli/src/v471.test.ts (key added/revoked against a live server; reads and writes both close)"
     }
   ]
 }

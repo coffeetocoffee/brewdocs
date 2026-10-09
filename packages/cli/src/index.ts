@@ -1995,7 +1995,10 @@ contentDir defaults (configVersion: current format; 'brewdocs migrate' stamps
 it). CLI flags override it. v2.0: '--theme' also accepts a
 theme manifest (themes/<name>.yml with 'base:', 'vars:', and 'slots:'
 partials); a 'content/' directory of .md/.mdx guide pages is published under
-content/. v3.0: 'aliases:' (name → version redirect pages), 'eol:' (end-of-life
+content/. v4.8: a theme manifest carries raw slot HTML, so a fetched
+(npm/git) source cannot name its own theme and a repo manifest may not shadow a
+built-in name — pass an explicit path ('--theme ./themes/brand.yml') to use one
+deliberately. v3.0: 'aliases:' (name → version redirect pages), 'eol:' (end-of-life
 version list) and 'redirects:' (moved pages) ride along with build-all.
 
 Search: press ⌘K / Ctrl+K on any generated page.

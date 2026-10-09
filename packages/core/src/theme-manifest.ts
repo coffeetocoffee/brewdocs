@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ThemeManifest } from "./types.js";
 import type { Theme, ThemeVars } from "./themes.js";
-import { getTheme } from "./themes.js";
+import { getTheme, isBuiltinTheme } from "./themes.js";
 import { loadConfig } from "./config.js";
 
 /**
@@ -17,6 +17,43 @@ const SLOT_KEYS = ["head", "header", "mainBefore", "mainAfter", "footer"] as con
 export type SlotName = (typeof SLOT_KEYS)[number];
 /** Manifest slot overrides: slot name -> inline HTML or a confined partial path. */
 export type Slots = Partial<Record<SlotName, string>>;
+
+/**
+ * Does this theme reference name a file rather than a bare theme name?
+ *
+ * Only an explicit path may select a repo-supplied manifest on a fetched
+ * source (finding #32): `--theme brand` against a repo you do not own is the
+ * repo choosing the markup, while `--theme ./themes/brand.yml` is the
+ * operator's own decision — the same line D-9 draws for plugins.
+ *
+ * @param ref - theme reference from CLI/config.
+ * @returns true when the reference looks like a path or a manifest filename.
+ */
+function isExplicitThemePath(ref: string): boolean {
+  return /[\\/]/.test(ref) || /\.(ya?ml|json)$/i.test(ref);
+}
+
+/**
+ * Theme warnings already emitted this process. `pageShell` resolves the theme
+ * once per rendered page, so without this a fetched source's dropped theme
+ * would print the same warning for every page of a `--multi` build.
+ */
+const warnedThemes = new Set<string>();
+
+/**
+ * Test hook: clear the warn-once memory so each test starts clean.
+ *
+ * @returns nothing; resets the module-level warning cache in place.
+ */
+export function __resetThemeWarnings(): void {
+  warnedThemes.clear();
+}
+
+function warnOnce(msg: string): void {
+  if (warnedThemes.has(msg)) return;
+  warnedThemes.add(msg);
+  console.warn(msg);
+}
 
 function parseScalar(raw: string): string {
   return raw.trim().replace(/^["']|["']$/g, "");
@@ -106,12 +143,41 @@ function readManifestFile(file: string, sourceRoot?: string): ThemeManifest | nu
  * the literal path, `themes/<ref>.yml|json` under root, and a
  * `themeFile`/`theme: path` from brewdocs.yml. Returns null for built-ins.
  *
+ * Two provenance guards live here (finding #32). A bare built-in name never
+ * resolves to a repo file, so `--theme ink` cannot be hijacked by a repo that
+ * ships `themes/ink.yml`. And a fetched (npm/git) source may not name a theme
+ * by bare name.
+ *
+ * Note which half is load-bearing: this function only sees a reference, so it
+ * cannot tell who supplied it. The primary guard is upstream (resolveSetup in
+ * build.ts), which drops the repo's own `theme`/`themeFile` config on a
+ * fetched source so that an explicit path can only ever arrive from
+ * `options.theme` — the operator's --theme. Testing the reference's *shape*
+ * here was the first, bypassable version of this fix: a repo writing
+ * `theme: ./themes/evil.yml` in its own config supplied a path-shaped string.
+ *
  * @param ref - theme reference: literal path or `themes/<name>` (undefined yields null).
  * @param root - source root the reference is resolved against.
+ * @param opts - `fetched` marks a source the operator did not choose locally.
  * @returns the parsed theme manifest, or null when no manifest file matches.
  */
-export function loadThemeManifest(ref: string | undefined, root: string): ThemeManifest | null {
+export function loadThemeManifest(
+  ref: string | undefined,
+  root: string,
+  opts: { fetched?: boolean } = {},
+): ThemeManifest | null {
   if (!ref) return null;
+  // A bundled name must resolve to the bundle. `--theme ink` is the documented
+  // invocation, so a repo shipping themes/ink.yml could otherwise replace the
+  // built-in — and a manifest carries raw slot HTML and css.
+  if (isBuiltinTheme(ref) && !isExplicitThemePath(ref)) return null;
+  // On a fetched source the bare name is the *repo's* choice, not the operator's.
+  if (opts.fetched && !isExplicitThemePath(ref)) {
+    warnOnce(
+      `[brewdocs] ignoring theme "${ref}" — a fetched source cannot choose its own theme (pass --theme with an explicit path to use one deliberately)`,
+    );
+    return null;
+  }
   const direct = [ref, `${ref}.yml`, `${ref}.json`].map((p) => path.resolve(root, p));
   for (const file of direct) {
     if (fs.existsSync(file) && /\.(yml|json)$/.test(file)) {
@@ -133,16 +199,24 @@ export function loadThemeManifest(ref: string | undefined, root: string): ThemeM
  *
  * @param ref - explicit theme reference from the caller, if any.
  * @param root - source root used to locate a manifest and read brewdocs.yml.
+ * @param opts - `fetched` marks a source the operator did not choose locally.
  * @returns the base theme name and the manifest, when one was found.
  */
-export function resolveThemeRef(ref: string | undefined, root: string): { name?: string; manifest?: ThemeManifest } {
+export function resolveThemeRef(
+  ref: string | undefined,
+  root: string,
+  opts: { fetched?: boolean } = {},
+): { name?: string; manifest?: ThemeManifest } {
   const config = loadConfig(root);
-  const candidate = ref ?? config.themeFile;
+  // `themeFile` is the repo's own config key, so a fetched source may not use
+  // it — the operator's explicit ref is the only way in.
+  const repoThemeFile = opts.fetched ? undefined : config.themeFile;
+  const candidate = ref ?? repoThemeFile;
   if (!candidate) return {};
   const manifest =
-    loadThemeManifest(candidate, root) ??
-    (config.themeFile && config.themeFile !== candidate
-      ? loadThemeManifest(config.themeFile, root)
+    loadThemeManifest(candidate, root, opts) ??
+    (repoThemeFile && repoThemeFile !== candidate
+      ? loadThemeManifest(repoThemeFile, root, opts)
       : null);
   if (manifest) return { name: manifest.extends, manifest };
   return { name: candidate };
@@ -216,10 +290,15 @@ export function applyManifest(base: Theme, manifest: ThemeManifest | undefined):
  *
  * @param ref - theme reference from CLI/config (undefined uses the default theme).
  * @param root - source root used to resolve a manifest; omit for built-ins only.
+ * @param fetched - true when the source came from npm/git (finding #32).
  * @returns the resolved theme, merged with any manifest customizations.
  */
-export function themeFromRef(ref: string | undefined, root?: string): Theme & { css?: string } {
+export function themeFromRef(
+  ref: string | undefined,
+  root?: string,
+  fetched?: boolean,
+): Theme & { css?: string } {
   if (!root) return getTheme(ref);
-  const { name, manifest } = resolveThemeRef(ref, root);
+  const { name, manifest } = resolveThemeRef(ref, root, { fetched });
   return applyManifest(getTheme(name), manifest ?? undefined);
 }

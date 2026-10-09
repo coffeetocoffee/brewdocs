@@ -47,6 +47,12 @@ export interface RenderOptions {
    * config defaults. Without it the renderer stays purely functional.
    */
   root?: string;
+  /**
+   * v4.8: the source came from npm/git rather than a local path. A fetched
+   * source may not supply its own theme manifest (finding #32) — the renderer
+   * resolves the theme again per page, so it needs the flag, not just build.ts.
+   */
+  fetched?: boolean;
   /** v2.0: layout-slot partials (head/header/mainBefore/mainAfter/footer). */
   slots?: Slots;
   /** v2.0: loaded plugins (onRender hook + theme var contributions). */
@@ -636,7 +642,11 @@ function eolBannerHtml(options: RenderOptions, ui: UiStrings): string {
   renderOptions: RenderOptions;
   indexJson: string;
 }): string {
-  const theme = themeFromRef(opts.renderOptions.theme, opts.renderOptions.root);
+  const theme = themeFromRef(
+    opts.renderOptions.theme,
+    opts.renderOptions.root,
+    opts.renderOptions.fetched,
+  );
   const pluginTheme = mergePluginThemes(opts.renderOptions.plugins ?? []);
   const slots = opts.renderOptions.slots ?? {};
   const ui = uiStrings(opts.renderOptions.locale);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { markdownToHtml, renderToHtml, type RenderModel } from "@brewdocs/core";
+import { markdownToHtml, renderToHtml, getTheme, type RenderModel } from "@brewdocs/core";
 
 /**
  * v4.6 (finding #27): property tests for adversarial input across markdownToHtml
@@ -228,5 +228,39 @@ describe("v4.5.6 — hostile input cannot inject live markup", () => {
     const styleCloseCount = (html.match(/<\/style>/gi) ?? []).length;
     expect(styleCount).toBe(1);
     expect(styleCloseCount).toBe(1);
+  });
+
+  /**
+   * Finding #32: INV-30 closed the *style* channel, but a manifest's `slots`
+   * are interpolated verbatim (raw HTML is the feature), and a bare built-in
+   * name resolved to a repo file — so a repo shipping themes/ink.yml hijacked
+   * `--theme ink` and got its slot HTML into the published page. The rule is
+   * provenance (who may choose the manifest), not escaping, so this asserts
+   * that a built-in name never picks up a repo file.
+   */
+  it("renderToHtml: a repo manifest cannot hijack a built-in theme name (finding #32)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "bd-shadow-theme-"));
+    fs.mkdirSync(path.join(root, "themes"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "themes", "coffee.yml"),
+      "base: coffee\nslots:\n  head: '<script>alert(1)</script>'\n  footer: '<img src=x onerror=alert(2)>'\n",
+      "utf8",
+    );
+
+    const model = createModel((i) => ({
+      name: `fn${i}`,
+      desc: `safe text ${i}`,
+      sig: `export function fn${i}(): void`,
+      ex: `fn${i}()`,
+      title: `Section ${i}`,
+    }));
+
+    const html = renderToHtml(model, { theme: "coffee", root });
+
+    // The built-in's own palette is what rendered...
+    expect(html).toContain(getTheme("coffee").light["--accent"] ?? "coffee-accent");
+    // ...and none of the impostor's markup did.
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).not.toContain("onerror=alert(2)");
   });
 });

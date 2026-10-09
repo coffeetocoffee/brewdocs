@@ -39,13 +39,50 @@ export function loadKeys(hostingDir: string): ApiKeyRecord[] {
  * "auth IS configured but unverifiable" and refuse.
  */
 export function keysStoreUnreadable(hostingDir: string): boolean {
+  return keyStoreState(hostingDir) === "unreadable";
+}
+
+/** What the key store looks like right now. */
+export type KeyStoreState = "missing" | "empty" | "configured" | "unreadable";
+
+/**
+ * Read the key store's current state.
+ *
+ * finding #33: the server used to decide `needsAuth` once, at construction, so
+ * a key added to a *running* server did not turn auth on — while the startup
+ * banner told operators to run `brewdocs keys add` to lock a network instance
+ * down. Callers now ask per request. The store is a small JSON file, and the
+ * `domains` store is already re-read per request for exactly this reason.
+ *
+ * @param hostingDir - directory holding `.keys.json`.
+ * @returns `missing` (no file), `empty`, `configured`, or `unreadable`.
+ */
+export function keyStoreState(hostingDir: string): KeyStoreState {
   const file = fileFor(hostingDir);
-  if (!fs.existsSync(file)) return false;
+  if (!fs.existsSync(file)) return "missing";
   try {
-    return !Array.isArray(JSON.parse(fs.readFileSync(file, "utf8")));
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    // A store that parses but is not an array (a hand-edit, a partial write)
+    // is unreadable, not empty: its real contents are unknown.
+    if (!Array.isArray(parsed)) return "unreadable";
+    return parsed.length > 0 ? "configured" : "empty";
   } catch {
-    return true;
+    return "unreadable";
   }
+}
+
+/**
+ * Is auth configured through the key store right now?
+ *
+ * `unreadable` counts as configured (finding #26): a store that cannot be
+ * parsed must refuse, never default to open.
+ *
+ * @param hostingDir - directory holding `.keys.json`.
+ * @returns true when keys exist or the store cannot be read.
+ */
+export function keysConfigured(hostingDir: string): boolean {
+  const state = keyStoreState(hostingDir);
+  return state === "configured" || state === "unreadable";
 }
 
 function saveKeys(hostingDir: string, keys: ApiKeyRecord[]): void {
