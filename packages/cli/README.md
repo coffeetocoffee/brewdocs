@@ -132,6 +132,12 @@ the live server deploy new brews straight to object storage instead of the local
 > `BREWDOCS_MAX_QUEUE`; defaults 2 concurrent, 8 queued). Excess requests get
 > `429` (rate limited) or `503` (queue full) with a `Retry-After` header, so a
 > synchronous git-clone + TS-compile per request can't be used to OOM the box.
+>
+> Request bodies are capped at 1 MiB: a POST declaring a larger
+> `Content-Length` — or one that crosses the cap mid-stream without one — is
+> answered `413` before it can be buffered. Every env var above is validated:
+> an empty or negative value warns and falls back to the default rather than
+> silently disabling the server.
 
 ## Deploying to real object storage (S3 / Cloudflare R2)
 

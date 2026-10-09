@@ -251,6 +251,45 @@
       "detail": "Found by execution while writing the hostile-input property test the fuzz rename called for: a theme manifest is repo-controlled config (the same threat model as the slot-partial read, #9), and its vars and css values were interpolated into <style> without escaping '<' — so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…</script>' } (or css: with the same) closed the style element and left a live script in the rendered page (reproduced by execution). The built-in themes are unaffected; the channel is theme manifests, the same repo-controlled config surface as #9. Fixed at the render chokepoint: cssSafe() neutralizes '<' into '\\3c ' (the CSS hex escape) for var keys, var values and the css blob — a '<' has no business in CSS, and it is the only way out of the raw-text element. The property test in hostile.test.ts asserts hostile manifest vars and css produce no injected script and the <style> block is not prematurely closed.",
       "checkedBy": "inv-30:style-channel-cannot-break-out",
       "verify": "npx vitest run packages/core/test/hostile.test.ts"
+    },
+    {
+      "id": 28,
+      "severity": "medium",
+      "title": "No request-body size limit on any POST route",
+      "status": "fixed",
+      "fixedIn": "v4.7.0",
+      "detail": "All four POST routes (/api/build, /api/export, /mcp, /api/markdown) read their body with `let body = \"\"; for await (const chunk of req) body += chunk;` — no content-length pre-check, no byte cap, no destroy. Nothing anywhere in server.ts bounded it, and the string concatenation was quadratic on top. A single POST grows the heap until the process dies; in the default `brewdocs serve` config (no auth, documented as the local-use posture) that is unauthenticated, and the rate limiter (10/min default) caps frequency, not size. Fixed with one shared readBody/readJsonBody helper (the four copies removed): a declared content-length over MAX_BODY_BYTES (1 MiB) answers 413 before a byte is read; a chunked or lying client is refused as soon as the running byte count crosses the cap. The refusal writes the 413 first and then drains the remainder for a bounded deadline — verified by execution that destroying the request at refusal time races the response and the client sees ECONNRESET instead of the 413, and that an endless body cannot pin the connection (the drain deadline destroys it). v47.test.ts covers all four routes, the chunked path, a header-only declaration, and the exact-cap boundary.",
+      "checkedBy": "inv-31:post-bodies-are-capped",
+      "verify": "npx vitest run packages/cli/src/v47.test.ts"
+    },
+    {
+      "id": 29,
+      "severity": "medium",
+      "title": "BREWDOCS_RATE_LIMIT= (set but empty) silently disabled the server",
+      "status": "fixed",
+      "fixedIn": "v4.7.0",
+      "detail": "numOption accepted any value that was not NaN: Number(\"\") is 0 and Number(\"-5\") is -5, so `BREWDOCS_RATE_LIMIT=` — the normal shape in a .env, a Dockerfile, or `docker run -e` — was indistinguishable from 'unlimited' to the operator but bricked /api/build, /api/export, /api/markdown and /mcp after one call (429 on request #2, reproduced: #1 -> 500, #2 -> 429, #3 -> 429; control env-unset -> all 500). Negative values did the same and additionally pinned maxConcurrentBuilds into a permanently-queued state. Nothing warned. Fixed by validating both channels: env values must be finite and >= a per-variable floor (1 for rate limit, rate window and build concurrency; 0 for queue depth, where 0 is a real choice) and warn-and-fall-back when unusable — the env equivalent of the warn-and-drop contract config.ts applies to brewdocs.yml (D-8). The explicit ProtectionOptions channel keeps 0 legal, because there a 0 is a deliberate caller input (the queue-full 503 test writes maxConcurrentBuilds: 0).",
+      "checkedBy": "inv-32:env-numeric-options-validated",
+      "verify": "npx vitest run packages/cli/src/v47.test.ts"
+    },
+    {
+      "id": 30,
+      "severity": "medium",
+      "title": "The test suite bound every interface while serving the unauthenticated build API",
+      "status": "fixed",
+      "fixedIn": "v4.7.0",
+      "detail": "Nine call sites across the test suite used `server.listen(0, r)` with no host — a bind to `::` (every interface) on Node — while serving the same unauthenticated build API production had fixed in v3.5 (INV-1: 'A bare `server.listen(port)` binds `::` (every interface), which silently exposed the unauthenticated build API to the LAN'). Running `npm test` on a laptop on a shared or untrusted network therefore exposed, for the duration of the run, an unauthenticated POST /api/build that would `npm install` a caller-supplied package name and build any path under process.cwd() — INV-1's exact threat model, reintroduced by the tests that exist to verify INV-1. Fixed with a shared listenLocal(server) helper (packages/cli/src/test-util.ts) that always passes '127.0.0.1', applied at every call site, plus gate check inv-33 which refuses any `.listen(` in a *.test.ts that does not name 127.0.0.1.",
+      "checkedBy": "inv-33:tests-bind-loopback",
+      "verify": "npx vitest run packages/cli/src/v47.test.ts"
+    },
+    {
+      "id": 31,
+      "severity": "low",
+      "title": "The trust-boundary table in the generated map rendered empty from v4.5.1 through v4.6",
+      "status": "fixed",
+      "fixedIn": "v4.7.0",
+      "detail": "scripts/map.mjs located the routes by scanning for `return async (req, res)` — the pre-v4.5.1 shape. Finding #21's fix moved the routes into `const handle = async (req, res) => { … }` (wrapped in the single try/catch guard), and the wrapper with the old shape now sits AFTER the routes, so the scan started past every route and the table silently rendered zero rows from v4.5.1 through v4.6. map:check could not catch it: the generator matched its own empty output, which is the blind spot a drift check has by construction — it proves the committed file equals the generated one, never that the generated one is non-empty. Found while adding the v4.7 route rows. Fixed the scan to match the handle signature (type annotations included) and to read guards from the route test to the next route test instead of a fixed 12-line window (the window had also stopped seeing guardSource in /api/build once the body read moved into a helper). Added gate check map:trust-table-populated so an empty table fails the build.",
+      "checkedBy": "map:trust-table-populated"
     }
   ]
 }

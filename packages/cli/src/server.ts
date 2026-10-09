@@ -101,6 +101,24 @@ const MAX_PATHS_PER_SITE = 250;
 const MAX_PATH_LEN = 256;
 const FLUSH_DEBOUNCE_MS = 2000;
 
+/**
+ * v4.7 finding #28: the largest POST body any route will accept. Every body
+ * here is a tiny JSON control message (a source string, one MCP call), so
+ * 1 MiB is generous; before the cap, one unauthenticated POST could grow the
+ * heap until the process died (and the old read loop concatenated strings,
+ * quadratic on top). Exported so tests size bodies against the real cap.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * v4.7 finding #28: how long a refused body is drained for. The 413 is written
+ * first; draining the rest briefly lets a well-behaved client actually read
+ * that response — closing a socket with unread bytes queued makes the kernel
+ * send RST, which discards it. The deadline keeps a hostile endless body from
+ * pinning the connection open.
+ */
+const BODY_DRAIN_MS = 1000;
+
 /** Per-site pageview/build/tool-call counters, persisted next to the hosting dir. */
 export class StatsStore {
   private static instances = new Map<string, StatsStore>();
@@ -523,14 +541,128 @@ function clientKey(req: http.IncomingMessage, trustProxy = false): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
-function numOption(
+/**
+ * v4.7 finding #29: resolve a numeric protection option from the explicit
+ * value or an env var. Two channels, two trust levels:
+ *
+ *  - `value` is the embedding API (createServer callers, tests): taken as
+ *    given while it is finite and >= 0. 0 stays legal there — a caller that
+ *    writes `maxConcurrentBuilds: 0` is deliberately exercising the "no
+ *    capacity" path.
+ *  - `env` is operator config from a shell, a .env file or `docker run -e`,
+ *    where 0 or an empty string is nearly always an accident, not an intent.
+ *    It must be finite and >= opts.min (>= 1 for the rate limit, the window
+ *    and build concurrency; >= 0 for queue depth, where 0 means "no queueing"
+ *    and is a real choice). `Number("")` is 0 and `Number("-5")` is -5, so
+ *    the old NaN-only check let `BREWDOCS_RATE_LIMIT=` through as "limit 0" —
+ *    one request per window, which bricked every build route after one call —
+ *    and a negative maxConcurrentBuilds pinned the queue forever. Unusable
+ *    values warn (once per server construction) and fall back to the default:
+ *    the same warn-and-drop contract config.ts applies to brewdocs.yml (D-8).
+ */
+export function numOption(
   value: number | undefined,
   env: string | undefined,
   fallback: number,
+  opts: { min: number; name: string },
 ): number {
-  const v = value ?? (env !== undefined ? Number(env) : undefined);
-  if (v === undefined || Number.isNaN(v)) return fallback;
-  return v;
+  if (value !== undefined) {
+    if (Number.isFinite(value) && value >= 0) return value;
+    console.warn(
+      `[brewdocs] ${opts.name}=${value} is not usable (need a number >= 0) — using ${fallback}`,
+    );
+    return fallback;
+  }
+  if (env === undefined) return fallback;
+  const parsed = env.trim() === "" ? NaN : Number(env);
+  if (Number.isFinite(parsed) && parsed >= opts.min) return parsed;
+  console.warn(
+    `[brewdocs] ${opts.name}=${JSON.stringify(env)} is not usable (need a number >= ${opts.min}) — using ${fallback}`,
+  );
+  return fallback;
+}
+
+/**
+ * v4.7 finding #28: answer 413 for a body over the cap. The response goes out
+ * BEFORE the socket closes: destroying the request at refusal time races the
+ * response write, and a socket closed with unread bytes queued makes the
+ * kernel send RST, discarding the 413 the client never got to read (verified:
+ * `req.destroy()` at refusal surfaced as ECONNRESET on every client). So the
+ * refused body is drained for a short deadline — long enough for a
+ * well-behaved client to read the answer, short enough that an endless body
+ * cannot pin the connection — and the request is destroyed when it elapses.
+ */
+function refuseTooLarge(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  limit: number,
+): void {
+  res.writeHead(413, { "content-type": TYPES[".json"], connection: "close" });
+  res.end(JSON.stringify({ error: "payload too large", limit }));
+  const deadline = setTimeout(() => req.destroy(), BODY_DRAIN_MS);
+  deadline.unref?.();
+  req.once("end", () => clearTimeout(deadline));
+  req.once("close", () => clearTimeout(deadline));
+}
+
+/**
+ * v4.7 finding #28: the single capped reader for POST bodies — the four
+ * routes used to each read the body unbounded into a string. A declared
+ * content-length over the cap is refused before a byte is read; a chunked (or
+ * lying) request is refused as soon as the running total crosses it, and the
+ * remainder is drained, not accumulated, so the 413 still reaches the client.
+ * Returns undefined once it has answered — callers just return.
+ */
+async function readBody(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<string | undefined> {
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    refuseTooLarge(req, res, maxBytes);
+    req.resume();
+    return undefined;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let refused = false;
+  try {
+    for await (const chunk of req) {
+      total += chunk.length;
+      if (total > maxBytes) {
+        if (!refused) {
+          refused = true;
+          refuseTooLarge(req, res, maxBytes);
+        }
+        continue; // drain without accumulating; refuseTooLarge owns the deadline
+      }
+      chunks.push(chunk);
+    }
+  } catch (e) {
+    // A client that walks away mid-body is routine (the outer guard tolerates
+    // it) — but once the 413 is out, a drain-deadline destroy is expected,
+    // not an incident to report.
+    if (!refused) throw e;
+    return undefined;
+  }
+  if (refused) return undefined;
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** readBody + JSON.parse, with the shared 400 for malformed JSON. */
+async function readJsonBody<T>(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<T | undefined> {
+  const body = await readBody(req, res);
+  if (body === undefined) return undefined;
+  try {
+    return JSON.parse(body || "{}") as T;
+  } catch {
+    res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
+    return undefined;
+  }
 }
 
 function packageName(root: string): string | undefined {
@@ -772,12 +904,24 @@ function buildRequestHandler(
   fs.mkdirSync(hostingDir, { recursive: true });
 
   const limiter = new RateLimiter(
-    numOption(protection?.rateLimit, process.env.BREWDOCS_RATE_LIMIT, 10),
-    numOption(protection?.rateWindowMs, process.env.BREWDOCS_RATE_WINDOW_MS, 60000),
+    numOption(protection?.rateLimit, process.env.BREWDOCS_RATE_LIMIT, 10, {
+      min: 1,
+      name: "BREWDOCS_RATE_LIMIT",
+    }),
+    numOption(protection?.rateWindowMs, process.env.BREWDOCS_RATE_WINDOW_MS, 60000, {
+      min: 1,
+      name: "BREWDOCS_RATE_WINDOW_MS",
+    }),
   );
   const queue = new BuildQueue(
-    numOption(protection?.maxConcurrentBuilds, process.env.BREWDOCS_MAX_BUILDS, 2),
-    numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8),
+    numOption(protection?.maxConcurrentBuilds, process.env.BREWDOCS_MAX_BUILDS, 2, {
+      min: 1,
+      name: "BREWDOCS_MAX_BUILDS",
+    }),
+    numOption(protection?.maxQueue, process.env.BREWDOCS_MAX_QUEUE, 8, {
+      min: 0,
+      name: "BREWDOCS_MAX_QUEUE",
+    }),
   );
   const stats = StatsStore.for(path.join(hostingDir, ".analytics.json"));
   // Require credentials only once *some* auth is configured (admin token or
@@ -942,9 +1086,7 @@ function buildRequestHandler(
         return;
       }
 
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      let data: {
+      const data = await readJsonBody<{
         source?: string;
         name?: string;
         theme?: string;
@@ -952,13 +1094,8 @@ function buildRequestHandler(
         org?: string;
         visibility?: Visibility;
         token?: string;
-      };
-      try {
-        data = JSON.parse(body || "{}") as typeof data;
-      } catch {
-        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
-        return;
-      }
+      }>(req, res);
+      if (data === undefined) return;
       if (!data.source) {
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;
@@ -1012,20 +1149,13 @@ function buildRequestHandler(
         return;
       }
 
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      let data: {
+      const data = await readJsonBody<{
         source?: string;
         theme?: string;
         dark?: boolean;
         name?: string;
-      };
-      try {
-        data = JSON.parse(body || "{}") as typeof data;
-      } catch {
-        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
-        return;
-      }
+      }>(req, res);
+      if (data === undefined) return;
       if (!data.source) {
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;
@@ -1141,8 +1271,8 @@ function buildRequestHandler(
           .end(JSON.stringify({ error: "rate limited", retryAfter: limited.retryAfterSec }));
         return;
       }
-      let body = "";
-      for await (const chunk of req) body += chunk;
+      const body = await readBody(req, res);
+      if (body === undefined) return;
       const docmodelFile = path.join(hostingDir, siteName, "docmodel.json");
       const out = handleMcpRequest(docmodelFile, body, (call: McpToolCall) =>
         stats.recordToolCall(siteName, call),
@@ -1199,15 +1329,11 @@ function buildRequestHandler(
           .end(JSON.stringify({ error: "rate limited", retryAfter: limited.retryAfterSec }));
         return;
       }
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      let data: { source?: string; format?: "md" | "mdx"; name?: string };
-      try {
-        data = JSON.parse(body || "{}") as typeof data;
-      } catch {
-        res.writeHead(400).end(JSON.stringify({ error: "invalid json" }));
-        return;
-      }
+      const data = await readJsonBody<{ source?: string; format?: "md" | "mdx"; name?: string }>(
+        req,
+        res,
+      );
+      if (data === undefined) return;
       if (!data.source) {
         res.writeHead(400).end(JSON.stringify({ error: "missing source" }));
         return;

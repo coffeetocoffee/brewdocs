@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { run } from "./index.js";
+import { listenLocal } from "./test-util.js";
 
 describe("v3.5 CLI commands", () => {
   let cwd: string;
@@ -169,9 +170,8 @@ export function brew(kind) { return "cup of " + kind; }
 
     const { createServer } = await import("./server.js");
     const server = createServer(hosting);
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+    const port = await listenLocal(server);
     try {
       const miss = await fetch(`http://127.0.0.1:${port}/api/search`);
       expect(miss.status).toBe(400);

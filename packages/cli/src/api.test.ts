@@ -3,9 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createServer } from "./server.js";
+import { listenLocal } from "./test-util.js";
 
 const PORT = 4199;
-const BASE = `http://localhost:${PORT}`;
+const BASE = `http://127.0.0.1:${PORT}`;
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
 const libRoot = path.join(EXAMPLES, "lib");
 
@@ -20,7 +21,8 @@ beforeAll(async () => {
   fixtureLib = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-api-lib-"));
   fs.cpSync(libRoot, fixtureLib, { recursive: true });
   server = createServer(hostingDir, undefined, undefined, { sourceRoot: os.tmpdir() });
-  await new Promise<void>((resolve) => server.listen(PORT, () => resolve()));
+  // v4.7 finding #30: loopback only — a bare listen(PORT) binds every interface.
+  await listenLocal(server, PORT);
 });
 
 afterAll(async () => {

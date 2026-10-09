@@ -6,7 +6,7 @@
 > Facts a machine cannot infer live in [`facts/`](./facts) and are reviewed by humans.
 > Everything below with a number in it is parsed from the source tree.
 
-_Generated: 2026-10-08_
+_Generated: 2026-10-09_
 
 ## What this is
 
@@ -18,13 +18,13 @@ The product's whole job is rendering prose from repositories **you do not own** 
 
 | Package | Version | Role | Source | Tests |
 | --- | --- | --- | --- | --- |
-| `@brewdocs/cli` | 4.6.0 | commands + hosting server | 4 files / 3,751 loc | 11 files / 2,104 loc |
-| `@brewdocs/core` | 4.6.0 | pipeline: extract → model → render | 61 files / 15,414 loc | 47 files / 6,036 loc |
+| `@brewdocs/cli` | 4.6.0 | commands + hosting server | 5 files / 3,904 loc | 12 files / 2,385 loc |
+| `@brewdocs/core` | 4.6.0 | pipeline: extract → model → render | 61 files / 15,414 loc | 47 files / 6,040 loc |
 | `@brewdocs/plugin-sdk` | 4.6.0 | adapter/hook contracts | 1 files / 57 loc | 1 files / 394 loc |
 
-**420 test declarations across 59 files** — parsed from the tree, not typed.
+**430 test declarations across 60 files** — parsed from the tree, not typed.
 
-> 15 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `examples.test.ts`, `federation.test.ts`, `harvest.test.ts`, `hostile.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
+> 16 file(s) declare tests inside a fixture loop, so a `vitest` run reports more cases than the declaration count above: `mcp-http.test.ts`, `v47.test.ts`, `audit.test.ts`, `ci.test.ts`, `draft.test.ts`, `drift.test.ts`, `examples.test.ts`, `federation.test.ts`, `harvest.test.ts`, `hostile.test.ts`, `languages.test.ts`, `openapi.test.ts`, `prove.test.ts`, `realworld.test.ts`, `robust.test.ts`, `workspaces.test.ts`. That is expected — the declaration count is the stable number.
 
 ## Trust boundaries
 
@@ -32,6 +32,17 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 
 | Endpoint | Method | Guards | Defined at |
 | --- | --- | --- | --- |
+| `/api/build` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1070` |
+| `/api/export` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1133` |
+| `/api/sites` | GET | `authorizeRead` | `packages/cli/src/server.ts:1192` |
+| `/api/registry` | GET | `authorizeRead` | `packages/cli/src/server.ts:1204` |
+| `/mcp` | POST | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1230` |
+| `/api/gap` | GET | `authorizeRead` | `packages/cli/src/server.ts:1286` |
+| `/api/search` | GET | `authorizeRead` | `packages/cli/src/server.ts:1301` |
+| `/api/markdown` | POST | `authorize`, `sourceRoot` | `packages/cli/src/server.ts:1319` |
+| `/api/stats` | GET | `authorizeRead`, `requireSiteAccess` | `packages/cli/src/server.ts:1361` |
+| `/` | GET | **none** | `packages/cli/src/server.ts:1426` |
+| `/dashboard` | GET | `requireSiteAccess` | `packages/cli/src/server.ts:1442` |
 
 ### Invariants a change must not break
 
@@ -125,6 +136,15 @@ Every entry point that accepts caller-controlled input, and the exact guard on i
 - **INV-30** — A theme manifest's vars and css must not be able to terminate the <style> element: '<' is neutralized before interpolation.
   - _why:_ HTML ends a raw-text <style> element at the literal sequence '</style', and escapeHtml cannot help inside a raw-text element. themeVars and the manifest css string were interpolated raw, so a repo shipping themes/brand.yml with vars: { accent: '</style><script>…' } got a live script in the built page (finding #27, reproduced by execution). cssSafe in render.ts neutralizes '<' into the CSS escape '\3c ', keeping the style element intact.
   - _enforced by:_ scripts/gate.mjs (inv-30:style-channel-cannot-break-out) + packages/core/test/hostile.test.ts (hostile manifest vars and css produce no live script and style count is 1)
+- **INV-31** — Every POST route must read its body through the capped reader: a content-length over 1 MiB answers 413 before the body is read, and a running byte count answers 413 the moment it crosses the cap (chunked or lying clients), with the response written before the socket closes.
+  - _why:_ Four routes each read the body with an unbounded loop, so one unauthenticated POST could grow the heap until the process died — and the string concatenation was quadratic on top (finding #28). The rate limiter caps frequency, not size, and the default `brewdocs serve` posture is unauthenticated, so this was reachable by any caller. The refusal must write the 413 BEFORE closing the socket: destroying the request at refusal time races the response write, and a socket closed with unread bytes queued makes the kernel send RST, discarding the answer (verified by execution). So readBody drains the refused remainder briefly (a deadline bounds an endless body) rather than destroying immediately.
+  - _enforced by:_ scripts/gate.mjs (inv-31:post-bodies-are-capped) + packages/cli/src/v47.test.ts (413 on all four routes, chunked without content-length, header-only refusal, exact-cap boundary)
+- **INV-32** — A numeric protection option from the environment must be finite and at least its floor (1 for rate limit, rate window and build concurrency; 0 for queue depth, where 0 means 'no queueing'); an unusable value warns and falls back to the default. The embedding API channel keeps 0 legal where it means 'no capacity'.
+  - _why:_ `Number("")` is 0 and `Number("-5")` is -5, and the old check only rejected NaN — so `BREWDOCS_RATE_LIMIT=` (the normal shape in a .env, a Dockerfile, or `docker run -e`) read as 'limit 0', which bricked /api/build, /api/export, /api/markdown and /mcp after one call, and a negative maxConcurrentBuilds pinned the queue forever. Nothing warned (finding #29). This is the env channel of the same contract config.ts applies to brewdocs.yml (D-8: warn and drop, never throw); it had no equivalent. The explicit-value channel stays permissive because there a 0 is a deliberate caller choice (the queue-full 503 test writes maxConcurrentBuilds: 0).
+  - _enforced by:_ scripts/gate.mjs (inv-32:env-numeric-options-validated) + packages/cli/src/v47.test.ts (empty/whitespace/negative/0/non-numeric fall back with a warning; BREWDOCS_RATE_LIMIT= no longer 429s the second request)
+- **INV-33** — No test may bind every interface: every `.listen(` in a *.test.ts must name 127.0.0.1, and the shared listenLocal helper (packages/cli/src/test-util.ts) is the sanctioned way to start a test server.
+  - _why:_ Production fixed the bare `server.listen(port)` bind in v3.5 (INV-1) — it silently exposed the unauthenticated build API to the LAN — but nine test call sites (`server.listen(0, r)`) reintroduced the same bind: on Node a missing host binds `::`, every interface. While `npm test` ran on a shared or untrusted network, that API (an `npm install` of a caller-supplied name) was reachable, which is INV-1's exact threat model re-created by the tests that exist to verify INV-1 (finding #30).
+  - _enforced by:_ scripts/gate.mjs (inv-33:tests-bind-loopback) + packages/cli/src/v47.test.ts (listenLocal binds 127.0.0.1)
 
 ### Server defaults
 
@@ -250,11 +270,17 @@ The three-state manifest read (INV-26) draws its line between absence and unread
 
 </details>
 
+<details><summary><b>D-13</b> — An oversized body is refused with a 413 that is written BEFORE the socket closes</summary>
+
+readBody answers 413 for a body over 1 MiB, but the order of operations is load-bearing: write the response, then drain the refused remainder for a bounded deadline (1s), and only then destroy the request. The obvious-looking alternative — `req.destroy()` immediately at refusal — was tested by execution and is wrong: destroying the request races the response write, and a socket closed with unread bytes still queued makes the kernel send RST, so the client sees ECONNRESET and never reads the 413 at all (verified against fetch, a raw chunked writer, and a slow dribble client). Never destroying is also wrong: an endless chunked body would pin the connection until the client gives up, which is a slow-loris the cap was supposed to prevent. The bounded drain is the middle: a well-behaved client reads the 413 and goes away, a hostile endless body gets its socket destroyed when the deadline fires, and memory stays capped either way because the refused bytes are drained, not accumulated. Do not 'simplify' this into an immediate destroy.
+
+</details>
+
 ## Findings
 
 Severity and the write-up are human judgement. **Status is not**: every entry marked `fixed` names the check that proves it, and `npm run gate` fails if that check stops passing. Reproduce the whole table with `npm run gate`.
 
-**27 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
+**31 fixed / 0 open** — 0 of the not-yet-fixed ones are high or med-high.
 
 | # | Severity | Finding | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -285,6 +311,10 @@ Severity and the write-up are human judgement. **Status is not**: every entry ma
 | 25 | high | A private site with no tokenHash served anonymously (private: true config minted no token) | fixed | `inv-28:private-site-always-token-gated` |
 | 26 | high | An unreadable key store turned every gated endpoint public | fixed | `inv-29:unreadable-key-store-refuses` |
 | 27 | medium | A theme manifest could end the <style> element and inject script into the page | fixed | `inv-30:style-channel-cannot-break-out` |
+| 28 | medium | No request-body size limit on any POST route | fixed | `inv-31:post-bodies-are-capped` |
+| 29 | medium | BREWDOCS_RATE_LIMIT= (set but empty) silently disabled the server | fixed | `inv-32:env-numeric-options-validated` |
+| 30 | medium | The test suite bound every interface while serving the unauthenticated build API | fixed | `inv-33:tests-bind-loopback` |
+| 31 | low | The trust-boundary table in the generated map rendered empty from v4.5.1 through v4.6 | fixed | `map:trust-table-populated` |
 
 ## Working in this repo
 

@@ -706,6 +706,135 @@ function checkStyleChannelBreakout() {
     );
 }
 
+/**
+ * INV-31: every POST route must read its body through the capped reader
+ * (finding #28). Four routes each did `body += chunk` with no bound, so one
+ * unauthenticated POST could grow the heap until the process died. The cap
+ * lives in readBody (content-length pre-check + running byte count + 413);
+ * this asserts the helper, its wiring, and that the unbounded pattern is gone.
+ */
+function checkPostBodyCapped() {
+  const src = read("packages/cli/src/server.ts");
+  const helper = /async function readBody\(/.test(src);
+  const cap = /MAX_BODY_BYTES = 1024 \* 1024/.test(src);
+  // Both refusal halves: declared content-length, and the running byte count.
+  const preCheck = /declared > maxBytes/.test(src);
+  const running = /total > maxBytes/.test(src);
+  const refuses = /function refuseTooLarge\(/.test(src) && /writeHead\(413/.test(src);
+  // The unbounded read is what regressed; a re-added copy must turn this red.
+  const unbounded = /body \+= chunk/.test(src);
+  // All four POST routes go through the helpers.
+  const wired =
+    (src.match(/readJsonBody</g) ?? []).length >= 3 &&
+    (src.match(/await readBody\(req, res\)/g) ?? []).length >= 1;
+  // The behavior is asserted, not just the shape (v47.test.ts).
+  const tested = read("packages/cli/src/v47.test.ts").includes("payload too large");
+
+  if (helper && cap && preCheck && running && refuses && !unbounded && wired && tested)
+    pass("inv-31:post-bodies-are-capped");
+  else
+    fail(
+      "inv-31:post-bodies-are-capped",
+      `helper=${helper}, cap=${cap}, preCheck=${preCheck}, running=${running}, refuses=${refuses}, unboundedRead=${unbounded}, wired=${wired}, tested=${tested}`,
+    );
+}
+
+/**
+ * INV-32: a numeric env option must be validated, not merely NaN-checked
+ * (finding #29). `Number("")` is 0 and `Number("-5")` is -5, so
+ * `BREWDOCS_RATE_LIMIT=` (the normal .env shape) read as "limit 0" and
+ * bricked the build routes; a negative concurrency pinned the queue forever.
+ * Env values below the floor warn and fall back; the embedding API channel
+ * keeps 0 legal where it means "no capacity" (the queue-full 503 test).
+ */
+function checkNumericEnvValidated() {
+  const src = read("packages/cli/src/server.ts");
+  const floor = /parsed >= opts\.min/.test(src);
+  const emptyIsNaN = /env\.trim\(\) === "" \? NaN/.test(src);
+  const warns = /console\.warn\(/.test(src) && /is not usable/.test(src);
+  // The four call sites carry floors: limit/window/concurrency >= 1, queue >= 0.
+  const callSites = (src.match(/numOption\(/g) ?? []).length >= 5; // 1 def + 4 uses
+  const mins = (src.match(/min: 1,\s*\n\s*name: "BREWDOCS_/g) ?? []).length >= 3;
+  // The behavior is asserted, not just the shape (v47.test.ts).
+  const tested = read("packages/cli/src/v47.test.ts").includes("BREWDOCS_RATE_LIMIT=");
+
+  if (floor && emptyIsNaN && warns && callSites && mins && tested)
+    pass("inv-32:env-numeric-options-validated");
+  else
+    fail(
+      "inv-32:env-numeric-options-validated",
+      `floor=${floor}, emptyIsNaN=${emptyIsNaN}, warns=${warns}, callSites=${callSites}, mins=${mins}, tested=${tested}`,
+    );
+}
+
+/**
+ * INV-33: no test may bind every interface (finding #30). Production fixed
+ * the bare `server.listen(port)` bind in v3.5 (INV-1), and nine test call
+ * sites reintroduced it: a bare `listen(0)` binds `::`, so while `npm test`
+ * ran on a shared network the unauthenticated build API was LAN-reachable.
+ * Every `.listen(` in a *.test.ts must name 127.0.0.1, and the shared helper
+ * (test-util.ts) is the sanctioned way to start a test server.
+ */
+function checkTestsBindLoopback() {
+  const offenders = [];
+  for (const f of walkTests()) {
+    const src = read(f);
+    src.split("\n").forEach((line, i) => {
+      if (!/\.listen\(/.test(line)) return;
+      if (/^\s*(\/\/|\*)/.test(line)) return; // comment
+      if (!line.includes("127.0.0.1")) offenders.push(`${f}:${i + 1}`);
+    });
+  }
+  const helper = read("packages/cli/src/test-util.ts");
+  const helperBinds = /server\.listen\(port, "127\.0\.0\.1"/.test(helper);
+  if (offenders.length === 0 && helperBinds) pass("inv-33:tests-bind-loopback");
+  else
+    fail(
+      "inv-33:tests-bind-loopback",
+      `listen() without 127.0.0.1: ${offenders.join(", ") || "none"}; helperBinds=${helperBinds}`,
+    );
+}
+
+/** Every *.test.ts under packages/ (test files only — util files are fine). */
+function walkTests() {
+  const out = [];
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+      const child = `${rel}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name !== "__snapshots__" && e.name !== "node_modules") walk(child);
+      } else if (e.name.endsWith(".test.ts")) {
+        out.push(child);
+      }
+    }
+  };
+  for (const d of ["packages/core", "packages/cli", "packages/plugin-sdk"]) {
+    if (fs.existsSync(path.join(ROOT, d))) walk(d);
+  }
+  return out;
+}
+
+/**
+ * The generated trust-boundary table must actually contain routes. It
+ * silently rendered EMPTY from v4.5.1 through v4.6: the scanner looked for
+ * `return async (req, res)` while the routes had moved into `const handle =
+ * async (req, res)` (finding #21's wrapper). map:check only compares the
+ * committed file against the generator — a generator that matches its own
+ * empty output passes — so this asserts content, not just equality. The
+ * table is the map's highest-value artifact; an empty one is exactly the
+ * quiet erosion the map exists to prevent.
+ */
+function checkTrustTablePopulated() {
+  const map = read("docs/map/PROJECT_MAP.md");
+  const rows = (map.match(/^\| `\/[^`]*` \| (GET|POST) \|/gm) ?? []).length;
+  if (rows >= 8) pass("map:trust-table-populated");
+  else
+    fail(
+      "map:trust-table-populated",
+      `only ${rows} route row(s) — scripts/map.mjs lost the handler scan`,
+    );
+}
+
 /* ------------------------------------------------------ 3. finding verify */
 
 function findings() {
@@ -835,6 +964,10 @@ checkSiteParamContainment();
 checkPrivateAlwaysGated();
 checkKeyStoreFailClosed();
 checkStyleChannelBreakout();
+checkPostBodyCapped();
+checkNumericEnvValidated();
+checkTestsBindLoopback();
+checkTrustTablePopulated();
 checkFindings();
 
 const failed = results.filter((r) => !r.ok);

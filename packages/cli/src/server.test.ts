@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createServer, resolveSite } from "./server.js";
+import { listenLocal } from "./test-util.js";
 import { deploySite, deriveSubdomain } from "@brewdocs/core";
 
 const EXAMPLES = path.resolve(__dirname, "../../../examples");
@@ -23,9 +24,8 @@ function tmp(): string {
 
 async function start(hosting: string, token?: string) {
   const server = createServer(hosting, undefined, token);
-  await new Promise<void>((r) => server.listen(0, r));
-  const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 0;
+  // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+  const port = await listenLocal(server);
   return { server, base: `http://127.0.0.1:${port}` };
 }
 
@@ -87,9 +87,7 @@ describe("Phase 4 — hosting server auth", () => {
     async () => {
     const hosting = fs.mkdtempSync(path.join(os.tmpdir(), "brewdocs-auth-"));
     const server = createServer(hosting, undefined, "secret");
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const port = await listenLocal(server);
     const base = `http://127.0.0.1:${port}`;
     const body = JSON.stringify({ source: tinyRoot });
 
@@ -134,8 +132,7 @@ describe("Phase 5 — source confinement", () => {
       const hosting = path.join(root, "hosting");
       fs.mkdirSync(hosting, { recursive: true });
       const server = createServer(hosting, undefined, undefined, { sourceRoot: root });
-      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-      const port = (server.address() as { port: number }).port;
+      const port = await listenLocal(server);
       const base = `http://127.0.0.1:${port}`;
       const post = (p: string, source: string) =>
         fetch(`${base}${p}`, {
@@ -173,9 +170,7 @@ describe("Phase 5 — hosted-tier protection", () => {
       maxConcurrentBuilds: 1,
       maxQueue: 1,
     });
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const port = await listenLocal(server);
     const base = `http://127.0.0.1:${port}`;
     const body = JSON.stringify({ source: tinyRoot });
 
@@ -205,9 +200,7 @@ describe("Phase 5 — hosted-tier protection", () => {
       maxConcurrentBuilds: 0,
       maxQueue: 0,
     });
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const port = await listenLocal(server);
     const base = `http://127.0.0.1:${port}`;
     const body = JSON.stringify({ source: tinyRoot });
 
@@ -226,9 +219,7 @@ describe("Phase 5 — hosted-tier protection", () => {
   it("refuses cross-site POST /api/build", async () => {
     const hosting = tmp();
     const server = createServer(hosting);
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const port = await listenLocal(server);
     const base = `http://127.0.0.1:${port}`;
     const body = JSON.stringify({ source: tinyRoot });
 

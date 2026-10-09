@@ -5,6 +5,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createServer } from "./server.js";
+import { listenLocal } from "./test-util.js";
 import { serveStatic } from "./index.js";
 import { addKey, validateKey } from "./keys.js";
 import { deploySite } from "@brewdocs/core";
@@ -14,9 +15,8 @@ const tinyRoot = path.join(EXAMPLES, "tiny");
 
 async function start(hosting: string, token?: string) {
   const server = createServer(hosting, undefined, token);
-  await new Promise<void>((r) => server.listen(0, r));
-  const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 0;
+  // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+  const port = await listenLocal(server);
   return { server, base: `http://127.0.0.1:${port}`, port };
 }
 

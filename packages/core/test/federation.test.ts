@@ -210,9 +210,13 @@ describe("v4.5 federation — index a deployed site over HTTP", () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(status, { "content-type": "application/json" }).end(body);
     });
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+    const port = await new Promise<number>((r) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        r(typeof addr === "object" && addr ? addr.port : 0);
+      });
+    });
     return {
       base: `http://127.0.0.1:${port}`,
       close: () => new Promise<void>((r) => server.close(() => r())),

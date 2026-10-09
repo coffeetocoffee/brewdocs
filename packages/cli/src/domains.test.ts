@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createSecureServer, createServer, resolveSite } from "./server.js";
+import { listenLocal } from "./test-util.js";
 import { addDomain, deploySite, verifyDomain } from "@brewdocs/core";
 
 /** Raw HTTP GET with an explicit Host header (fetch forbids overriding Host). */
@@ -63,9 +64,8 @@ describe("v2.5 custom domains — host routing", () => {
       await verifyDomain(hosting, "docs.acme.test", async () => rec.token);
 
       const server = createServer(hosting);
-      await new Promise<void>((r) => server.listen(0, r));
-      const addr = server.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
+      // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+      const port = await listenLocal(server);
       try {
         const mine = await getWithHost(port, "docs.acme.test");
         expect(mine.status).toBe(200);

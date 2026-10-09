@@ -139,8 +139,18 @@ function endpointSurface() {
   const src = read(file);
   const lines = src.split("\n");
 
-  // Locate the returned async request handler.
-  const handlerStart = lines.findIndex((l) => /return async \(req, res\)/.test(l));
+  // Locate the route body. v4.5.1 moved the routes out of the returned
+  // listener into `const handle = async (req, res) => { … }` (the single
+  // try/catch guard is finding #21), and this scan kept looking for the old
+  // `return async (req, res)` shape — which sits AFTER the routes, so the
+  // table silently rendered empty from v4.5.1 through v4.6. Match the handle
+  // first; fall back to the returned listener for the old shape. The handle
+  // signature carries TS annotations (`req: http.IncomingMessage`), so the
+  // match stops at the argument name.
+  const handlerStart = lines.findIndex(
+    (l) =>
+      /const handle = async \(req\b/.test(l) || /return async \(req, res\)/.test(l),
+  );
   if (handlerStart < 0) throw new Error("could not locate the request handler in server.ts");
 
   const routes = [];
@@ -149,8 +159,13 @@ function endpointSurface() {
     const m = routeRe.exec(lines[i]);
     if (!m) continue;
 
-    // The guard checks appear within the next few lines of the route test.
-    const window = lines.slice(i, i + 12).join("\n");
+    // Scan to the NEXT route test, not a fixed window: the guards live
+    // wherever the route puts them (the /api/build source confinement sits
+    // ~30 lines in, after auth, the limiter and the body read), and a fixed
+    // window silently reported "no sourceRoot" for a route that has one.
+    let end = i + 1;
+    while (end < lines.length && !/url\.pathname === "/.test(lines[end])) end++;
+    const window = lines.slice(i, end).join("\n");
     const method =
       /req\.method === "POST"/.test(lines[i]) || /req\.method === "POST"/.test(lines[i + 1] ?? "")
         ? "POST"

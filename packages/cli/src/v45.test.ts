@@ -4,6 +4,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { run } from "./index.js";
+import { listenLocal } from "./test-util.js";
 
 describe("v4.5 CLI — the loop", () => {
   let cwd: string;
@@ -113,9 +114,8 @@ describe("v4.5 CLI — the loop", () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, { "content-type": "application/json" }).end(body);
     });
-    await new Promise<void>((r) => server.listen(0, r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    // v4.7 finding #30: loopback only — a bare listen(0) binds every interface.
+    const port = await listenLocal(server);
 
     const store = path.join(tmp, "fed");
     try {
